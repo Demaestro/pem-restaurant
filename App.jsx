@@ -698,6 +698,7 @@ export default function App() {
   const [theme, setTheme] = useState("light");
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -833,6 +834,15 @@ export default function App() {
   useEffect(() => {
     loadPublicDeliveryZones();
     loadMenuCatalog();
+  }, []);
+
+  useEffect(() => {
+    function handleScroll() {
+      setMobileMenuOpen(false);
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   useEffect(() => {
@@ -1140,6 +1150,10 @@ export default function App() {
     await installPromptEvent.prompt();
     await installPromptEvent.userChoice.catch(() => null);
     setInstallPromptEvent(null);
+  }
+
+  function handleQuickNav() {
+    setMobileMenuOpen(false);
   }
 
   async function loadPublicDeliveryZones() {
@@ -1987,6 +2001,15 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <button
+        type="button"
+        className="theme-fab"
+        onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+        aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+      >
+        {theme === "light" ? "Dark" : "Light"}
+      </button>
+
       <header className="topbar">
         <button
           type="button"
@@ -2002,35 +2025,40 @@ export default function App() {
           </span>
         </button>
 
+        <button
+          type="button"
+          className={mobileMenuOpen ? "topbar__menu-button is-open" : "topbar__menu-button"}
+          onClick={() => setMobileMenuOpen((current) => !current)}
+        >
+          <span>Explore</span>
+          <strong>{mobileMenuOpen ? "Close" : "Open"}</strong>
+        </button>
+
         <nav className="topbar__nav">
-          <a href="#menu">Menu</a>
-          <a href="#track">Track Order</a>
-          <a href="#catering">Catering</a>
-          <a href="#contact">Contact</a>
-          {adminToken ? <a href="#admin">Admin</a> : null}
+          <a href="#menu" onClick={handleQuickNav}>Menu</a>
+          <a href="#track" onClick={handleQuickNav}>Track Order</a>
+          <a href="#catering" onClick={handleQuickNav}>Catering</a>
+          <a href="#contact" onClick={handleQuickNav}>Contact</a>
+          <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
         </nav>
 
         <div className="topbar__actions">
-          {!adminToken ? (
-            <a href="#admin" className="admin-access-link">
-              Admin Access
-            </a>
-          ) : null}
-
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-          >
-            {theme === "light" ? "Dark mode" : "Light mode"}
-          </button>
-
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
             <strong>{totalItems}</strong>
           </button>
         </div>
       </header>
+
+      {mobileMenuOpen ? (
+        <div className="mobile-nav">
+          <a href="#menu" onClick={handleQuickNav}>Menu</a>
+          <a href="#track" onClick={handleQuickNav}>Track Order</a>
+          <a href="#catering" onClick={handleQuickNav}>Catering</a>
+          <a href="#contact" onClick={handleQuickNav}>Contact</a>
+          <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
+        </div>
+      ) : null}
 
       {orderPlaced ? (
         <div className="toast" role="status">
