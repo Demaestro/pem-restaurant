@@ -106,6 +106,71 @@ button:disabled {
   min-height: 100vh;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top left, var(--bg-accent), transparent 30%),
+    radial-gradient(circle at right 16%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 28%),
+    linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 94%, black) 100%);
+}
+
+.auth-hero {
+  min-height: calc(100vh - 4rem);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(22rem, 0.95fr);
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.auth-hero__copy,
+.auth-hero__forms,
+.auth-loading-card {
+  padding: 2rem;
+  border-radius: 2rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.auth-hero__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.auth-hero__copy h1,
+.auth-loading-card h1 {
+  margin: 0.35rem 0 1rem;
+  max-width: 12ch;
+  font-family: "Instrument Serif", serif;
+  font-size: clamp(3rem, 5vw, 5.3rem);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+
+.auth-hero__copy p,
+.auth-loading-card p {
+  max-width: 38rem;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.auth-hero__stats {
+  margin-top: 1.5rem;
+}
+
+.auth-hero__forms {
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-card {
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -1414,9 +1479,19 @@ button:disabled {
   color: #ad6c00;
 }
 
+.status-pill--confirmed {
+  background: rgba(255, 188, 66, 0.14);
+  color: #9e6900;
+}
+
 .status-pill--ready {
   background: rgba(41, 155, 90, 0.14);
   color: #1f8c50;
+}
+
+.status-pill--out_for_delivery {
+  background: rgba(24, 122, 102, 0.14);
+  color: #146f60;
 }
 
 .status-pill--delivered {
@@ -1481,6 +1556,14 @@ button:disabled {
   color: #8ee5ad;
 }
 
+:root[data-theme="dark"] .status-pill--confirmed {
+  color: #ffd289;
+}
+
+:root[data-theme="dark"] .status-pill--out_for_delivery {
+  color: #8be3d1;
+}
+
 :root[data-theme="dark"] .status-pill--contacted {
   color: #ffd289;
 }
@@ -1496,6 +1579,18 @@ button:disabled {
 
 .account-section {
   padding: 1rem 2rem 0;
+}
+
+.receipt-section {
+  padding: 0 2rem 1rem;
+}
+
+.receipt-card {
+  padding: 1.5rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  box-shadow: var(--shadow);
 }
 
 .account-grid {
@@ -1634,6 +1729,32 @@ button:disabled {
   gap: 0.6rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.tracking-timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.tracking-timeline__step {
+  padding: 0.85rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.tracking-timeline__step.is-done {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--brand) 18%, var(--line));
+}
+
+.tracking-timeline__step.is-active {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--line));
+  background: var(--brand-soft);
 }
 
 .contact-card {
@@ -1897,6 +2018,7 @@ button:disabled {
 @media (max-width: 1120px) {
   .hero,
   .promo-banner,
+  .receipt-section,
   .account-section,
   .menu-section,
   .combo-section,
@@ -1909,6 +2031,10 @@ button:disabled {
   }
 
   .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero {
     grid-template-columns: 1fr;
   }
 
@@ -1941,6 +2067,8 @@ button:disabled {
 
 @media (max-width: 720px) {
   .hero,
+  .receipt-section,
+  .auth-shell,
   .account-section,
   .menu-section,
   .combo-section,
@@ -1978,6 +2106,10 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .tracking-timeline {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .mobile-nav {
     display: block;
   }
@@ -1996,6 +2128,27 @@ button:disabled {
   .hero {
     gap: 1.4rem;
     padding-top: 2.5rem;
+  }
+
+  .auth-shell {
+    padding: 1rem;
+  }
+
+  .auth-hero {
+    min-height: auto;
+  }
+
+  .auth-hero__copy,
+  .auth-hero__forms,
+  .auth-loading-card {
+    padding: 1.2rem;
+    border-radius: 1.5rem;
+  }
+
+  .auth-hero__copy h1,
+  .auth-loading-card h1 {
+    max-width: none;
+    font-size: clamp(2.5rem, 10vw, 3.6rem);
   }
 
   .hero__actions {

@@ -18,7 +18,7 @@ const ENV_PATH = path.join(__dirname, ".env");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-let adminPassword = process.env.ADMIN_PASSWORD || "pem-admin-1234";
+let adminPassword = process.env.ADMIN_PASSWORD || "change-admin-password";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const forceLocalStorage = process.env.STORAGE_MODE === "local";
 const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || "";
@@ -55,6 +55,7 @@ const defaultSettings = {
   bankAccountNumber: "0123456789",
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
   minimumOrder: 1500,
+  promoCodesText: "WELCOME10|percent|10|5000\nPARTY500|flat|500|7000",
   receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
 };
 const defaultMenuItems = [
@@ -194,6 +195,54 @@ function createNotification(message, type = "general") {
     message,
     createdAt: new Date().toISOString(),
     read: false,
+  };
+}
+
+function parsePromoCodes(rawValue) {
+  return String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [code, type, amount, minimumOrder = "0"] = line.split("|").map((part) => String(part || "").trim());
+      if (!code || !type || !amount) {
+        return null;
+      }
+      return {
+        code: code.toUpperCase(),
+        type: type === "percent" ? "percent" : "flat",
+        amount: Number(amount) || 0,
+        minimumOrder: Number(minimumOrder) || 0,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
+  const normalizedCode = String(promoCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return { valid: false, amount: 0, code: "", type: "", minimumOrder: 0 };
+  }
+
+  const promo = promoCodes.find((item) => item.code === normalizedCode);
+  if (!promo) {
+    return { valid: false, amount: 0, code: normalizedCode, type: "", minimumOrder: 0 };
+  }
+
+  if ((Number(subtotal) || 0) < promo.minimumOrder) {
+    return { valid: false, amount: 0, code: normalizedCode, type: promo.type, minimumOrder: promo.minimumOrder };
+  }
+
+  const discountAmount = promo.type === "percent"
+    ? Math.round((Number(subtotal) || 0) * (promo.amount / 100))
+    : promo.amount;
+
+  return {
+    valid: true,
+    amount: Math.max(0, Math.min(discountAmount, Number(subtotal) || 0)),
+    code: normalizedCode,
+    type: promo.type,
+    minimumOrder: promo.minimumOrder,
   };
 }
 
@@ -549,6 +598,40 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   });
 }));
 
+app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => {
+  const { email, phone, newPassword } = request.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedPhone = String(phone || "").replace(/\D/g, "");
+  const user = await storage.getUserByEmail(normalizedEmail);
+
+  if (!user) {
+    return response.status(404).json({ error: "No PEM account was found for that email." });
+  }
+
+  if (!normalizedPhone || String(user.phone || "").replace(/\D/g, "") !== normalizedPhone) {
+    return response.status(401).json({ error: "The recovery phone number did not match this account." });
+  }
+
+  if (String(newPassword || "").length < 6) {
+    return response.status(400).json({ error: "New password must be at least 6 characters long." });
+  }
+
+  const savedUser = await storage.updateUser(user.email, {
+    ...user,
+    passwordHash: createPasswordHash(newPassword),
+    notifications: [
+      createNotification("Your PEM account password was updated.", "security"),
+      ...(user.notifications || []),
+    ].slice(0, 15),
+    updatedAt: new Date().toISOString(),
+  });
+
+  response.json({
+    message: "Password updated successfully. You can now log in.",
+    user: sanitizeUser(savedUser),
+  });
+}));
+
 app.post("/api/auth/logout", requireUser, (request, response) => {
   const token = getBearerToken(request);
   userSessions.delete(token);
@@ -717,6 +800,7 @@ app.put("/api/admin/settings", requireAdmin, asyncHandler(async (request, respon
     bankAccountNumber: String(payload.bankAccountNumber || "").trim(),
     bankInstructions: String(payload.bankInstructions || "").trim(),
     minimumOrder: Math.max(0, Number(payload.minimumOrder) || 0),
+    promoCodesText: String(payload.promoCodesText || defaultSettings.promoCodesText).trim(),
     receiptFooter: String(payload.receiptFooter || defaultSettings.receiptFooter).trim(),
   };
 
@@ -781,6 +865,7 @@ app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) 
     spicy: Boolean(item.spicy),
     badge: String(item.badge || "").trim(),
     description: String(item.description || "").trim(),
+    imageUrl: String(item.imageUrl || "").trim(),
     dietaryTags: Array.isArray(item.dietaryTags) ? item.dietaryTags : [],
     dietaryProfile: String(item.dietaryProfile || "").trim(),
     soldOut: Boolean(item.soldOut),
@@ -801,9 +886,22 @@ app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) 
 app.post("/api/orders", asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
   const settings = await storage.getSettings();
+  const promoCodes = parsePromoCodes(settings.promoCodesText);
 
   if (!customer?.customerName || !customer?.phone || !customer?.address) {
     return response.status(400).json({ error: "Customer name, phone, and address are required." });
+  }
+
+  if (String(customer.phone || "").replace(/\D/g, "").length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number." });
+  }
+
+  if (customer.paymentMethod === "Paystack" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || "").trim())) {
+    return response.status(400).json({ error: "A valid email address is required for Paystack checkout." });
+  }
+
+  if (customer.paymentMethod === "Bank transfer" && String(customer.paymentReference || "").trim().length < 3) {
+    return response.status(400).json({ error: "Add your bank transfer payment reference before placing this order." });
   }
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -815,6 +913,21 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
     });
   }
+
+  const subtotal = Number(pricing?.subtotal) || 0;
+  const delivery = Number(pricing?.delivery) || 0;
+  const promo = getPromoDiscount(customer?.promoCode, subtotal, promoCodes);
+
+  if (String(customer?.promoCode || "").trim() && !promo.valid) {
+    return response.status(400).json({
+      error: promo.minimumOrder
+        ? `This promo code needs a minimum subtotal of NGN ${promo.minimumOrder.toLocaleString("en-NG")}.`
+        : "That promo code is not valid right now.",
+    });
+  }
+
+  const discount = promo.valid ? promo.amount : 0;
+  const total = Math.max(0, subtotal + delivery - discount);
 
   const menuItems = await storage.getMenuItems();
   const soldOutItems = items.filter((item) =>
@@ -831,7 +944,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     reference: makeReference("PEM-ORD"),
     customer,
     items,
-    pricing,
+    pricing: {
+      subtotal,
+      delivery,
+      discount,
+      total,
+    },
     payment: {
       method: customer?.paymentMethod || "Pay on delivery",
       status: customer?.paymentMethod === "Paystack" ? "pending" : "unpaid",
@@ -976,7 +1094,7 @@ app.get("/api/orders/:reference", asyncHandler(async (request, response) => {
 app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
-  const allowedStatuses = ["received", "preparing", "ready", "delivered", "cancelled"];
+  const allowedStatuses = ["received", "confirmed", "preparing", "ready", "out_for_delivery", "delivered", "cancelled"];
 
   if (!allowedStatuses.includes(status)) {
     return response.status(400).json({ error: "Invalid order status." });

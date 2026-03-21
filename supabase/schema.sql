@@ -59,11 +59,15 @@ create table if not exists public.menu_items (
   spicy boolean not null default false,
   badge text,
   description text,
+  image_url text,
   dietary_tags jsonb not null default '[]'::jsonb,
   dietary_profile text,
   sold_out boolean not null default false,
   hidden boolean not null default false
 );
+
+alter table public.menu_items
+add column if not exists image_url text;
 
 create table if not exists public.business_settings (
   id bigint generated always as identity primary key,

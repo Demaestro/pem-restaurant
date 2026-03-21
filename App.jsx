@@ -423,9 +423,11 @@ const initialCheckout = {
   phone: "",
   email: "",
   address: "",
+  landmark: "",
   deliveryZone: "gwarinpa",
   paymentMethod: "Pay on delivery",
   paymentReference: "",
+  promoCode: "",
 };
 
 const initialTrackingState = {
@@ -507,6 +509,7 @@ const initialBusinessSettings = {
   bankAccountNumber: "0123456789",
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
   minimumOrder: 1500,
+  promoCodesText: "WELCOME10|percent|10|5000\nPARTY500|flat|500|7000",
   receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
 };
 
@@ -543,7 +546,13 @@ const initialLoginForm = {
   password: "",
 };
 
-const orderStatuses = ["all", "awaiting_payment", "received", "preparing", "ready", "delivered", "cancelled"];
+const initialForgotPasswordForm = {
+  email: "",
+  phone: "",
+  newPassword: "",
+};
+
+const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "preparing", "ready", "out_for_delivery", "delivered", "cancelled"];
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -603,8 +612,75 @@ function mergeMenuCatalog(baseItems, remoteItems) {
   return baseItems.map((item) => ({
     ...item,
     ...(remoteById.get(item.id) || {}),
+    imageUrl: remoteById.get(item.id)?.imageUrl || item.imageUrl || "",
     soldOut: Boolean(remoteById.get(item.id)?.soldOut),
     hidden: Boolean(remoteById.get(item.id)?.hidden),
+  }));
+}
+
+function parsePromoCodes(rawValue) {
+  return String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [code, type, amount, minimumOrder = "0"] = line.split("|").map((part) => String(part || "").trim());
+      if (!code || !type || !amount) {
+        return null;
+      }
+      return {
+        code: code.toUpperCase(),
+        type: type === "percent" ? "percent" : "flat",
+        amount: Number(amount) || 0,
+        minimumOrder: Number(minimumOrder) || 0,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
+  const normalizedCode = String(promoCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return { valid: false, amount: 0, code: "" };
+  }
+
+  const promo = promoCodes.find((item) => item.code === normalizedCode);
+  if (!promo) {
+    return { valid: false, amount: 0, code: normalizedCode, minimumOrder: 0 };
+  }
+
+  if ((Number(subtotal) || 0) < promo.minimumOrder) {
+    return { valid: false, amount: 0, code: normalizedCode, minimumOrder: promo.minimumOrder };
+  }
+
+  const amount = promo.type === "percent"
+    ? Math.round((Number(subtotal) || 0) * (promo.amount / 100))
+    : promo.amount;
+
+  return {
+    valid: true,
+    amount: Math.max(0, Math.min(amount, Number(subtotal) || 0)),
+    code: normalizedCode,
+    minimumOrder: promo.minimumOrder,
+  };
+}
+
+function getOrderTimeline(order) {
+  const currentStatus = String(order?.status || "").toLowerCase();
+  const timeline = [
+    { key: "received", label: "Received" },
+    { key: "confirmed", label: "Confirmed" },
+    { key: "preparing", label: "Preparing" },
+    { key: "ready", label: "Ready" },
+    { key: "out_for_delivery", label: "Out for delivery" },
+    { key: "delivered", label: "Delivered" },
+  ];
+
+  const currentIndex = timeline.findIndex((step) => step.key === currentStatus);
+  return timeline.map((step, index) => ({
+    ...step,
+    done: currentIndex >= index,
+    active: step.key === currentStatus,
   }));
 }
 
@@ -780,6 +856,7 @@ export default function App() {
   const [accountHydrated, setAccountHydrated] = useState(false);
   const [signupForm, setSignupForm] = useState(initialAccountForm);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
+  const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
   const [addressDraft, setAddressDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -815,6 +892,7 @@ export default function App() {
   });
   const [passwordState, setPasswordState] = useState({ loading: false, error: "", success: "" });
   const [orderActionState, setOrderActionState] = useState({ loadingRef: "", error: "", success: "" });
+  const [receiptOrder, setReceiptOrder] = useState(null);
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden);
   const visibleMenuCount = visibleMenuItems.length;
@@ -1085,7 +1163,10 @@ export default function App() {
   const selectedDeliveryZone =
     deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || deliveryZones[0] || getDeliveryZone();
   const delivery = subtotal > 0 ? selectedDeliveryZone.fee : 0;
-  const total = subtotal + delivery;
+  const promoCodes = useMemo(() => parsePromoCodes(businessSettings.promoCodesText), [businessSettings.promoCodesText]);
+  const promoDiscount = getPromoDiscount(checkoutForm.promoCode, subtotal, promoCodes);
+  const discount = promoDiscount.valid ? promoDiscount.amount : 0;
+  const total = Math.max(0, subtotal + delivery - discount);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden);
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
@@ -1136,6 +1217,18 @@ export default function App() {
     const matchesStatus = orderStatusFilter === "all" || order.status === orderStatusFilter;
     return matchesQuery && matchesStatus;
   });
+  const adminUnreadOrders = adminState.data.orders.filter((order) => ["awaiting_payment", "received", "confirmed"].includes(order.status)).length;
+  const adminUnreadContacts = adminState.data.contacts.filter((message) => message.status === "new").length;
+  const adminUnreadCatering = adminState.data.catering.filter((request) => request.status === "new").length;
+  const topDeliveryZones = Object.entries(
+    adminState.data.orders.reduce((accumulator, order) => {
+      const zone = order.customer.deliveryZone || "Unspecified";
+      accumulator[zone] = (accumulator[zone] || 0) + 1;
+      return accumulator;
+    }, {}),
+  )
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4);
 
   const filteredAdminContacts = adminState.data.contacts.filter((message) => {
     return (
@@ -1934,6 +2027,7 @@ export default function App() {
             <p><strong>Customer:</strong> ${order.customer.customerName}</p>
             <p><strong>Phone:</strong> ${order.customer.phone}</p>
             <p><strong>Address:</strong> ${order.customer.address}</p>
+            <p><strong>Landmark:</strong> ${order.customer.landmark || "-"}</p>
             <p><strong>Payment:</strong> ${order.customer.paymentMethod}</p>
             <p><strong>Payment Status:</strong> ${order.payment?.status || "unpaid"}</p>
             <p><strong>Payment Reference:</strong> ${order.payment?.reference || "-"}</p>
@@ -1954,6 +2048,7 @@ export default function App() {
           <div class="totals">
             <p><strong>Subtotal:</strong> ${formatPrice(order.pricing.subtotal)}</p>
             <p><strong>Delivery:</strong> ${formatPrice(order.pricing.delivery)}</p>
+            <p><strong>Discount:</strong> ${formatPrice(order.pricing.discount || 0)}</p>
             <p><strong>Grand Total:</strong> ${formatPrice(order.pricing.total)}</p>
           </div>
           <p style="margin-top:20px;font-size:12px;color:#666;">${businessSettings.receiptFooter}</p>
@@ -2042,17 +2137,20 @@ export default function App() {
     downloadCsv(
       "pem-orders.csv",
       [
-        ["Reference", "Customer", "Phone", "Address", "Items", "Status", "Payment Method", "Payment Status", "Payment Reference", "Total", "Created At"],
+        ["Reference", "Customer", "Phone", "Address", "Landmark", "Promo Code", "Items", "Status", "Payment Method", "Payment Status", "Payment Reference", "Discount", "Total", "Created At"],
         ...filteredAdminOrders.map((order) => [
           order.reference,
           order.customer.customerName,
           order.customer.phone,
           order.customer.address,
+          order.customer.landmark || "",
+          order.customer.promoCode || "",
           order.items.map((item) => `${item.name} x${item.quantity}`).join(" | "),
           order.status,
           order.customer.paymentMethod,
           order.payment?.status || "unpaid",
           order.payment?.reference || "",
+          order.pricing.discount || 0,
           order.pricing.total,
           order.createdAt,
         ]),
@@ -2130,6 +2228,27 @@ export default function App() {
         loading: false,
         error: "",
         success: "Welcome back to PEM.",
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function handleForgotPassword(event) {
+    event.preventDefault();
+
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await postJson("/api/auth/forgot-password", forgotPasswordForm);
+      setForgotPasswordForm(initialForgotPasswordForm);
+      setAccountState({
+        loading: false,
+        error: "",
+        success: data.message || "Password updated successfully.",
       });
     } catch (error) {
       setAccountState({
@@ -2281,10 +2400,36 @@ export default function App() {
       return;
     }
 
-    if (checkoutForm.paymentMethod === "Paystack" && !checkoutForm.email) {
+    if (checkoutForm.phone.replace(/\D/g, "").length < 10) {
+      setCheckoutState({
+        loading: false,
+        error: "Please enter a valid phone number.",
+      });
+      return;
+    }
+
+    if (checkoutForm.paymentMethod === "Paystack" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(checkoutForm.email)) {
       setCheckoutState({
         loading: false,
         error: "Please enter your email address to pay with Paystack.",
+      });
+      return;
+    }
+
+    if (checkoutForm.paymentMethod === "Bank transfer" && checkoutForm.paymentReference.trim().length < 3) {
+      setCheckoutState({
+        loading: false,
+        error: "Add your bank transfer payment reference before placing this order.",
+      });
+      return;
+    }
+
+    if (checkoutForm.promoCode.trim() && !promoDiscount.valid) {
+      setCheckoutState({
+        loading: false,
+        error: promoDiscount.minimumOrder
+          ? `This promo code needs a minimum subtotal of ${formatPrice(promoDiscount.minimumOrder)}.`
+          : "That promo code is not valid right now.",
       });
       return;
     }
@@ -2304,6 +2449,7 @@ export default function App() {
         pricing: {
           subtotal,
           delivery,
+          discount,
           total,
         },
       }, getUserAuthHeaders());
@@ -2320,11 +2466,13 @@ export default function App() {
           result.order.reference,
           ...previous.filter((reference) => reference !== result.order.reference),
         ].slice(0, 5));
+        setReceiptOrder(result.order);
         window.location.href = paymentResult.payment.authorization_url;
         return;
       }
 
       setOrderPlaced(`Order ${result.order.reference} submitted successfully.`);
+      setReceiptOrder(result.order);
       setTrackingReference(result.order.reference);
       setTrackingState({
         loading: false,
@@ -2381,16 +2529,19 @@ export default function App() {
       `Name: ${checkoutForm.customerName}`,
       `Phone: ${checkoutForm.phone}`,
       `Address: ${checkoutForm.address || "Will confirm on WhatsApp"}`,
+      `Landmark: ${checkoutForm.landmark || "Will confirm on WhatsApp"}`,
       `Area: ${selectedDeliveryZone.label}`,
       `Estimated delivery time: ${selectedDeliveryZone.eta}`,
       `Payment: ${checkoutForm.paymentMethod}`,
       `Payment reference: ${checkoutForm.paymentReference || "Will confirm later"}`,
+      `Promo code: ${checkoutForm.promoCode || "None"}`,
       "",
       "Order items:",
       ...itemLines,
       "",
       `Subtotal: ${formatPrice(subtotal)}`,
       `Delivery: ${formatPrice(delivery)}`,
+      `Discount: ${formatPrice(discount)}`,
       `Total: ${formatPrice(total)}`,
     ].join("\n");
 
@@ -2542,6 +2693,254 @@ export default function App() {
     }
   }
 
+  if (!accountHydrated) {
+    return (
+      <div className="auth-shell">
+        <button
+          type="button"
+          className="theme-fab"
+          onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          {theme === "light" ? "Dark" : "Light"}
+        </button>
+
+        <section className="auth-hero">
+          <div className="auth-hero__brand">
+            <span className="brand__mark">
+              <img src={logo} alt="Precious Events Makers logo" />
+            </span>
+            <div className="brand__text">
+              <strong>{businessSettings.appName}</strong>
+              <small>{businessSettings.businessName}</small>
+            </div>
+          </div>
+          <div className="auth-loading-card">
+            <p className="eyebrow">Loading account access</p>
+            <h1>Preparing your PEM experience.</h1>
+            <p>Please wait a moment while we check your sign-in session.</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (!accountToken) {
+    return (
+      <div className="auth-shell">
+        <button
+          type="button"
+          className="theme-fab"
+          onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          {theme === "light" ? "Dark" : "Light"}
+        </button>
+
+        <section className="auth-hero">
+          <div className="auth-hero__copy reveal reveal--up">
+            <div className="auth-hero__brand">
+              <span className="brand__mark">
+                <img src={logo} alt="Precious Events Makers logo" />
+              </span>
+              <div className="brand__text">
+                <strong>{businessSettings.appName}</strong>
+                <small>{businessSettings.businessName}</small>
+              </div>
+            </div>
+
+            <p className="eyebrow">Welcome to PEM</p>
+            <h1>Sign up or log in before entering the app.</h1>
+            <p>
+              Create your PEM account once, then keep your saved meals, delivery addresses,
+              notifications, and order history in one calm, professional experience.
+            </p>
+
+            <div className="hero__stats auth-hero__stats">
+              <div>
+                <strong>{visibleMenuCount}</strong>
+                <span>Food and drink items</span>
+              </div>
+              <div>
+                <strong>{visibleLocalDishCount}</strong>
+                <span>Local dish choices</span>
+              </div>
+              <div>
+                <strong>4.8</strong>
+                <span>Average customer rating</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-hero__forms">
+            <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleSignup}>
+              <div className="account-card__header">
+                <div>
+                  <p className="eyebrow">New customer</p>
+                  <h3>Create your PEM account</h3>
+                </div>
+                <span>Signup</span>
+              </div>
+
+              <div className="service-form__grid">
+                <label className="field">
+                  <span>Full name</span>
+                  <input
+                    type="text"
+                    value={signupForm.fullName}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
+                    }
+                    placeholder="Your full name"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Phone number</span>
+                  <input
+                    type="tel"
+                    value={signupForm.phone}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
+                    }
+                    placeholder="0803 334 5161"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    value={signupForm.email}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, email: event.target.value }))
+                    }
+                    placeholder="you@example.com"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    value={signupForm.password}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, password: event.target.value }))
+                    }
+                    placeholder="At least 6 characters"
+                  />
+                </label>
+              </div>
+
+              {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+              {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
+
+              <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                {accountState.loading ? "Creating account..." : "Create Account"}
+              </button>
+            </form>
+
+            <form className="service-form auth-card reveal reveal--up reveal--delay-2" onSubmit={handleLogin}>
+              <div className="account-card__header">
+                <div>
+                  <p className="eyebrow">Returning customer</p>
+                  <h3>Log in to PEM</h3>
+                </div>
+                <span>Login</span>
+              </div>
+
+              <div className="service-form__grid">
+                <label className="field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    value={loginForm.email}
+                    onChange={(event) =>
+                      setLoginForm((previous) => ({ ...previous, email: event.target.value }))
+                    }
+                    placeholder="you@example.com"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    value={loginForm.password}
+                    onChange={(event) =>
+                      setLoginForm((previous) => ({ ...previous, password: event.target.value }))
+                    }
+                    placeholder="Your PEM password"
+                  />
+                </label>
+              </div>
+
+              <p className="account-helper">
+                Once you sign in, PEM unlocks the full menu, tracking, catering, and account experience.
+              </p>
+
+              <button type="submit" className="button button--ghost" disabled={accountState.loading}>
+                {accountState.loading ? "Signing in..." : "Log In"}
+              </button>
+            </form>
+
+            <form className="service-form auth-card reveal reveal--up reveal--delay-2" onSubmit={handleForgotPassword}>
+              <div className="account-card__header">
+                <div>
+                  <p className="eyebrow">Forgot password?</p>
+                  <h3>Recover your account</h3>
+                </div>
+                <span>Recovery</span>
+              </div>
+
+              <div className="service-form__grid">
+                <label className="field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    value={forgotPasswordForm.email}
+                    onChange={(event) =>
+                      setForgotPasswordForm((previous) => ({ ...previous, email: event.target.value }))
+                    }
+                    placeholder="you@example.com"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Phone number</span>
+                  <input
+                    type="tel"
+                    value={forgotPasswordForm.phone}
+                    onChange={(event) =>
+                      setForgotPasswordForm((previous) => ({ ...previous, phone: event.target.value }))
+                    }
+                    placeholder="The number on your account"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>New password</span>
+                  <input
+                    type="password"
+                    value={forgotPasswordForm.newPassword}
+                    onChange={(event) =>
+                      setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
+                    }
+                    placeholder="Choose a new password"
+                  />
+                </label>
+              </div>
+
+              <button type="submit" className="button button--ghost" disabled={accountState.loading}>
+                {accountState.loading ? "Updating..." : "Reset Password"}
+              </button>
+            </form>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <button
@@ -2682,6 +3081,32 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {receiptOrder ? (
+          <section className="receipt-section">
+            <div className="receipt-card reveal reveal--up">
+              <div className="account-card__header">
+                <div>
+                  <p className="eyebrow">Checkout complete</p>
+                  <h2>{receiptOrder.reference}</h2>
+                </div>
+                <span>{receiptOrder.status.replaceAll("_", " ")}</span>
+              </div>
+              <p>
+                PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
+                You can track it below, download the receipt, or continue browsing the menu.
+              </p>
+              <div className="account-list__actions">
+                <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
+                  Download Receipt
+                </button>
+                <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="account-section" id="account">
           <div className="section-heading reveal reveal--up">
@@ -3111,11 +3536,24 @@ export default function App() {
                       <strong>{trackingState.order.payment?.status || "unpaid"}</strong>
                     </div>
                   </div>
+                  <div className="tracking-timeline">
+                    {getOrderTimeline(trackingState.order).map((step) => (
+                      <div
+                        key={step.key}
+                        className={step.active ? "tracking-timeline__step is-active" : step.done ? "tracking-timeline__step is-done" : "tracking-timeline__step"}
+                      >
+                        <strong>{step.label}</strong>
+                      </div>
+                    ))}
+                  </div>
                   <p>
                     Payment reference: <strong>{trackingState.order.payment?.reference || "Not added yet"}</strong>
                   </p>
                   {trackingState.order.payment?.paidAt ? (
                     <p>Paid at {formatDateTime(trackingState.order.payment.paidAt)}.</p>
+                  ) : null}
+                  {trackingState.order.customer.landmark ? (
+                    <p>Landmark: <strong>{trackingState.order.customer.landmark}</strong></p>
                   ) : null}
                   {trackingState.order.status === "awaiting_payment" ? (
                     <p className="tracking-card__hint">
@@ -3388,7 +3826,7 @@ export default function App() {
                   }
                 >
                   <div className="meal-card__media">
-                    <img src={item.image} alt={item.name} />
+                    <img src={item.imageUrl || item.image} alt={item.name} />
                     <div className="meal-card__gradient" />
                     <div className="meal-card__chips">
                       <small>{item.badge}</small>
@@ -3714,12 +4152,16 @@ export default function App() {
                     <span>Orders</span>
                   </div>
                   <div>
-                    <strong>{adminState.data.contacts.length}</strong>
-                    <span>Messages</span>
+                    <strong>{adminUnreadOrders}</strong>
+                    <span>Need attention</span>
                   </div>
                   <div>
-                    <strong>{adminState.data.catering.length}</strong>
-                    <span>Catering requests</span>
+                    <strong>{adminUnreadContacts}</strong>
+                    <span>New messages</span>
+                  </div>
+                  <div>
+                    <strong>{adminUnreadCatering}</strong>
+                    <span>New catering requests</span>
                   </div>
                 </div>
 
@@ -3815,6 +4257,16 @@ export default function App() {
                     </div>
                   </div>
                   <div className="admin-list">
+                    {topDeliveryZones.length > 0 ? (
+                      topDeliveryZones.map(([zone, count]) => (
+                        <div key={zone} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{zone}</strong>
+                            <span>{count} delivery orders</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : null}
                     {topMeals.length === 0 ? (
                       <p className="admin-empty">Top meals will appear after orders come in.</p>
                     ) : (
@@ -3968,6 +4420,15 @@ export default function App() {
                         type="text"
                         value={settingsAdminState.settings.bankInstructions}
                         onChange={(event) => updateSettingsField("bankInstructions", event.target.value)}
+                      />
+                    </label>
+                    <label className="note-field">
+                      <span>Promo codes</span>
+                      <textarea
+                        rows="3"
+                        value={settingsAdminState.settings.promoCodesText}
+                        onChange={(event) => updateSettingsField("promoCodesText", event.target.value)}
+                        placeholder={"WELCOME10|percent|10|5000\nPARTY500|flat|500|7000"}
                       />
                     </label>
                     <label className="note-field">
@@ -4159,6 +4620,16 @@ export default function App() {
                               }
                             />
                           </label>
+
+                          <label className="field">
+                            <span>Image URL</span>
+                            <input
+                              type="url"
+                              value={item.imageUrl || ""}
+                              onChange={(event) => updateMenuAdminItem(item.id, { imageUrl: event.target.value })}
+                              placeholder="https://..."
+                            />
+                          </label>
                         </div>
                       ))}
                     </div>
@@ -4207,6 +4678,8 @@ export default function App() {
                             <span>{order.customer.phone}</span>
                             <strong>{formatPrice(order.pricing.total)}</strong>
                           </div>
+                          {order.customer.landmark ? <p>Landmark: {order.customer.landmark}</p> : null}
+                          {order.customer.promoCode ? <p>Promo code: {order.customer.promoCode}</p> : null}
                           <p>
                             Payment: {order.customer.paymentMethod} | {order.payment?.status || "unpaid"} | Ref:{" "}
                             {order.payment?.reference || "Not added"}
@@ -4555,6 +5028,21 @@ export default function App() {
                   </label>
 
                   <label className="field">
+                    <span>Nearest landmark</span>
+                    <input
+                      type="text"
+                      value={checkoutForm.landmark}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          landmark: event.target.value,
+                        }))
+                      }
+                      placeholder="Bus stop, estate gate, popular shop"
+                    />
+                  </label>
+
+                  <label className="field">
                     <span>Payment method</span>
                     <select
                       value={checkoutForm.paymentMethod}
@@ -4584,6 +5072,21 @@ export default function App() {
                         }))
                       }
                       placeholder="Transaction ID or teller reference"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Promo code</span>
+                    <input
+                      type="text"
+                      value={checkoutForm.promoCode}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          promoCode: event.target.value.toUpperCase(),
+                        }))
+                      }
+                      placeholder="WELCOME10"
                     />
                   </label>
 
@@ -4623,6 +5126,12 @@ export default function App() {
               <span>Delivery</span>
               <strong>{formatPrice(delivery)}</strong>
             </div>
+            {discount > 0 ? (
+              <div className="cart-total">
+                <span>Promo discount</span>
+                <strong>-{formatPrice(discount)}</strong>
+              </div>
+            ) : null}
             <div className="cart-total">
               <span>Area</span>
               <strong>{selectedDeliveryZone.label}</strong>
