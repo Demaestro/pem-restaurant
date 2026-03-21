@@ -28,6 +28,7 @@ const defaultDeliveryZones = [
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
   { id: "maitama", label: "Maitama / Asokoro / Guzape", fee: 2200, eta: "50 to 70 mins" },
   { id: "lugbe", label: "Lugbe / Airport Road", fee: 2500, eta: "60 to 85 mins" },
+  { id: "owerri", label: "Owerri, Imo State", fee: 4500, eta: "Next-day confirmation with PEM" },
   { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
 ];
 const storage = createStorage({

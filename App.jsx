@@ -383,6 +383,7 @@ const defaultDeliveryZones = [
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
   { id: "maitama", label: "Maitama / Asokoro / Guzape", fee: 2200, eta: "50 to 70 mins" },
   { id: "lugbe", label: "Lugbe / Airport Road", fee: 2500, eta: "60 to 85 mins" },
+  { id: "owerri", label: "Owerri, Imo State", fee: 4500, eta: "Next-day confirmation with PEM" },
   { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
 ];
 
@@ -1154,6 +1155,31 @@ export default function App() {
         success: "",
       }));
     }
+  }
+
+  function addDeliveryZoneRow() {
+    setDeliveryZoneAdminState((previous) => ({
+      ...previous,
+      zones: [
+        ...previous.zones,
+        {
+          id: `zone-${Date.now()}`,
+          label: "",
+          fee: 0,
+          eta: "",
+        },
+      ],
+    }));
+  }
+
+  function removeDeliveryZoneRow(zoneId) {
+    setDeliveryZoneAdminState((previous) => ({
+      ...previous,
+      zones:
+        previous.zones.length > 1
+          ? previous.zones.filter((zone) => zone.id !== zoneId)
+          : previous.zones,
+    }));
   }
 
   async function handleOrderStatusChange(reference, status) {
@@ -2492,6 +2518,17 @@ export default function App() {
                     <div className="admin-list">
                       {deliveryZoneAdminState.zones.map((zone, index) => (
                         <div key={zone.id} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{zone.label || `Delivery Zone ${index + 1}`}</strong>
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => removeDeliveryZoneRow(zone.id)}
+                              disabled={deliveryZoneAdminState.zones.length === 1}
+                            >
+                              Remove
+                            </button>
+                          </div>
                           <div className="service-form__grid">
                             <label className="field">
                               <span>Area label</span>
@@ -2543,6 +2580,9 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                    <button type="button" className="button button--ghost" onClick={addDeliveryZoneRow}>
+                      Add Delivery Zone
+                    </button>
                     {deliveryZoneAdminState.error ? (
                       <p className="form-message form-message--error">{deliveryZoneAdminState.error}</p>
                     ) : null}
@@ -2879,6 +2919,9 @@ export default function App() {
                     <p className="delivery-zone-card__title">Area delivery estimate</p>
                     <strong>{formatPrice(selectedDeliveryZone.fee)}</strong>
                     <span>{selectedDeliveryZone.eta}</span>
+                    {selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom" ? (
+                      <small>PEM will confirm final timing with you after the order is received.</small>
+                    ) : null}
                   </div>
 
                   <label className="field">
