@@ -1494,6 +1494,148 @@ button:disabled {
   color: var(--muted);
 }
 
+.account-section {
+  padding: 1rem 2rem 0;
+}
+
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.account-card {
+  padding: 1.5rem;
+  border-radius: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.account-card__panel {
+  margin-top: 1rem;
+}
+
+.account-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.account-card__header h3 {
+  margin: 0.25rem 0 0;
+}
+
+.account-card__header span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.account-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.account-kpis div {
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 82%, var(--brand-soft));
+}
+
+.account-kpis strong {
+  display: block;
+  font-size: 1.2rem;
+  color: var(--text);
+}
+
+.account-kpis span,
+.account-helper {
+  color: var(--muted);
+}
+
+.account-helper {
+  margin: 0.75rem 0 0;
+  line-height: 1.6;
+}
+
+.account-progress {
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 82%, var(--brand-soft));
+}
+
+.account-progress p {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.account-progress__bar {
+  width: 100%;
+  height: 0.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 85%, transparent);
+  overflow: hidden;
+}
+
+.account-progress__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 62%, white));
+}
+
+.account-list {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.account-list__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 90%, var(--brand-soft));
+}
+
+.account-list__item.is-unread {
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
+}
+
+.account-list__item strong {
+  display: block;
+}
+
+.account-list__item p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.account-list__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .contact-card {
   padding: 1.4rem;
   border-radius: 1.5rem;
@@ -1755,6 +1897,7 @@ button:disabled {
 @media (max-width: 1120px) {
   .hero,
   .promo-banner,
+  .account-section,
   .menu-section,
   .combo-section,
   .tracking-section,
@@ -1798,6 +1941,7 @@ button:disabled {
 
 @media (max-width: 720px) {
   .hero,
+  .account-section,
   .menu-section,
   .combo-section,
   .tracking-section,
@@ -1810,6 +1954,7 @@ button:disabled {
   }
 
   .topbar__actions,
+  .account-grid,
   .controls,
   .menu-grid,
   .combo-grid,
@@ -1827,6 +1972,10 @@ button:disabled {
 
   .topbar__actions {
     width: auto;
+  }
+
+  .account-kpis {
+    grid-template-columns: 1fr;
   }
 
   .mobile-nav {
@@ -1894,6 +2043,7 @@ button:disabled {
 
   .meal-card__body,
   .service-form,
+  .account-card,
   .admin-card,
   .contact-card,
   .catering-card {
@@ -1919,6 +2069,13 @@ button:disabled {
     top: auto;
     bottom: 1rem;
     right: 1rem;
+  }
+
+  .account-card__header,
+  .account-list__item,
+  .account-list__actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

@@ -27,6 +27,7 @@ const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS ||
   .map((value) => String(value || "").trim())
   .filter(Boolean);
 const adminSessions = new Map();
+const userSessions = new Map();
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
@@ -135,9 +136,64 @@ function requireAdmin(request, response, next) {
   next();
 }
 
+function requireUser(request, response, next) {
+  const token = getBearerToken(request);
+  const session = userSessions.get(token);
+
+  if (!token || !session?.email) {
+    return response.status(401).json({ error: "User login required." });
+  }
+
+  request.userSession = session;
+  next();
+}
+
+function getOptionalUserSession(request) {
+  const token = getBearerToken(request);
+  return token ? userSessions.get(token) || null : null;
+}
+
 function asyncHandler(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
+  };
+}
+
+function createPasswordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, hash] = String(storedHash || "").split(":");
+  if (!salt || !hash) {
+    return false;
+  }
+  const comparison = crypto.scryptSync(password, salt, 64).toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(comparison, "hex"));
+}
+
+function sanitizeUser(user) {
+  if (!user) {
+    return null;
+  }
+  const { passwordHash, ...rest } = user;
+  return rest;
+}
+
+function buildLoyaltyTier(points) {
+  if (points >= 120) return "gold";
+  if (points >= 60) return "silver";
+  return "bronze";
+}
+
+function createNotification(message, type = "general") {
+  return {
+    id: crypto.randomBytes(8).toString("hex"),
+    type,
+    message,
+    createdAt: new Date().toISOString(),
+    read: false,
   };
 }
 
@@ -435,6 +491,142 @@ app.get("/api/settings", asyncHandler(async (_request, response) => {
   response.json({ settings });
 }));
 
+app.post("/api/auth/signup", asyncHandler(async (request, response) => {
+  const { fullName, email, password, phone } = request.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!fullName || !normalizedEmail || !password) {
+    return response.status(400).json({ error: "Full name, email, and password are required." });
+  }
+
+  if (String(password).length < 6) {
+    return response.status(400).json({ error: "Password must be at least 6 characters long." });
+  }
+
+  const existingUser = await storage.getUserByEmail(normalizedEmail);
+  if (existingUser) {
+    return response.status(409).json({ error: "An account with that email already exists." });
+  }
+
+  const user = await storage.createUser({
+    email: normalizedEmail,
+    passwordHash: createPasswordHash(password),
+    fullName: String(fullName).trim(),
+    phone: String(phone || "").trim(),
+    favoriteItemIds: [],
+    savedAddresses: [],
+    orderReferences: [],
+    notifications: [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")],
+    loyaltyPoints: 0,
+    loyaltyTier: "bronze",
+    createdAt: new Date().toISOString(),
+  });
+
+  const token = createAdminToken();
+  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+
+  response.status(201).json({
+    token,
+    user: sanitizeUser(user),
+  });
+}));
+
+app.post("/api/auth/login", asyncHandler(async (request, response) => {
+  const { email, password } = request.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const user = await storage.getUserByEmail(normalizedEmail);
+
+  if (!user || !verifyPassword(String(password || ""), user.passwordHash)) {
+    return response.status(401).json({ error: "Incorrect email or password." });
+  }
+
+  const token = createAdminToken();
+  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+
+  response.json({
+    token,
+    user: sanitizeUser(user),
+  });
+}));
+
+app.post("/api/auth/logout", requireUser, (request, response) => {
+  const token = getBearerToken(request);
+  userSessions.delete(token);
+  response.json({ ok: true });
+});
+
+app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  const orders = await storage.getOrdersByReferences(user?.orderReferences || []);
+  response.json({
+    user: sanitizeUser(user),
+    orders,
+  });
+}));
+
+app.put("/api/account/profile", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "User account not found." });
+  }
+
+  const nextUser = {
+    ...user,
+    fullName: String(request.body?.fullName || user.fullName).trim(),
+    phone: String(request.body?.phone || user.phone || "").trim(),
+  };
+  const savedUser = await storage.updateUser(user.email, nextUser);
+  response.json({ user: sanitizeUser(savedUser) });
+}));
+
+app.put("/api/account/addresses", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "User account not found." });
+  }
+
+  const savedAddresses = Array.isArray(request.body?.savedAddresses)
+    ? request.body.savedAddresses.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 5)
+    : [];
+  const savedUser = await storage.updateUser(user.email, {
+    ...user,
+    savedAddresses,
+  });
+  response.json({ user: sanitizeUser(savedUser) });
+}));
+
+app.put("/api/account/favorites", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "User account not found." });
+  }
+
+  const favoriteItemIds = Array.isArray(request.body?.favoriteItemIds)
+    ? request.body.favoriteItemIds.map((item) => Number(item)).filter(Boolean)
+    : [];
+  const savedUser = await storage.updateUser(user.email, {
+    ...user,
+    favoriteItemIds,
+  });
+  response.json({ user: sanitizeUser(savedUser) });
+}));
+
+app.patch("/api/account/notifications/:id/read", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "User account not found." });
+  }
+
+  const notifications = (user.notifications || []).map((item) =>
+    item.id === request.params.id ? { ...item, read: true } : item,
+  );
+  const savedUser = await storage.updateUser(user.email, {
+    ...user,
+    notifications,
+  });
+  response.json({ user: sanitizeUser(savedUser) });
+}));
+
 app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   const deliveryZones = await storage.getDeliveryZones();
   response.json({ deliveryZones });
@@ -651,6 +843,40 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   };
   const savedOrder = await storage.createOrder(order);
 
+  const optionalSession = getOptionalUserSession(request);
+  const candidateEmail = String(optionalSession?.email || customer?.email || "").trim().toLowerCase();
+  const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
+
+  if (linkedUser) {
+    const orderReferences = [
+      savedOrder.reference,
+      ...(linkedUser.orderReferences || []).filter((reference) => reference !== savedOrder.reference),
+    ].slice(0, 20);
+    const notifications = [
+      createNotification(`Order ${savedOrder.reference} has been received by PEM.`, "order"),
+      ...(linkedUser.notifications || []),
+    ].slice(0, 15);
+    const nextSavedAddresses = customer?.address
+      ? [
+          customer.address,
+          ...(linkedUser.savedAddresses || []).filter((item) => item !== customer.address),
+        ].slice(0, 5)
+      : linkedUser.savedAddresses || [];
+    const addedPoints = Math.max(1, Math.floor((Number(savedOrder.pricing?.total) || 0) / 2500));
+    const loyaltyPoints = (Number(linkedUser.loyaltyPoints) || 0) + addedPoints;
+
+    await storage.updateUser(linkedUser.email, {
+      ...linkedUser,
+      phone: linkedUser.phone || String(customer?.phone || "").trim(),
+      orderReferences,
+      notifications,
+      savedAddresses: nextSavedAddresses,
+      loyaltyPoints,
+      loyaltyTier: buildLoyaltyTier(loyaltyPoints),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   return response.status(201).json({
     message: "Order received.",
     order: savedOrder,
@@ -708,6 +934,19 @@ app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request,
       },
       "received",
     );
+
+    const customerEmail = String(order?.customer?.email || "").trim().toLowerCase();
+    const linkedUser = customerEmail ? await storage.getUserByEmail(customerEmail) : null;
+    if (linkedUser) {
+      await storage.updateUser(linkedUser.email, {
+        ...linkedUser,
+        notifications: [
+          createNotification(`Payment was confirmed for order ${reference}.`, "payment"),
+          ...(linkedUser.notifications || []),
+        ].slice(0, 15),
+        updatedAt: new Date().toISOString(),
+      });
+    }
   }
 
   response.json({

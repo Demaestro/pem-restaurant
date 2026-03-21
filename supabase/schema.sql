@@ -71,3 +71,19 @@ create table if not exists public.business_settings (
   data jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+create table if not exists public.users (
+  id bigint generated always as identity primary key,
+  email text not null unique,
+  password_hash text not null,
+  full_name text not null,
+  phone text,
+  favorite_item_ids jsonb not null default '[]'::jsonb,
+  saved_addresses jsonb not null default '[]'::jsonb,
+  order_references jsonb not null default '[]'::jsonb,
+  notifications jsonb not null default '[]'::jsonb,
+  loyalty_points integer not null default 0,
+  loyalty_tier text not null default 'bronze',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);

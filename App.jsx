@@ -518,6 +518,31 @@ const initialSettingsAdminState = {
   settings: initialBusinessSettings,
 };
 
+const initialAccountUser = {
+  email: "",
+  fullName: "",
+  phone: "",
+  favoriteItemIds: [],
+  savedAddresses: [],
+  orderReferences: [],
+  notifications: [],
+  loyaltyPoints: 0,
+  loyaltyTier: "bronze",
+  createdAt: "",
+};
+
+const initialAccountForm = {
+  fullName: "",
+  email: "",
+  password: "",
+  phone: "",
+};
+
+const initialLoginForm = {
+  email: "",
+  password: "",
+};
+
 const orderStatuses = ["all", "awaiting_payment", "received", "preparing", "ready", "delivered", "cancelled"];
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
@@ -671,13 +696,22 @@ function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   };
 }
 
-async function postJson(url, payload) {
-  const response = await fetch(apiUrl(url), {
+async function postJson(url, payload, headers = {}) {
+  return requestJson(url, {
     method: "POST",
+    payload,
+    headers,
+  });
+}
+
+async function requestJson(url, { method = "GET", payload, headers = {} } = {}) {
+  const response = await fetch(apiUrl(url), {
+    method,
     headers: {
       "Content-Type": "application/json",
+      ...headers,
     },
-    body: JSON.stringify(payload),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -739,6 +773,15 @@ export default function App() {
   const [notes, setNotes] = useState({});
   const [favorites, setFavorites] = useState([]);
   const [savedReferences, setSavedReferences] = useState([]);
+  const [accountToken, setAccountToken] = useState("");
+  const [accountUser, setAccountUser] = useState(initialAccountUser);
+  const [accountOrders, setAccountOrders] = useState([]);
+  const [accountState, setAccountState] = useState({ loading: false, error: "", success: "" });
+  const [accountHydrated, setAccountHydrated] = useState(false);
+  const [signupForm, setSignupForm] = useState(initialAccountForm);
+  const [loginForm, setLoginForm] = useState(initialLoginForm);
+  const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
+  const [addressDraft, setAddressDraft] = useState("");
   const [search, setSearch] = useState("");
   const [showCart, setShowCart] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
@@ -845,6 +888,15 @@ export default function App() {
   }, [savedReferences]);
 
   useEffect(() => {
+    const savedAccountToken = window.localStorage.getItem("pem-account-token");
+    if (savedAccountToken) {
+      setAccountToken(savedAccountToken);
+    } else {
+      setAccountHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
     const savedAdminToken = window.localStorage.getItem("pem-admin-token");
     if (savedAdminToken) {
       setAdminToken(savedAdminToken);
@@ -865,10 +917,38 @@ export default function App() {
   }, [adminToken]);
 
   useEffect(() => {
+    if (accountToken) {
+      window.localStorage.setItem("pem-account-token", accountToken);
+      loadAccount(accountToken);
+    } else {
+      window.localStorage.removeItem("pem-account-token");
+      setAccountUser(initialAccountUser);
+      setAccountOrders([]);
+      setProfileForm({ fullName: "", phone: "" });
+      setAccountHydrated(true);
+    }
+  }, [accountToken]);
+
+  useEffect(() => {
     loadPublicDeliveryZones();
     loadMenuCatalog();
     loadPublicSettings();
   }, []);
+
+  useEffect(() => {
+    if (!accountToken || !accountHydrated) {
+      return;
+    }
+
+    const nextFavorites = JSON.stringify(favorites);
+    const accountFavorites = JSON.stringify(accountUser.favoriteItemIds || []);
+
+    if (nextFavorites === accountFavorites) {
+      return;
+    }
+
+    syncFavoritesToAccount(favorites);
+  }, [accountHydrated, accountToken, accountUser.favoriteItemIds, favorites]);
 
   useEffect(() => {
     function handleScroll() {
@@ -911,6 +991,9 @@ export default function App() {
             ...previous.filter((item) => item !== reference),
           ].slice(0, 5));
         }
+        if (accountToken) {
+          loadAccount();
+        }
       } catch (error) {
         setOrderPlaced(error.message);
       } finally {
@@ -922,7 +1005,7 @@ export default function App() {
     }
 
     verifyPayment();
-  }, []);
+  }, [accountToken]);
 
   const visibleCategories = useMemo(() => {
     const availableCategories = ["All", ...new Set(menuCatalog.filter((item) => !item.hidden).map((item) => item.category))];
@@ -1031,6 +1114,15 @@ export default function App() {
   )
     .sort((left, right) => right.quantity - left.quantity)
     .slice(0, 5);
+  const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
+  const loyaltyProgress = Math.min(
+    100,
+    Math.round(
+      ((Number(accountUser.loyaltyPoints) || 0) /
+        (accountUser.loyaltyTier === "gold" ? 120 : accountUser.loyaltyTier === "silver" ? 120 : 60)) *
+        100,
+    ),
+  );
 
   const filteredAdminOrders = adminState.data.orders.filter((order) => {
     const matchesQuery =
@@ -1223,6 +1315,70 @@ export default function App() {
 
   function handleQuickNav() {
     setMobileMenuOpen(false);
+  }
+
+  function getUserAuthHeaders(tokenOverride = accountToken) {
+    return tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : {};
+  }
+
+  async function loadAccount(tokenOverride = accountToken) {
+    if (!tokenOverride) {
+      return;
+    }
+
+    try {
+      setAccountState((previous) => ({ ...previous, loading: true, error: "" }));
+      const data = await requestJson("/api/account", {
+        headers: getUserAuthHeaders(tokenOverride),
+      });
+      const nextUser = { ...initialAccountUser, ...(data.user || {}) };
+      setAccountUser(nextUser);
+      setAccountOrders(Array.isArray(data.orders) ? data.orders : []);
+      setProfileForm({
+        fullName: nextUser.fullName || "",
+        phone: nextUser.phone || "",
+      });
+      setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
+      setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
+      setCheckoutForm((previous) => ({
+        ...previous,
+        customerName: previous.customerName || nextUser.fullName || "",
+        phone: previous.phone || nextUser.phone || "",
+        email: previous.email || nextUser.email || "",
+        address: previous.address || nextUser.savedAddresses?.[0] || "",
+      }));
+      setAccountState((previous) => ({
+        ...previous,
+        loading: false,
+        error: "",
+      }));
+    } catch (error) {
+      setAccountState((previous) => ({
+        ...previous,
+        loading: false,
+        error: error.message,
+      }));
+      setAccountToken("");
+    } finally {
+      setAccountHydrated(true);
+    }
+  }
+
+  async function syncFavoritesToAccount(nextFavorites) {
+    try {
+      const data = await requestJson("/api/account/favorites", {
+        method: "PUT",
+        headers: getUserAuthHeaders(),
+        payload: {
+          favoriteItemIds: nextFavorites,
+        },
+      });
+      if (data.user) {
+        setAccountUser((previous) => ({ ...previous, ...data.user }));
+      }
+    } catch {
+      // Keep local favorites responsive even if sync fails.
+    }
   }
 
   async function loadPublicDeliveryZones() {
@@ -1939,6 +2095,162 @@ export default function App() {
     );
   }
 
+  async function handleSignup(event) {
+    event.preventDefault();
+
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await postJson("/api/auth/signup", signupForm);
+      setAccountToken(data.token || "");
+      setSignupForm(initialAccountForm);
+      setLoginForm(initialLoginForm);
+      setAccountState({
+        loading: false,
+        error: "",
+        success: "Your PEM account is ready. You can now save meals, addresses, and order history.",
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault();
+
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await postJson("/api/auth/login", loginForm);
+      setAccountToken(data.token || "");
+      setLoginForm(initialLoginForm);
+      setAccountState({
+        loading: false,
+        error: "",
+        success: "Welcome back to PEM.",
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function handleAccountLogout() {
+    try {
+      if (accountToken) {
+        await requestJson("/api/auth/logout", {
+          method: "POST",
+          headers: getUserAuthHeaders(),
+        });
+      }
+    } catch {
+      // Ignore logout request failures and clear local state anyway.
+    } finally {
+      setAccountToken("");
+      setAccountState({ loading: false, error: "", success: "You have signed out." });
+    }
+  }
+
+  async function handleProfileSave(event) {
+    event.preventDefault();
+
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await requestJson("/api/account/profile", {
+        method: "PUT",
+        headers: getUserAuthHeaders(),
+        payload: profileForm,
+      });
+      const nextUser = { ...initialAccountUser, ...(data.user || {}) };
+      setAccountUser(nextUser);
+      setCheckoutForm((previous) => ({
+        ...previous,
+        customerName: nextUser.fullName || previous.customerName,
+        phone: nextUser.phone || previous.phone,
+      }));
+      setAccountState({
+        loading: false,
+        error: "",
+        success: "Your PEM profile has been updated.",
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function saveAddresses(nextAddresses, successMessage = "Saved addresses updated.") {
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await requestJson("/api/account/addresses", {
+        method: "PUT",
+        headers: getUserAuthHeaders(),
+        payload: {
+          savedAddresses: nextAddresses,
+        },
+      });
+      const nextUser = { ...initialAccountUser, ...(data.user || {}) };
+      setAccountUser(nextUser);
+      setAddressDraft("");
+      setCheckoutForm((previous) => ({
+        ...previous,
+        address: previous.address || nextUser.savedAddresses?.[0] || "",
+      }));
+      setAccountState({
+        loading: false,
+        error: "",
+        success: successMessage,
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function handleAddAddress(event) {
+    event.preventDefault();
+    const normalizedAddress = addressDraft.trim();
+    if (!normalizedAddress) {
+      setAccountState({ loading: false, error: "Add an address first.", success: "" });
+      return;
+    }
+    const nextAddresses = [
+      normalizedAddress,
+      ...(accountUser.savedAddresses || []).filter((item) => item !== normalizedAddress),
+    ].slice(0, 5);
+    await saveAddresses(nextAddresses, "Address saved to your PEM account.");
+  }
+
+  async function handleRemoveAddress(address) {
+    const nextAddresses = (accountUser.savedAddresses || []).filter((item) => item !== address);
+    await saveAddresses(nextAddresses, "Address removed from your PEM account.");
+  }
+
+  async function handleNotificationRead(notificationId) {
+    try {
+      const data = await requestJson(`/api/account/notifications/${notificationId}/read`, {
+        method: "PATCH",
+        headers: getUserAuthHeaders(),
+      });
+      if (data.user) {
+        setAccountUser({ ...initialAccountUser, ...data.user });
+      }
+    } catch {
+      // Do not block the rest of the account page if notification sync fails.
+    }
+  }
+
   async function handlePlaceOrder() {
     if (cartItems.length === 0) {
       setCheckoutState({ loading: false, error: "Add at least one meal before checkout." });
@@ -1983,6 +2295,7 @@ export default function App() {
       const result = await postJson("/api/orders", {
         customer: {
           ...checkoutForm,
+          email: checkoutForm.email || accountUser.email || "",
           deliveryZone: selectedDeliveryZone.label,
           deliveryEta: selectedDeliveryZone.eta,
           paymentReference: checkoutForm.paymentReference,
@@ -1993,7 +2306,7 @@ export default function App() {
           delivery,
           total,
         },
-      });
+      }, getUserAuthHeaders());
 
       if (checkoutForm.paymentMethod === "Paystack") {
         const paymentResult = await postJson("/api/payments/paystack/initialize", {
@@ -2028,6 +2341,9 @@ export default function App() {
       setCheckoutForm(initialCheckout);
       setCheckoutState({ loading: false, error: "" });
       loadAdminData();
+      if (accountToken) {
+        loadAccount();
+      }
 
       window.setTimeout(() => {
         setOrderPlaced("");
@@ -2262,6 +2578,7 @@ export default function App() {
         </button>
 
         <nav className="topbar__nav">
+          <a href="#account" onClick={handleQuickNav}>Account</a>
           <a href="#menu" onClick={handleQuickNav}>Menu</a>
           <a href="#track" onClick={handleQuickNav}>Track Order</a>
           <a href="#catering" onClick={handleQuickNav}>Catering</a>
@@ -2279,6 +2596,7 @@ export default function App() {
 
       {mobileMenuOpen ? (
         <div className="mobile-nav">
+          <a href="#account" onClick={handleQuickNav}>Account</a>
           <a href="#menu" onClick={handleQuickNav}>Menu</a>
           <a href="#track" onClick={handleQuickNav}>Track Order</a>
           <a href="#catering" onClick={handleQuickNav}>Catering</a>
@@ -2363,6 +2681,355 @@ export default function App() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="account-section" id="account">
+          <div className="section-heading reveal reveal--up">
+            <p className="eyebrow">Customer Account</p>
+            <h2>Create a PEM account for faster repeat ordering.</h2>
+            <p>
+              Save your details, keep favorite meals across devices, reuse delivery addresses, and
+              follow your order history from one place.
+            </p>
+          </div>
+
+          {!accountToken ? (
+            <div className="account-grid">
+              <form className="service-form reveal reveal--up" onSubmit={handleSignup}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">New here?</p>
+                    <h3>Create your PEM account</h3>
+                  </div>
+                  <span>Signup</span>
+                </div>
+
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Full name</span>
+                    <input
+                      type="text"
+                      value={signupForm.fullName}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
+                      }
+                      placeholder="Your full name"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Phone number</span>
+                    <input
+                      type="tel"
+                      value={signupForm.phone}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
+                      }
+                      placeholder="0803 334 5161"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={signupForm.email}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, email: event.target.value }))
+                      }
+                      placeholder="you@example.com"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={signupForm.password}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, password: event.target.value }))
+                      }
+                      placeholder="At least 6 characters"
+                    />
+                  </label>
+                </div>
+
+                {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+                {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
+
+                <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                  {accountState.loading ? "Creating account..." : "Create Account"}
+                </button>
+              </form>
+
+              <form className="service-form reveal reveal--up reveal--delay-1" onSubmit={handleLogin}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Already registered?</p>
+                    <h3>Sign in to continue</h3>
+                  </div>
+                  <span>Login</span>
+                </div>
+
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={loginForm.email}
+                      onChange={(event) =>
+                        setLoginForm((previous) => ({ ...previous, email: event.target.value }))
+                      }
+                      placeholder="you@example.com"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={loginForm.password}
+                      onChange={(event) =>
+                        setLoginForm((previous) => ({ ...previous, password: event.target.value }))
+                      }
+                      placeholder="Your PEM password"
+                    />
+                  </label>
+                </div>
+
+                <p className="account-helper">
+                  Sign in to sync favorites, addresses, notifications, and order history across devices.
+                </p>
+
+                <button type="submit" className="button button--ghost" disabled={accountState.loading}>
+                  {accountState.loading ? "Signing in..." : "Sign In"}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="account-grid">
+              <article className="account-card reveal reveal--up">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">PEM profile</p>
+                    <h3>{accountUser.fullName || "Your account"}</h3>
+                  </div>
+                  <button type="button" className="button button--ghost button--small" onClick={handleAccountLogout}>
+                    Sign Out
+                  </button>
+                </div>
+
+                <div className="account-kpis">
+                  <div>
+                    <strong>{accountOrders.length}</strong>
+                    <span>Orders</span>
+                  </div>
+                  <div>
+                    <strong>{favorites.length}</strong>
+                    <span>Saved meals</span>
+                  </div>
+                  <div>
+                    <strong>{accountUser.savedAddresses.length}</strong>
+                    <span>Saved addresses</span>
+                  </div>
+                </div>
+
+                <form className="service-form account-card__panel" onSubmit={handleProfileSave}>
+                  <div className="service-form__grid">
+                    <label className="field">
+                      <span>Full name</span>
+                      <input
+                        type="text"
+                        value={profileForm.fullName}
+                        onChange={(event) =>
+                          setProfileForm((previous) => ({ ...previous, fullName: event.target.value }))
+                        }
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Phone number</span>
+                      <input
+                        type="tel"
+                        value={profileForm.phone}
+                        onChange={(event) =>
+                          setProfileForm((previous) => ({ ...previous, phone: event.target.value }))
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>Email</span>
+                    <input type="email" value={accountUser.email} disabled />
+                  </label>
+
+                  <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                    {accountState.loading ? "Saving..." : "Save Profile"}
+                  </button>
+                </form>
+
+                {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+                {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
+              </article>
+
+              <article className="account-card reveal reveal--up reveal--delay-1">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Loyalty</p>
+                    <h3>{accountUser.loyaltyTier} tier</h3>
+                  </div>
+                  <span>{accountUser.loyaltyPoints} pts</span>
+                </div>
+
+                <div className="account-progress">
+                  <div className="account-progress__bar">
+                    <span style={{ width: `${loyaltyProgress}%` }} />
+                  </div>
+                  <p>
+                    Earn points whenever you place an order through your PEM account. Bronze upgrades to
+                    silver at 60 points, then gold at 120 points.
+                  </p>
+                </div>
+
+                <form className="service-form account-card__panel" onSubmit={handleAddAddress}>
+                  <div className="account-card__header">
+                    <div>
+                      <p className="eyebrow">Saved addresses</p>
+                      <h3>Reuse delivery locations</h3>
+                    </div>
+                    <span>{accountUser.savedAddresses.length}/5</span>
+                  </div>
+
+                  <label className="field">
+                    <span>Add another address</span>
+                    <input
+                      type="text"
+                      value={addressDraft}
+                      onChange={(event) => setAddressDraft(event.target.value)}
+                      placeholder="Your preferred delivery address"
+                    />
+                  </label>
+
+                  <button type="submit" className="button button--ghost" disabled={accountState.loading}>
+                    Save Address
+                  </button>
+
+                  {accountUser.savedAddresses.length > 0 ? (
+                    <div className="account-list">
+                      {accountUser.savedAddresses.map((address) => (
+                        <div key={address} className="account-list__item">
+                          <div>
+                            <strong>{address}</strong>
+                          </div>
+                          <div className="account-list__actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() =>
+                                setCheckoutForm((previous) => ({ ...previous, address }))
+                              }
+                            >
+                              Use in checkout
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => handleRemoveAddress(address)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="account-helper">Save your most-used delivery addresses here.</p>
+                  )}
+                </form>
+              </article>
+
+              <article className="account-card reveal reveal--up">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Notifications</p>
+                    <h3>Order and payment updates</h3>
+                  </div>
+                  <span>{unreadNotifications.length} unread</span>
+                </div>
+
+                <div className="account-list">
+                  {(accountUser.notifications || []).length > 0 ? (
+                    accountUser.notifications.map((notification) => (
+                      <div
+                        key={notification.id}
+                        className={notification.read ? "account-list__item" : "account-list__item is-unread"}
+                      >
+                        <div>
+                          <strong>{notification.message}</strong>
+                          <p>{formatDateTime(notification.createdAt)}</p>
+                        </div>
+                        {!notification.read ? (
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => handleNotificationRead(notification.id)}
+                          >
+                            Mark Read
+                          </button>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="account-helper">PEM account updates will show here once you start ordering.</p>
+                  )}
+                </div>
+              </article>
+
+              <article className="account-card reveal reveal--up reveal--delay-1">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Order history</p>
+                    <h3>Quick reorder and receipts</h3>
+                  </div>
+                  <span>{accountOrders.length}</span>
+                </div>
+
+                <div className="account-list">
+                  {accountOrders.length > 0 ? (
+                    accountOrders.map((order) => (
+                      <div key={order.reference} className="account-list__item">
+                        <div>
+                          <strong>{order.reference}</strong>
+                          <p>
+                            {formatDateTime(order.createdAt)} • {formatPrice(order.pricing.total)} • {order.status}
+                          </p>
+                        </div>
+                        <div className="account-list__actions">
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => applyOrderToCart(order)}
+                          >
+                            Reorder
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => downloadOrderReceipt(order)}
+                          >
+                            Receipt
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="account-helper">Your placed orders will appear here once you checkout with your PEM account.</p>
+                  )}
+                </div>
+              </article>
+            </div>
+          )}
         </section>
 
         <section className="tracking-section" id="track">
