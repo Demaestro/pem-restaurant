@@ -8,6 +8,7 @@ create table if not exists public.orders (
   customer jsonb not null default '{}'::jsonb,
   items jsonb not null default '[]'::jsonb,
   pricing jsonb not null default '{}'::jsonb,
+  payment jsonb not null default '{}'::jsonb,
   status text not null default 'received',
   created_at timestamptz not null default now(),
   updated_at timestamptz
@@ -62,4 +63,11 @@ create table if not exists public.menu_items (
   dietary_profile text,
   sold_out boolean not null default false,
   hidden boolean not null default false
+);
+
+create table if not exists public.business_settings (
+  id bigint generated always as identity primary key,
+  singleton text not null unique,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
 );

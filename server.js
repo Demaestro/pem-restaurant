@@ -36,6 +36,26 @@ const defaultDeliveryZones = [
   { id: "owerri", label: "Owerri, Imo State", fee: 4500, eta: "Next-day confirmation with PEM" },
   { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
 ];
+const defaultSettings = {
+  businessName: "Precious Events Makers",
+  appName: "PEM",
+  phone: "0803 334 5161",
+  whatsappPhone: "2348033345161",
+  supportEmail: "hello@pem.local",
+  address: "Abuja, Nigeria",
+  heroHeadline: "Restaurant ordering and catering, designed with a calmer PEM feel.",
+  heroCopy:
+    "Explore local favorites, choose your quantity, add special notes, and place orders through a cleaner, more elegant PEM experience.",
+  promoBanner: "Fresh local dishes, premium catering, and smoother ordering all in one PEM experience.",
+  contactPromise: "Professional meals, local flavors, and catering support for all event sizes.",
+  businessHoursText: "Open daily in Lagos time. PEM confirms exact delivery windows after checkout.",
+  bankName: "PEM Business Account",
+  bankAccountName: "Precious Events Makers",
+  bankAccountNumber: "0123456789",
+  bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
+  minimumOrder: 1500,
+  receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
+};
 const defaultMenuItems = [
   { id: 1, name: "Jollof Rice & Grilled Chicken", category: "Rice", price: 3800, rating: 4.9, reviews: 241, spicy: false, badge: "Popular", description: "Classic Nigerian party jollof with grilled chicken and sweet plantain.", dietaryTags: ["Chicken", "Rice-based", "Mild"], dietaryProfile: "Contains grilled chicken and rice. Mild heat and a balanced, filling profile.", soldOut: false, hidden: false },
   { id: 2, name: "Fried Rice & Beef Stew", category: "Rice", price: 4000, rating: 4.8, reviews: 188, spicy: false, badge: "Signature", description: "Colorful fried rice served with rich beef stew for a hearty PEM favorite.", dietaryTags: ["Beef", "Rice-based", "Mild"], dietaryProfile: "Contains beef stew and fried rice. Hearty and filling, but not suitable for beef-free diets.", soldOut: false, hidden: false },
@@ -67,6 +87,7 @@ const storage = createStorage({
   supabaseServiceRoleKey: forceLocalStorage ? "" : process.env.SUPABASE_SERVICE_ROLE_KEY,
   defaultDeliveryZones,
   defaultMenuItems,
+  defaultSettings,
 });
 
 const allowedOrigins = [...new Set([...frontendUrls, "http://localhost:5173", "http://127.0.0.1:5173"])];
@@ -409,6 +430,11 @@ app.get("/api/menu", asyncHandler(async (_request, response) => {
   response.json({ menuItems });
 }));
 
+app.get("/api/settings", asyncHandler(async (_request, response) => {
+  const settings = await storage.getSettings();
+  response.json({ settings });
+}));
+
 app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   const deliveryZones = await storage.getDeliveryZones();
   response.json({ deliveryZones });
@@ -477,6 +503,40 @@ app.post("/api/admin/change-password", requireAdmin, asyncHandler(async (request
 app.get("/api/admin/summary", requireAdmin, asyncHandler(async (_request, response) => {
   const summary = await storage.getSummary();
   response.json(summary);
+}));
+
+app.put("/api/admin/settings", requireAdmin, asyncHandler(async (request, response) => {
+  const payload = request.body?.settings || {};
+  const settings = {
+    ...defaultSettings,
+    businessName: String(payload.businessName || defaultSettings.businessName).trim(),
+    appName: String(payload.appName || defaultSettings.appName).trim(),
+    phone: String(payload.phone || defaultSettings.phone).trim(),
+    whatsappPhone: String(payload.whatsappPhone || defaultSettings.whatsappPhone).replace(/\D/g, ""),
+    supportEmail: String(payload.supportEmail || defaultSettings.supportEmail).trim(),
+    address: String(payload.address || defaultSettings.address).trim(),
+    heroHeadline: String(payload.heroHeadline || defaultSettings.heroHeadline).trim(),
+    heroCopy: String(payload.heroCopy || defaultSettings.heroCopy).trim(),
+    promoBanner: String(payload.promoBanner || "").trim(),
+    contactPromise: String(payload.contactPromise || defaultSettings.contactPromise).trim(),
+    businessHoursText: String(payload.businessHoursText || defaultSettings.businessHoursText).trim(),
+    bankName: String(payload.bankName || "").trim(),
+    bankAccountName: String(payload.bankAccountName || "").trim(),
+    bankAccountNumber: String(payload.bankAccountNumber || "").trim(),
+    bankInstructions: String(payload.bankInstructions || "").trim(),
+    minimumOrder: Math.max(0, Number(payload.minimumOrder) || 0),
+    receiptFooter: String(payload.receiptFooter || defaultSettings.receiptFooter).trim(),
+  };
+
+  if (!settings.businessName || !settings.appName || !settings.phone) {
+    return response.status(400).json({ error: "Business name, app name, and phone are required." });
+  }
+
+  const savedSettings = await storage.updateSettings(settings);
+  response.json({
+    message: "Business settings updated successfully.",
+    settings: savedSettings,
+  });
 }));
 
 app.put("/api/admin/delivery-zones", requireAdmin, asyncHandler(async (request, response) => {
@@ -548,6 +608,7 @@ app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) 
 
 app.post("/api/orders", asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
+  const settings = await storage.getSettings();
 
   if (!customer?.customerName || !customer?.phone || !customer?.address) {
     return response.status(400).json({ error: "Customer name, phone, and address are required." });
@@ -555,6 +616,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
 
   if (!Array.isArray(items) || items.length === 0) {
     return response.status(400).json({ error: "At least one order item is required." });
+  }
+
+  if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
+    return response.status(400).json({
+      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
+    });
   }
 
   const menuItems = await storage.getMenuItems();
@@ -573,6 +640,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     customer,
     items,
     pricing,
+    payment: {
+      method: customer?.paymentMethod || "Pay on delivery",
+      status: customer?.paymentMethod === "Paystack" ? "pending" : "unpaid",
+      reference: String(customer?.paymentReference || "").trim(),
+      paidAt: null,
+    },
     createdAt: new Date().toISOString(),
     status: customer?.paymentMethod === "Paystack" ? "awaiting_payment" : "received",
   };
@@ -604,6 +677,13 @@ app.post("/api/payments/paystack/initialize", asyncHandler(async (request, respo
     },
   });
 
+  await storage.updateOrderPayment(orderReference, {
+    method: "Paystack",
+    status: "pending",
+    reference: orderReference,
+    paidAt: null,
+  });
+
   response.json({ payment });
 }));
 
@@ -617,7 +697,17 @@ app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request,
   let order = await storage.getOrderByReference(reference);
 
   if (payment.status === "success" && order && order.status === "awaiting_payment") {
-    order = await storage.updateOrderStatus(reference, "received");
+    order = await storage.updateOrderPayment(
+      reference,
+      {
+        ...(order.payment || {}),
+        method: "Paystack",
+        status: "paid",
+        reference: payment.reference || reference,
+        paidAt: payment.paid_at || new Date().toISOString(),
+      },
+      "received",
+    );
   }
 
   response.json({

@@ -290,6 +290,20 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.promo-banner {
+  padding: 1rem 4.5rem 0;
+}
+
+.promo-banner p {
+  margin: 0;
+  padding: 1rem 1.2rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(135deg, var(--brand-soft), color-mix(in srgb, var(--surface) 86%, transparent));
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
 .mobile-nav {
   position: sticky;
   top: 5.4rem;
@@ -1118,7 +1132,7 @@ button:disabled {
 }
 
 .contact-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin-bottom: 1.5rem;
 }
 
@@ -1146,6 +1160,10 @@ button:disabled {
 .tracking-card p {
   color: var(--muted);
   line-height: 1.75;
+}
+
+.tracking-card .button + .button {
+  margin-top: 0.75rem;
 }
 
 .tracking-card__top,
@@ -1736,6 +1754,7 @@ button:disabled {
 
 @media (max-width: 1120px) {
   .hero,
+  .promo-banner,
   .menu-section,
   .combo-section,
   .tracking-section,

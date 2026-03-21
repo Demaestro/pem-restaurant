@@ -425,6 +425,7 @@ const initialCheckout = {
   address: "",
   deliveryZone: "gwarinpa",
   paymentMethod: "Pay on delivery",
+  paymentReference: "",
 };
 
 const initialTrackingState = {
@@ -486,6 +487,35 @@ const initialDietaryState = {
   matches: [],
   mode: "",
   degraded: false,
+};
+
+const initialBusinessSettings = {
+  businessName: "Precious Events Makers",
+  appName: "PEM",
+  phone: "0803 334 5161",
+  whatsappPhone: "2348033345161",
+  supportEmail: "hello@pem.local",
+  address: "Abuja, Nigeria",
+  heroHeadline: "Restaurant ordering and catering, designed with a calmer PEM feel.",
+  heroCopy:
+    "Explore local favorites, choose your quantity, add special notes, and place orders through a cleaner, more elegant PEM experience.",
+  promoBanner: "Fresh local dishes, premium catering, and smoother ordering all in one PEM experience.",
+  contactPromise: "Professional meals, local flavors, and catering support for all event sizes.",
+  businessHoursText: "Open daily in Lagos time. PEM confirms exact delivery windows after checkout.",
+  bankName: "PEM Business Account",
+  bankAccountName: "Precious Events Makers",
+  bankAccountNumber: "0123456789",
+  bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
+  minimumOrder: 1500,
+  receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
+};
+
+const initialSettingsAdminState = {
+  loading: false,
+  saving: false,
+  error: "",
+  success: "",
+  settings: initialBusinessSettings,
 };
 
 const orderStatuses = ["all", "awaiting_payment", "received", "preparing", "ready", "delivered", "cancelled"];
@@ -722,7 +752,9 @@ export default function App() {
   const [trackingState, setTrackingState] = useState(initialTrackingState);
   const [deliveryZoneAdminState, setDeliveryZoneAdminState] = useState(initialDeliveryZoneAdminState);
   const [menuAdminState, setMenuAdminState] = useState(initialMenuAdminState);
+  const [settingsAdminState, setSettingsAdminState] = useState(initialSettingsAdminState);
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
+  const [businessSettings, setBusinessSettings] = useState(initialBusinessSettings);
   const [dietaryNeeds, setDietaryNeeds] = useState("");
   const [dietaryState, setDietaryState] = useState(initialDietaryState);
   const [showDietaryMatchesOnly, setShowDietaryMatchesOnly] = useState(false);
@@ -825,6 +857,7 @@ export default function App() {
       loadAdminData(adminToken);
       loadDeliveryZones(adminToken);
       loadMenuCatalog(adminToken);
+      loadPublicSettings(adminToken);
     } else {
       window.localStorage.removeItem("pem-admin-token");
       setAdminState(initialAdminState);
@@ -834,6 +867,7 @@ export default function App() {
   useEffect(() => {
     loadPublicDeliveryZones();
     loadMenuCatalog();
+    loadPublicSettings();
   }, []);
 
   useEffect(() => {
@@ -973,6 +1007,30 @@ export default function App() {
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden);
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
   const normalizedMenuAdminQuery = menuAdminQuery.trim().toLowerCase();
+  const totalRevenue = adminState.data.orders.reduce((sum, order) => sum + (Number(order.pricing?.total) || 0), 0);
+  const paidRevenue = adminState.data.orders.reduce(
+    (sum, order) => sum + ((order.payment?.status === "paid" ? Number(order.pricing?.total) || 0 : 0)),
+    0,
+  );
+  const todayOrders = adminState.data.orders.filter((order) => {
+    if (!order.createdAt) {
+      return false;
+    }
+    return new Date(order.createdAt).toDateString() === new Date().toDateString();
+  }).length;
+  const topMeals = Object.values(
+    adminState.data.orders.reduce((accumulator, order) => {
+      order.items.forEach((item) => {
+        if (!accumulator[item.id]) {
+          accumulator[item.id] = { id: item.id, name: item.name, quantity: 0 };
+        }
+        accumulator[item.id].quantity += Number(item.quantity) || 0;
+      });
+      return accumulator;
+    }, {}),
+  )
+    .sort((left, right) => right.quantity - left.quantity)
+    .slice(0, 5);
 
   const filteredAdminOrders = adminState.data.orders.filter((order) => {
     const matchesQuery =
@@ -1138,6 +1196,17 @@ export default function App() {
     });
   }
 
+  function updateSettingsField(field, value) {
+    setSettingsAdminState((previous) => ({
+      ...previous,
+      success: "",
+      settings: {
+        ...previous.settings,
+        [field]: value,
+      },
+    }));
+  }
+
   async function handleInstallApp() {
     if (!installPromptEvent) {
       setOrderPlaced("Open PEM in Chrome on your Samsung phone and tap Add to Home screen if the install prompt does not appear.");
@@ -1203,6 +1272,42 @@ export default function App() {
     } catch (error) {
       setMenuCatalog(mergeMenuCatalog(menuItems, []));
       setMenuAdminState((previous) => ({
+        ...previous,
+        loading: false,
+        error: error.message,
+      }));
+    }
+  }
+
+  async function loadPublicSettings(tokenOverride = adminToken) {
+    try {
+      setSettingsAdminState((previous) => ({
+        ...previous,
+        loading: true,
+        error: "",
+      }));
+      const response = await fetch(apiUrl("/api/settings"), {
+        headers: tokenOverride
+          ? {
+              Authorization: `Bearer ${tokenOverride}`,
+            }
+          : undefined,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to load PEM business settings.");
+      }
+      const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
+      setBusinessSettings(nextSettings);
+      setSettingsAdminState({
+        loading: false,
+        saving: false,
+        error: "",
+        success: "",
+        settings: nextSettings,
+      });
+    } catch (error) {
+      setSettingsAdminState((previous) => ({
         ...previous,
         loading: false,
         error: error.message,
@@ -1457,6 +1562,51 @@ export default function App() {
     }
   }
 
+  async function handleSettingsSave(event) {
+    event.preventDefault();
+
+    try {
+      setSettingsAdminState((previous) => ({
+        ...previous,
+        saving: true,
+        error: "",
+        success: "",
+      }));
+
+      const response = await fetch(apiUrl("/api/admin/settings"), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          settings: settingsAdminState.settings,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to save business settings.");
+      }
+
+      const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
+      setBusinessSettings(nextSettings);
+      setSettingsAdminState({
+        loading: false,
+        saving: false,
+        error: "",
+        success: "Business settings updated successfully.",
+        settings: nextSettings,
+      });
+    } catch (error) {
+      setSettingsAdminState((previous) => ({
+        ...previous,
+        saving: false,
+        error: error.message,
+        success: "",
+      }));
+    }
+  }
+
   function addDeliveryZoneRow() {
     setDeliveryZoneAdminState((previous) => ({
       ...previous,
@@ -1629,6 +1779,8 @@ export default function App() {
             <p><strong>Phone:</strong> ${order.customer.phone}</p>
             <p><strong>Address:</strong> ${order.customer.address}</p>
             <p><strong>Payment:</strong> ${order.customer.paymentMethod}</p>
+            <p><strong>Payment Status:</strong> ${order.payment?.status || "unpaid"}</p>
+            <p><strong>Payment Reference:</strong> ${order.payment?.reference || "-"}</p>
             <p><strong>Created:</strong> ${formatDateTime(order.createdAt)}</p>
             <p><strong>Status:</strong> ${order.status}</p>
           </div>
@@ -1648,12 +1800,74 @@ export default function App() {
             <p><strong>Delivery:</strong> ${formatPrice(order.pricing.delivery)}</p>
             <p><strong>Grand Total:</strong> ${formatPrice(order.pricing.total)}</p>
           </div>
+          <p style="margin-top:20px;font-size:12px;color:#666;">${businessSettings.receiptFooter}</p>
         </body>
       </html>
     `);
     slipWindow.document.close();
     slipWindow.focus();
     slipWindow.print();
+  }
+
+  function downloadOrderReceipt(order) {
+    const receiptMarkup = `
+      <html>
+        <head>
+          <title>${order.reference} Receipt</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #1f1f1f; }
+            h1, h2, p { margin: 0 0 10px; }
+            .block { margin-bottom: 18px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+            th { background: #f6f6f6; }
+          </style>
+        </head>
+        <body>
+          <h1>${businessSettings.appName} Receipt</h1>
+          <p>${businessSettings.businessName}</p>
+          <p>${order.reference}</p>
+          <div class="block">
+            <h2>Customer</h2>
+            <p>${order.customer.customerName}</p>
+            <p>${order.customer.phone}</p>
+            <p>${order.customer.address}</p>
+          </div>
+          <div class="block">
+            <h2>Payment</h2>
+            <p>Method: ${order.customer.paymentMethod}</p>
+            <p>Status: ${order.payment?.status || "unpaid"}</p>
+            <p>Reference: ${order.payment?.reference || "-"}</p>
+            <p>Paid At: ${formatDateTime(order.payment?.paidAt)}</p>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Meal</th><th>Qty</th><th>Unit</th><th>Total</th></tr>
+            </thead>
+            <tbody>
+              ${order.items
+                .map(
+                  (item) => `<tr><td>${item.name}</td><td>${item.quantity}</td><td>${formatPrice(item.price)}</td><td>${formatPrice(item.price * item.quantity)}</td></tr>`,
+                )
+                .join("")}
+            </tbody>
+          </table>
+          <div class="block" style="margin-top:18px;">
+            <p>Subtotal: ${formatPrice(order.pricing.subtotal)}</p>
+            <p>Delivery: ${formatPrice(order.pricing.delivery)}</p>
+            <p><strong>Total: ${formatPrice(order.pricing.total)}</strong></p>
+          </div>
+          <p>${businessSettings.receiptFooter}</p>
+        </body>
+      </html>
+    `;
+    const blob = new Blob([receiptMarkup], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${order.reference}-receipt.html`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function downloadCsv(filename, rows) {
@@ -1672,7 +1886,7 @@ export default function App() {
     downloadCsv(
       "pem-orders.csv",
       [
-        ["Reference", "Customer", "Phone", "Address", "Items", "Status", "Total", "Created At"],
+        ["Reference", "Customer", "Phone", "Address", "Items", "Status", "Payment Method", "Payment Status", "Payment Reference", "Total", "Created At"],
         ...filteredAdminOrders.map((order) => [
           order.reference,
           order.customer.customerName,
@@ -1680,6 +1894,9 @@ export default function App() {
           order.customer.address,
           order.items.map((item) => `${item.name} x${item.quantity}`).join(" | "),
           order.status,
+          order.customer.paymentMethod,
+          order.payment?.status || "unpaid",
+          order.payment?.reference || "",
           order.pricing.total,
           order.createdAt,
         ]),
@@ -1736,6 +1953,14 @@ export default function App() {
       return;
     }
 
+    if (total < Number(businessSettings.minimumOrder || 0)) {
+      setCheckoutState({
+        loading: false,
+        error: `The current minimum order is ${formatPrice(Number(businessSettings.minimumOrder || 0))}.`,
+      });
+      return;
+    }
+
     if (!checkoutForm.customerName || !checkoutForm.phone || !checkoutForm.address) {
       setCheckoutState({
         loading: false,
@@ -1760,6 +1985,7 @@ export default function App() {
           ...checkoutForm,
           deliveryZone: selectedDeliveryZone.label,
           deliveryEta: selectedDeliveryZone.eta,
+          paymentReference: checkoutForm.paymentReference,
         },
         items: cartItems,
         pricing: {
@@ -1834,7 +2060,7 @@ export default function App() {
     });
 
     const message = [
-      "Hello PEM, I want to place an order.",
+      `Hello ${businessSettings.appName}, I want to place an order.`,
       "",
       `Name: ${checkoutForm.customerName}`,
       `Phone: ${checkoutForm.phone}`,
@@ -1842,6 +2068,7 @@ export default function App() {
       `Area: ${selectedDeliveryZone.label}`,
       `Estimated delivery time: ${selectedDeliveryZone.eta}`,
       `Payment: ${checkoutForm.paymentMethod}`,
+      `Payment reference: ${checkoutForm.paymentReference || "Will confirm later"}`,
       "",
       "Order items:",
       ...itemLines,
@@ -1851,7 +2078,7 @@ export default function App() {
       `Total: ${formatPrice(total)}`,
     ].join("\n");
 
-    window.open(`https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${businessSettings.whatsappPhone || whatsappPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleContactSubmit(event) {
@@ -2020,8 +2247,8 @@ export default function App() {
             <img src={logo} alt="Precious Events Makers logo" />
           </span>
           <span className="brand__text">
-            <strong>PEM</strong>
-            <small>Precious Events Makers</small>
+            <strong>{businessSettings.appName}</strong>
+            <small>{businessSettings.businessName}</small>
           </span>
         </button>
 
@@ -2067,14 +2294,17 @@ export default function App() {
       ) : null}
 
       <main>
+        {businessSettings.promoBanner ? (
+          <section className="promo-banner">
+            <p>{businessSettings.promoBanner}</p>
+          </section>
+        ) : null}
+
         <section className="hero">
           <div className="hero__content reveal reveal--up">
             <p className="eyebrow">Local dishes. Premium experience.</p>
-            <h1>Restaurant ordering and catering, designed with a calmer PEM feel.</h1>
-            <p className="hero__copy">
-              Explore local favorites, choose your quantity, add special notes, and place orders
-              through a cleaner, more elegant PEM experience.
-            </p>
+            <h1>{businessSettings.heroHeadline}</h1>
+            <p className="hero__copy">{businessSettings.heroCopy}</p>
             <p className="hero__status">
               <span className={businessStatus.isOpen ? "status-pill status-pill--delivered" : "status-pill status-pill--new"}>
                 {businessStatus.isOpen ? "Open now" : "Closed now"}
@@ -2209,12 +2439,29 @@ export default function App() {
                       <span>Payment</span>
                       <strong>{trackingState.order.customer.paymentMethod}</strong>
                     </div>
+                    <div>
+                      <span>Payment Status</span>
+                      <strong>{trackingState.order.payment?.status || "unpaid"}</strong>
+                    </div>
                   </div>
+                  <p>
+                    Payment reference: <strong>{trackingState.order.payment?.reference || "Not added yet"}</strong>
+                  </p>
+                  {trackingState.order.payment?.paidAt ? (
+                    <p>Paid at {formatDateTime(trackingState.order.payment.paidAt)}.</p>
+                  ) : null}
                   {trackingState.order.status === "awaiting_payment" ? (
                     <p className="tracking-card__hint">
                       PEM is waiting for payment confirmation before the kitchen starts preparing this order.
                     </p>
                   ) : null}
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => downloadOrderReceipt(trackingState.order)}
+                  >
+                    Download Receipt
+                  </button>
                   <button
                     type="button"
                     className="button button--ghost"
@@ -2665,26 +2912,34 @@ export default function App() {
             <h2>Make ordering easy for customers and inquiries easy for event clients.</h2>
           </div>
 
-          <div className="contact-grid">
+            <div className="contact-grid">
             <div className="contact-card">
               <h3>Business Name</h3>
-              <p>Precious Events Makers</p>
+              <p>{businessSettings.businessName}</p>
             </div>
             <div className="contact-card">
               <h3>App Name</h3>
-              <p>PEM</p>
+              <p>{businessSettings.appName}</p>
             </div>
             <div className="contact-card">
               <h3>Phone / WhatsApp</h3>
-              <p>0803 334 5161</p>
+              <p>{businessSettings.phone}</p>
             </div>
             <div className="contact-card">
               <h3>Service Promise</h3>
-              <p>Professional meals, local flavors, and catering support for all event sizes.</p>
+              <p>{businessSettings.contactPromise}</p>
             </div>
             <div className="contact-card">
               <h3>Business Hours</h3>
-              <p>{businessStatus.label}</p>
+              <p>{businessSettings.businessHoursText || businessStatus.label}</p>
+            </div>
+            <div className="contact-card">
+              <h3>Support Email</h3>
+              <p>{businessSettings.supportEmail}</p>
+            </div>
+            <div className="contact-card">
+              <h3>Business Address</h3>
+              <p>{businessSettings.address}</p>
             </div>
           </div>
 
@@ -2873,6 +3128,205 @@ export default function App() {
               ) : null}
 
               <div className="admin-grid">
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Analytics</h3>
+                    <span>{todayOrders}</span>
+                  </div>
+                  <div className="hero__stats admin-stats">
+                    <div>
+                      <strong>{formatPrice(totalRevenue)}</strong>
+                      <span>Total revenue</span>
+                    </div>
+                    <div>
+                      <strong>{formatPrice(paidRevenue)}</strong>
+                      <span>Paid revenue</span>
+                    </div>
+                    <div>
+                      <strong>{todayOrders}</strong>
+                      <span>Orders today</span>
+                    </div>
+                  </div>
+                  <div className="admin-list">
+                    {topMeals.length === 0 ? (
+                      <p className="admin-empty">Top meals will appear after orders come in.</p>
+                    ) : (
+                      topMeals.map((meal) => (
+                        <div key={meal.id} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{meal.name}</strong>
+                            <span>{meal.quantity} ordered</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Business Settings</h3>
+                    <span>{settingsAdminState.settings.appName}</span>
+                  </div>
+                  <form className="admin-zone-form" onSubmit={handleSettingsSave}>
+                    <div className="service-form__grid">
+                      <label className="field">
+                        <span>Business name</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.businessName}
+                          onChange={(event) => updateSettingsField("businessName", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>App name</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.appName}
+                          onChange={(event) => updateSettingsField("appName", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Phone</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.phone}
+                          onChange={(event) => updateSettingsField("phone", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>WhatsApp number</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.whatsappPhone}
+                          onChange={(event) => updateSettingsField("whatsappPhone", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Support email</span>
+                        <input
+                          type="email"
+                          value={settingsAdminState.settings.supportEmail}
+                          onChange={(event) => updateSettingsField("supportEmail", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Minimum order (NGN)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={settingsAdminState.settings.minimumOrder}
+                          onChange={(event) => updateSettingsField("minimumOrder", Number(event.target.value) || 0)}
+                        />
+                      </label>
+                    </div>
+
+                    <label className="field">
+                      <span>Business address</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.address}
+                        onChange={(event) => updateSettingsField("address", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Business hours note</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.businessHoursText}
+                        onChange={(event) => updateSettingsField("businessHoursText", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Promo banner</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.promoBanner}
+                        onChange={(event) => updateSettingsField("promoBanner", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Contact promise</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.contactPromise}
+                        onChange={(event) => updateSettingsField("contactPromise", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Hero headline</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.heroHeadline}
+                        onChange={(event) => updateSettingsField("heroHeadline", event.target.value)}
+                      />
+                    </label>
+                    <label className="note-field">
+                      <span>Hero copy</span>
+                      <textarea
+                        rows="3"
+                        value={settingsAdminState.settings.heroCopy}
+                        onChange={(event) => updateSettingsField("heroCopy", event.target.value)}
+                      />
+                    </label>
+                    <div className="service-form__grid">
+                      <label className="field">
+                        <span>Bank name</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.bankName}
+                          onChange={(event) => updateSettingsField("bankName", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Bank account name</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.bankAccountName}
+                          onChange={(event) => updateSettingsField("bankAccountName", event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Bank account number</span>
+                        <input
+                          type="text"
+                          value={settingsAdminState.settings.bankAccountNumber}
+                          onChange={(event) => updateSettingsField("bankAccountNumber", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <label className="field">
+                      <span>Bank instructions</span>
+                      <input
+                        type="text"
+                        value={settingsAdminState.settings.bankInstructions}
+                        onChange={(event) => updateSettingsField("bankInstructions", event.target.value)}
+                      />
+                    </label>
+                    <label className="note-field">
+                      <span>Receipt footer</span>
+                      <textarea
+                        rows="2"
+                        value={settingsAdminState.settings.receiptFooter}
+                        onChange={(event) => updateSettingsField("receiptFooter", event.target.value)}
+                      />
+                    </label>
+                    {settingsAdminState.error ? (
+                      <p className="form-message form-message--error">{settingsAdminState.error}</p>
+                    ) : null}
+                    {settingsAdminState.success ? (
+                      <p className="form-message form-message--success">{settingsAdminState.success}</p>
+                    ) : null}
+                    <button
+                      type="submit"
+                      className="button button--primary"
+                      disabled={settingsAdminState.saving || settingsAdminState.loading}
+                    >
+                      {settingsAdminState.saving ? "Saving settings..." : "Save Business Settings"}
+                    </button>
+                  </form>
+                </article>
+
                 <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
                     <h3>Delivery Zones</h3>
@@ -3086,6 +3540,11 @@ export default function App() {
                             <span>{order.customer.phone}</span>
                             <strong>{formatPrice(order.pricing.total)}</strong>
                           </div>
+                          <p>
+                            Payment: {order.customer.paymentMethod} | {order.payment?.status || "unpaid"} | Ref:{" "}
+                            {order.payment?.reference || "Not added"}
+                          </p>
+                          {order.payment?.paidAt ? <p>Paid at {formatDateTime(order.payment.paidAt)}</p> : null}
                           <div className="admin-status-row">
                             <span className={`status-pill status-pill--${order.status}`}>{order.status}</span>
                             <div className="admin-status-actions">
@@ -3110,6 +3569,13 @@ export default function App() {
                                 onClick={() => printOrderSlip(order)}
                               >
                                 Print Slip
+                              </button>
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => downloadOrderReceipt(order)}
+                              >
+                                Receipt
                               </button>
                             </div>
                           </div>
@@ -3332,6 +3798,7 @@ export default function App() {
 
                 <div className="checkout-fields">
                   <p className="checkout-fields__title">Delivery details</p>
+                  <p className="cart-help">Minimum order: {formatPrice(Number(businessSettings.minimumOrder || 0))}</p>
                   <label className="field">
                     <span>Customer name</span>
                     <input
@@ -3438,10 +3905,34 @@ export default function App() {
                     </select>
                   </label>
 
+                  <label className="field">
+                    <span>Payment reference</span>
+                    <input
+                      type="text"
+                      value={checkoutForm.paymentReference}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          paymentReference: event.target.value,
+                        }))
+                      }
+                      placeholder="Transaction ID or teller reference"
+                    />
+                  </label>
+
                   {checkoutForm.paymentMethod === "Paystack" ? (
                     <p className="cart-help">
                       PEM will take you to Paystack to complete your payment securely before returning to the app.
                     </p>
+                  ) : null}
+                  {checkoutForm.paymentMethod === "Bank transfer" ? (
+                    <div className="delivery-zone-card">
+                      <p className="delivery-zone-card__title">Bank transfer details</p>
+                      <strong>{businessSettings.bankName}</strong>
+                      <span>{businessSettings.bankAccountName}</span>
+                      <span>{businessSettings.bankAccountNumber}</span>
+                      <small>{businessSettings.bankInstructions}</small>
+                    </div>
                   ) : null}
                 </div>
               </>
