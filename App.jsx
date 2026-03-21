@@ -696,6 +696,8 @@ function QuantityControl({ value, onDecrease, onIncrease, disabled = false }) {
 export default function App() {
   const businessStatus = getBusinessStatus();
   const [theme, setTheme] = useState("light");
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
   const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -750,6 +752,34 @@ export default function App() {
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
     }
+  }, []);
+
+  useEffect(() => {
+    const standaloneMode =
+      window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    setIsInstalled(Boolean(standaloneMode));
+
+    function handleBeforeInstallPrompt(event) {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    }
+
+    function handleInstalled() {
+      setIsInstalled(true);
+      setInstallPromptEvent(null);
+      setOrderPlaced("PEM has been installed on this device.");
+      window.setTimeout(() => {
+        setOrderPlaced("");
+      }, 4000);
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
   }, []);
 
   useEffect(() => {
@@ -1096,6 +1126,20 @@ export default function App() {
       soldOut: nextValue === "sold-out",
       hidden: nextValue === "hidden",
     });
+  }
+
+  async function handleInstallApp() {
+    if (!installPromptEvent) {
+      setOrderPlaced("Open PEM in Chrome on your Samsung phone and tap Add to Home screen if the install prompt does not appear.");
+      window.setTimeout(() => {
+        setOrderPlaced("");
+      }, 4500);
+      return;
+    }
+
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice.catch(() => null);
+    setInstallPromptEvent(null);
   }
 
   async function loadPublicDeliveryZones() {
@@ -2020,6 +2064,11 @@ export default function App() {
               <a href="#catering" className="button button--ghost">
                 Explore Catering
               </a>
+              {!isInstalled ? (
+                <button type="button" className="button button--ghost" onClick={handleInstallApp}>
+                  {installPromptEvent ? "Install PEM App" : "How To Install"}
+                </button>
+              ) : null}
             </div>
 
             <div className="hero__stats">

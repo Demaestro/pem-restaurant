@@ -1,0 +1,25 @@
+{
+  "name": "PEM",
+  "short_name": "PEM",
+  "description": "PEM by Precious Events Makers. Order local dishes, request catering, and track your meals.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6efe8",
+  "theme_color": "#8f1d17",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/pem-icon.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/pem-icon.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "maskable"
+    }
+  ]
+}
