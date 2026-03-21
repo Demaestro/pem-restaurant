@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import logo from "./logo.jpg.jpeg";
 import jollofImage from "./Jollof Rice & Grilled Chicken.jpg";
 import friedRiceImage from "./Fried Rice & Beef Stew.jpg";
@@ -2875,6 +2876,7 @@ export default function App() {
           </div>
         </div>
       </aside>
+      <SpeedInsights />
     </div>
   );
 }
