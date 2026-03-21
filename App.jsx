@@ -353,10 +353,18 @@ const cateringPackages = [
 ];
 
 const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
+const menuSections = [
+  { id: "all", label: "Everything", categories },
+  { id: "mains", label: "Main Meals", categories: ["All", "Rice", "Pasta", "Grills", "Local Special"] },
+  { id: "soups", label: "Soups", categories: ["All", "Soup"] },
+  { id: "sides", label: "Sides", categories: ["All", "Sides"] },
+  { id: "drinks", label: "Drinks & Desserts", categories: ["All", "Drinks", "Drinks & Desserts"] },
+];
 const drinkCount = menuItems.filter((item) => item.category.includes("Drink")).length;
 const localDishCount = menuItems.filter(
   (item) => item.category === "Soup" || item.category === "Local Special",
 ).length;
+const whatsappPhone = "2348033345161";
 const dietaryPrompts = [
   "I want something less spicy.",
   "Show me high-protein meals.",
@@ -370,11 +378,65 @@ const currency = new Intl.NumberFormat("en-NG", {
   maximumFractionDigits: 0,
 });
 
+const defaultDeliveryZones = [
+  { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
+  { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
+  { id: "maitama", label: "Maitama / Asokoro / Guzape", fee: 2200, eta: "50 to 70 mins" },
+  { id: "lugbe", label: "Lugbe / Airport Road", fee: 2500, eta: "60 to 85 mins" },
+  { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
+];
+
+const comboBundles = [
+  {
+    id: "party-rice",
+    title: "Party Rice Combo",
+    itemIds: [1, 13, 22],
+    description: "Jollof rice, moi moi, and water for a quick balanced order.",
+  },
+  {
+    id: "native-soup",
+    title: "Native Soup Combo",
+    itemIds: [14, 16, 20],
+    description: "Oha soup with plantain and a chilled drink for a fuller local plate.",
+  },
+  {
+    id: "office-lunch",
+    title: "Office Lunch Combo",
+    itemIds: [18, 12, 21],
+    description: "White rice and sauce with coleslaw and smoothie for a lighter lunch set.",
+  },
+];
+
+const businessHours = [
+  { day: "Sunday", open: 10, close: 20 },
+  { day: "Monday", open: 8, close: 21 },
+  { day: "Tuesday", open: 8, close: 21 },
+  { day: "Wednesday", open: 8, close: 21 },
+  { day: "Thursday", open: 8, close: 21 },
+  { day: "Friday", open: 8, close: 22 },
+  { day: "Saturday", open: 9, close: 22 },
+];
+
 const initialCheckout = {
   customerName: "",
   phone: "",
   address: "",
+  deliveryZone: "gwarinpa",
   paymentMethod: "Pay on delivery",
+};
+
+const initialTrackingState = {
+  loading: false,
+  error: "",
+  order: null,
+};
+
+const initialDeliveryZoneAdminState = {
+  loading: false,
+  saving: false,
+  error: "",
+  success: "",
+  zones: defaultDeliveryZones,
 };
 
 const initialContact = {
@@ -436,6 +498,37 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function getDeliveryZone(zoneId) {
+  return defaultDeliveryZones.find((zone) => zone.id === zoneId) || defaultDeliveryZones[0];
+}
+
+function formatHour(hour) {
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const normalized = hour % 12 === 0 ? 12 : hour % 12;
+  return `${normalized}:00 ${suffix}`;
+}
+
+function getBusinessStatus() {
+  const formatter = new Intl.DateTimeFormat("en-NG", {
+    timeZone: "Africa/Lagos",
+    weekday: "long",
+    hour: "numeric",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const hourValue = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const schedule = businessHours.find((entry) => entry.day === weekday) || businessHours[0];
+  const isOpen = hourValue >= schedule.open && hourValue < schedule.close;
+
+  return {
+    isOpen,
+    label: isOpen
+      ? `Open now until ${formatHour(schedule.close)}`
+      : `Opens ${formatHour(schedule.open)} today`,
+  };
+}
+
 async function postJson(url, payload) {
   const response = await fetch(apiUrl(url), {
     method: "POST",
@@ -489,12 +582,17 @@ function QuantityControl({ value, onDecrease, onIncrease }) {
 }
 
 export default function App() {
+  const businessStatus = getBusinessStatus();
   const [theme, setTheme] = useState("light");
+  const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState("reviews");
   const [minimumRating, setMinimumRating] = useState(0);
   const [cart, setCart] = useState({});
   const [notes, setNotes] = useState({});
+  const [favorites, setFavorites] = useState([]);
+  const [savedReferences, setSavedReferences] = useState([]);
   const [search, setSearch] = useState("");
   const [showCart, setShowCart] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
@@ -504,6 +602,10 @@ export default function App() {
   const [contactState, setContactState] = useState({ loading: false, success: "", error: "" });
   const [cateringForm, setCateringForm] = useState(initialCatering);
   const [cateringState, setCateringState] = useState({ loading: false, success: "", error: "" });
+  const [trackingReference, setTrackingReference] = useState("");
+  const [trackingState, setTrackingState] = useState(initialTrackingState);
+  const [deliveryZoneAdminState, setDeliveryZoneAdminState] = useState(initialDeliveryZoneAdminState);
+  const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [dietaryNeeds, setDietaryNeeds] = useState("");
   const [dietaryState, setDietaryState] = useState(initialDietaryState);
   const [showDietaryMatchesOnly, setShowDietaryMatchesOnly] = useState(false);
@@ -530,9 +632,33 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      const storedFavorites = JSON.parse(window.localStorage.getItem("pem-favorites") || "[]");
+      const storedReferences = JSON.parse(window.localStorage.getItem("pem-order-history") || "[]");
+      if (Array.isArray(storedFavorites)) {
+        setFavorites(storedFavorites);
+      }
+      if (Array.isArray(storedReferences)) {
+        setSavedReferences(storedReferences);
+      }
+    } catch {
+      setFavorites([]);
+      setSavedReferences([]);
+    }
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("pem-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem("pem-favorites", JSON.stringify(favorites));
+  }, [favorites]);
+
+  useEffect(() => {
+    window.localStorage.setItem("pem-order-history", JSON.stringify(savedReferences));
+  }, [savedReferences]);
 
   useEffect(() => {
     const savedAdminToken = window.localStorage.getItem("pem-admin-token");
@@ -545,19 +671,38 @@ export default function App() {
     if (adminToken) {
       window.localStorage.setItem("pem-admin-token", adminToken);
       loadAdminData(adminToken);
+      loadDeliveryZones(adminToken);
     } else {
       window.localStorage.removeItem("pem-admin-token");
       setAdminState(initialAdminState);
     }
   }, [adminToken]);
 
+  useEffect(() => {
+    loadPublicDeliveryZones();
+  }, []);
+
+  const visibleCategories = useMemo(() => {
+    const section = menuSections.find((item) => item.id === activeMenuSection);
+    return section ? section.categories : categories;
+  }, [activeMenuSection]);
+
+  useEffect(() => {
+    if (!visibleCategories.includes(activeCategory)) {
+      setActiveCategory("All");
+    }
+  }, [activeCategory, visibleCategories]);
+
   const filteredItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const recommendedIdSet = new Set(recommendedItemIds);
 
     let items = menuItems.filter((item) => {
+      const section = menuSections.find((menuSection) => menuSection.id === activeMenuSection);
+      const matchesSection = !section || section.id === "all" || section.categories.includes(item.category);
       const matchesCategory = activeCategory === "All" || item.category === activeCategory;
       const matchesRating = item.rating >= minimumRating;
+      const matchesFavorites = !showFavoritesOnly || favorites.includes(item.id);
       const matchesDietarySelection =
         !showDietaryMatchesOnly || recommendedIdSet.size === 0 || recommendedIdSet.has(item.id);
       const matchesSearch =
@@ -567,7 +712,14 @@ export default function App() {
         item.badge.toLowerCase().includes(normalizedSearch) ||
         item.dietaryTags.some((tag) => tag.toLowerCase().includes(normalizedSearch));
 
-      return matchesCategory && matchesRating && matchesSearch && matchesDietarySelection;
+      return (
+        matchesSection &&
+        matchesCategory &&
+        matchesRating &&
+        matchesFavorites &&
+        matchesSearch &&
+        matchesDietarySelection
+      );
     });
 
     if (sortBy === "price-low") {
@@ -579,7 +731,7 @@ export default function App() {
     }
 
     return items;
-  }, [activeCategory, minimumRating, recommendedItemIds, search, showDietaryMatchesOnly, sortBy]);
+  }, [activeCategory, activeMenuSection, favorites, minimumRating, recommendedItemIds, search, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
 
   const cartItems = Object.entries(cart)
     .filter(([, quantity]) => quantity > 0)
@@ -593,7 +745,9 @@ export default function App() {
     });
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const delivery = subtotal > 0 ? 1200 : 0;
+  const selectedDeliveryZone =
+    deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || deliveryZones[0] || getDeliveryZone();
+  const delivery = subtotal > 0 ? selectedDeliveryZone.fee : 0;
   const total = subtotal + delivery;
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
@@ -654,6 +808,101 @@ export default function App() {
       ...previous,
       [itemId]: value,
     }));
+  }
+
+  function toggleFavorite(itemId) {
+    setFavorites((previous) =>
+      previous.includes(itemId)
+        ? previous.filter((id) => id !== itemId)
+        : [...previous, itemId],
+    );
+  }
+
+  function addComboToCart(combo) {
+    setCart((previous) => {
+      const nextCart = { ...previous };
+      combo.itemIds.forEach((itemId) => {
+        nextCart[itemId] = (nextCart[itemId] || 0) + 1;
+      });
+      return nextCart;
+    });
+    setShowCart(true);
+  }
+
+  function applyOrderToCart(order) {
+    const nextCart = {};
+    const nextNotes = {};
+
+    order.items.forEach((item) => {
+      nextCart[item.id] = (nextCart[item.id] || 0) + item.quantity;
+      if (item.note) {
+        nextNotes[item.id] = item.note;
+      }
+    });
+
+    setCart(nextCart);
+    setNotes(nextNotes);
+    setShowCart(true);
+  }
+
+  async function loadPublicDeliveryZones() {
+    try {
+      const response = await fetch(apiUrl("/api/delivery-zones"));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to load delivery zones.");
+      }
+      if (Array.isArray(data.deliveryZones) && data.deliveryZones.length > 0) {
+        setDeliveryZones(data.deliveryZones);
+        setDeliveryZoneAdminState((previous) => ({
+          ...previous,
+          zones: data.deliveryZones,
+        }));
+      }
+    } catch {
+      setDeliveryZones(defaultDeliveryZones);
+    }
+  }
+
+  async function loadDeliveryZones(tokenOverride = adminToken) {
+    if (!tokenOverride) {
+      return;
+    }
+
+    try {
+      setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        loading: true,
+        error: "",
+        success: "",
+      }));
+      const response = await fetch(apiUrl("/api/delivery-zones"), {
+        headers: {
+          Authorization: `Bearer ${tokenOverride}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to load delivery zones.");
+      }
+      const zones = Array.isArray(data.deliveryZones) && data.deliveryZones.length > 0
+        ? data.deliveryZones
+        : defaultDeliveryZones;
+      setDeliveryZones(zones);
+      setDeliveryZoneAdminState({
+        loading: false,
+        saving: false,
+        error: "",
+        success: "",
+        zones,
+      });
+    } catch (error) {
+      setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        loading: false,
+        error: error.message,
+      }));
+    }
   }
 
   async function loadAdminData(tokenOverride = adminToken) {
@@ -771,6 +1020,51 @@ export default function App() {
         error: error.message,
         success: "",
       });
+    }
+  }
+
+  async function handleDeliveryZonesSave(event) {
+    event.preventDefault();
+
+    try {
+      setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        saving: true,
+        error: "",
+        success: "",
+      }));
+
+      const response = await fetch(apiUrl("/api/admin/delivery-zones"), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          deliveryZones: deliveryZoneAdminState.zones,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to update delivery zones.");
+      }
+
+      setDeliveryZones(data.deliveryZones);
+      setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        saving: false,
+        error: "",
+        success: "Delivery zones updated successfully.",
+        zones: data.deliveryZones,
+      }));
+    } catch (error) {
+      setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        saving: false,
+        error: error.message,
+        success: "",
+      }));
     }
   }
 
@@ -1032,7 +1326,11 @@ export default function App() {
       setCheckoutState({ loading: true, error: "" });
 
       const result = await postJson("/api/orders", {
-        customer: checkoutForm,
+        customer: {
+          ...checkoutForm,
+          deliveryZone: selectedDeliveryZone.label,
+          deliveryEta: selectedDeliveryZone.eta,
+        },
         items: cartItems,
         pricing: {
           subtotal,
@@ -1042,6 +1340,16 @@ export default function App() {
       });
 
       setOrderPlaced(`Order ${result.order.reference} submitted successfully.`);
+      setTrackingReference(result.order.reference);
+      setTrackingState({
+        loading: false,
+        error: "",
+        order: result.order,
+      });
+      setSavedReferences((previous) => [
+        result.order.reference,
+        ...previous.filter((reference) => reference !== result.order.reference),
+      ].slice(0, 5));
       setShowCart(false);
       setCart({});
       setNotes({});
@@ -1058,6 +1366,46 @@ export default function App() {
         error: error.message,
       });
     }
+  }
+
+  function handleWhatsAppOrder() {
+    if (cartItems.length === 0) {
+      setCheckoutState({ loading: false, error: "Add at least one meal before sending to WhatsApp." });
+      return;
+    }
+
+    if (!checkoutForm.customerName || !checkoutForm.phone) {
+      setCheckoutState({
+        loading: false,
+        error: "Add your name and phone number before sending your cart to WhatsApp.",
+      });
+      return;
+    }
+
+    const itemLines = cartItems.map((item) => {
+      const noteText = item.note ? ` | Note: ${item.note}` : "";
+      return `- ${item.name} x${item.quantity}${noteText}`;
+    });
+
+    const message = [
+      "Hello PEM, I want to place an order.",
+      "",
+      `Name: ${checkoutForm.customerName}`,
+      `Phone: ${checkoutForm.phone}`,
+      `Address: ${checkoutForm.address || "Will confirm on WhatsApp"}`,
+      `Area: ${selectedDeliveryZone.label}`,
+      `Estimated delivery time: ${selectedDeliveryZone.eta}`,
+      `Payment: ${checkoutForm.paymentMethod}`,
+      "",
+      "Order items:",
+      ...itemLines,
+      "",
+      `Subtotal: ${formatPrice(subtotal)}`,
+      `Delivery: ${formatPrice(delivery)}`,
+      `Total: ${formatPrice(total)}`,
+    ].join("\n");
+
+    window.open(`https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleContactSubmit(event) {
@@ -1162,6 +1510,51 @@ export default function App() {
     setShowDietaryMatchesOnly(false);
   }
 
+  async function handleTrackOrder(event) {
+    event.preventDefault();
+    const normalizedReference = trackingReference.trim().toUpperCase();
+
+    if (!normalizedReference) {
+      setTrackingState({
+        ...initialTrackingState,
+        error: "Enter your order reference first.",
+      });
+      return;
+    }
+
+    try {
+      setTrackingState({
+        loading: true,
+        error: "",
+        order: null,
+      });
+
+      const response = await fetch(apiUrl(`/api/orders/${encodeURIComponent(normalizedReference)}`));
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to find that order right now.");
+      }
+
+      setTrackingState({
+        loading: false,
+        error: "",
+        order: data.order,
+      });
+      setTrackingReference(normalizedReference);
+      setSavedReferences((previous) => [
+        normalizedReference,
+        ...previous.filter((reference) => reference !== normalizedReference),
+      ].slice(0, 5));
+    } catch (error) {
+      setTrackingState({
+        loading: false,
+        error: error.message,
+        order: null,
+      });
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1181,6 +1574,7 @@ export default function App() {
 
         <nav className="topbar__nav">
           <a href="#menu">Menu</a>
+          <a href="#track">Track Order</a>
           <a href="#catering">Catering</a>
           <a href="#contact">Contact</a>
           {adminToken ? <a href="#admin">Admin</a> : null}
@@ -1223,10 +1617,19 @@ export default function App() {
               Explore local favorites, choose your quantity, add special notes, and place orders
               through a cleaner, more elegant PEM experience.
             </p>
+            <p className="hero__status">
+              <span className={businessStatus.isOpen ? "status-pill status-pill--delivered" : "status-pill status-pill--new"}>
+                {businessStatus.isOpen ? "Open now" : "Closed now"}
+              </span>
+              <strong>{businessStatus.label}</strong>
+            </p>
 
             <div className="hero__actions">
               <a href="#menu" className="button button--primary">
                 Start Ordering
+              </a>
+              <a href="#track" className="button button--ghost">
+                Track Order
               </a>
               <a href="#catering" className="button button--ghost">
                 Explore Catering
@@ -1266,6 +1669,122 @@ export default function App() {
                 </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="tracking-section" id="track">
+          <div className="section-heading reveal reveal--up">
+            <p className="eyebrow">Order Tracking</p>
+            <h2>Check the status of your PEM order with your reference.</h2>
+          </div>
+
+          <div className="tracking-grid">
+            <form className="service-form reveal reveal--up" onSubmit={handleTrackOrder}>
+              <label className="field">
+                <span>Order reference</span>
+                <input
+                  type="text"
+                  value={trackingReference}
+                  onChange={(event) => setTrackingReference(event.target.value)}
+                  placeholder="PEM-ORD-1234567890-1234"
+                />
+              </label>
+
+              {trackingState.error ? (
+                <p className="form-message form-message--error">{trackingState.error}</p>
+              ) : null}
+
+              <button type="submit" className="button button--primary" disabled={trackingState.loading}>
+                {trackingState.loading ? "Checking..." : "Track Order"}
+              </button>
+
+              {savedReferences.length > 0 ? (
+                <div className="tracking-history">
+                  <span className="field-label">Recent references</span>
+                  <div className="tracking-history__list">
+                    {savedReferences.map((reference) => (
+                      <button
+                        key={reference}
+                        type="button"
+                        className="category-pill"
+                        onClick={() => setTrackingReference(reference)}
+                      >
+                        {reference}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </form>
+
+            <div className="tracking-card reveal reveal--up reveal--delay-1">
+              {trackingState.order ? (
+                <>
+                  <div className="tracking-card__top">
+                    <div>
+                      <p className="eyebrow">Latest status</p>
+                      <h3>{trackingState.order.reference}</h3>
+                    </div>
+                    <span className={`status-pill status-pill--${trackingState.order.status}`}>
+                      {trackingState.order.status}
+                    </span>
+                  </div>
+                  <p>
+                    Ordered by <strong>{trackingState.order.customer.customerName}</strong> on{" "}
+                    {formatDateTime(trackingState.order.updatedAt || trackingState.order.createdAt)}.
+                  </p>
+                  <div className="tracking-card__meta">
+                    <div>
+                      <span>Total</span>
+                      <strong>{formatPrice(trackingState.order.pricing.total)}</strong>
+                    </div>
+                    <div>
+                      <span>Items</span>
+                      <strong>{trackingState.order.items.reduce((sum, item) => sum + item.quantity, 0)}</strong>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => applyOrderToCart(trackingState.order)}
+                  >
+                    Add These Items To Cart
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="eyebrow">How it works</p>
+                  <h3>Enter your order reference to see whether PEM has received, prepared, or delivered it.</h3>
+                  <p>
+                    After checkout, PEM gives you a reference code. Save that code and use it here anytime.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="combo-section">
+          <div className="section-heading section-heading--compact reveal reveal--up">
+            <p className="eyebrow">Quick Combos</p>
+            <h2>Start faster with PEM bundle suggestions.</h2>
+          </div>
+          <div className="combo-grid">
+            {comboBundles.map((combo) => (
+              <article key={combo.id} className="combo-card reveal reveal--up">
+                <p className="eyebrow">{combo.title}</p>
+                <h3>{combo.description}</h3>
+                <p>
+                  {combo.itemIds
+                    .map((itemId) => menuItems.find((item) => item.id === itemId)?.name)
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+                <button type="button" className="button button--ghost" onClick={() => addComboToCart(combo)}>
+                  Add Combo To Cart
+                </button>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -1389,6 +1908,21 @@ export default function App() {
             </form>
           </section>
 
+          <div className="menu-section__header reveal reveal--up reveal--delay-1">
+            <div className="menu-structure" aria-label="Menu sections">
+              {menuSections.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  className={section.id === activeMenuSection ? "category-pill is-active" : "category-pill"}
+                  onClick={() => setActiveMenuSection(section.id)}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="controls reveal reveal--up reveal--delay-1">
             <label className="search-field">
               <span>Search meals</span>
@@ -1421,19 +1955,37 @@ export default function App() {
                 <option value={4.8}>4.8 and above</option>
               </select>
             </label>
+
+            <label className="field field--toggle">
+              <span>Saved meals</span>
+              <button
+                type="button"
+                className={showFavoritesOnly ? "category-pill is-active" : "category-pill"}
+                onClick={() => setShowFavoritesOnly((previous) => !previous)}
+              >
+                {showFavoritesOnly ? "Showing favorites" : "Show favorites only"}
+              </button>
+            </label>
           </div>
 
           <div className="category-row reveal reveal--up reveal--delay-2" aria-label="Meal categories">
-            {categories.map((category) => (
+            {visibleCategories.map((category) => (
               <button
                 key={category}
                 type="button"
                 className={category === activeCategory ? "category-pill is-active" : "category-pill"}
                 onClick={() => setActiveCategory(category)}
-              >
-                {category}
-              </button>
-            ))}
+                >
+                  {category}
+                </button>
+              ))}
+          </div>
+
+          <div className="menu-summary reveal reveal--up reveal--delay-2">
+            <span>{filteredItems.length} items showing</span>
+            <span>
+              {menuSections.find((section) => section.id === activeMenuSection)?.label || "Everything"}
+            </span>
           </div>
 
           <div className="menu-grid">
@@ -1465,7 +2017,17 @@ export default function App() {
                         <p className="meal-card__category">{item.category}</p>
                         <h3>{item.name}</h3>
                       </div>
-                      <p className="meal-card__price">{formatPrice(item.price)}</p>
+                      <div className="meal-card__actions">
+                        <button
+                          type="button"
+                          className={favorites.includes(item.id) ? "favorite-button is-active" : "favorite-button"}
+                          onClick={() => toggleFavorite(item.id)}
+                          aria-label={favorites.includes(item.id) ? "Remove from favorites" : "Add to favorites"}
+                        >
+                          {favorites.includes(item.id) ? "Saved" : "Save"}
+                        </button>
+                        <p className="meal-card__price">{formatPrice(item.price)}</p>
+                      </div>
                     </div>
 
                     <p className="meal-card__description">{item.description}</p>
@@ -1643,6 +2205,10 @@ export default function App() {
             <div className="contact-card">
               <h3>Service Promise</h3>
               <p>Professional meals, local flavors, and catering support for all event sizes.</p>
+            </div>
+            <div className="contact-card">
+              <h3>Business Hours</h3>
+              <p>{businessStatus.label}</p>
             </div>
           </div>
 
@@ -1831,6 +2397,82 @@ export default function App() {
               ) : null}
 
               <div className="admin-grid">
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Delivery Zones</h3>
+                    <span>{deliveryZoneAdminState.zones.length}</span>
+                  </div>
+                  <form className="admin-zone-form" onSubmit={handleDeliveryZonesSave}>
+                    <div className="admin-list">
+                      {deliveryZoneAdminState.zones.map((zone, index) => (
+                        <div key={zone.id} className="admin-item">
+                          <div className="service-form__grid">
+                            <label className="field">
+                              <span>Area label</span>
+                              <input
+                                type="text"
+                                value={zone.label}
+                                onChange={(event) =>
+                                  setDeliveryZoneAdminState((previous) => ({
+                                    ...previous,
+                                    zones: previous.zones.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, label: event.target.value } : item,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Fee (NGN)</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={zone.fee}
+                                onChange={(event) =>
+                                  setDeliveryZoneAdminState((previous) => ({
+                                    ...previous,
+                                    zones: previous.zones.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, fee: Number(event.target.value) || 0 } : item,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </label>
+                          </div>
+                          <label className="field">
+                            <span>Estimated delivery time</span>
+                            <input
+                              type="text"
+                              value={zone.eta}
+                              onChange={(event) =>
+                                setDeliveryZoneAdminState((previous) => ({
+                                  ...previous,
+                                  zones: previous.zones.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, eta: event.target.value } : item,
+                                  ),
+                                }))
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    {deliveryZoneAdminState.error ? (
+                      <p className="form-message form-message--error">{deliveryZoneAdminState.error}</p>
+                    ) : null}
+                    {deliveryZoneAdminState.success ? (
+                      <p className="form-message form-message--success">{deliveryZoneAdminState.success}</p>
+                    ) : null}
+                    <button
+                      type="submit"
+                      className="button button--primary"
+                      disabled={deliveryZoneAdminState.saving || deliveryZoneAdminState.loading}
+                    >
+                      {deliveryZoneAdminState.saving ? "Saving zones..." : "Save Delivery Zones"}
+                    </button>
+                  </form>
+                </article>
+
                 <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
                     <h3>Recent Orders</h3>
@@ -2129,6 +2771,31 @@ export default function App() {
                   </label>
 
                   <label className="field">
+                    <span>Delivery area</span>
+                    <select
+                      value={checkoutForm.deliveryZone}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          deliveryZone: event.target.value,
+                        }))
+                      }
+                    >
+                      {deliveryZones.map((zone) => (
+                        <option key={zone.id} value={zone.id}>
+                          {zone.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="delivery-zone-card">
+                    <p className="delivery-zone-card__title">Area delivery estimate</p>
+                    <strong>{formatPrice(selectedDeliveryZone.fee)}</strong>
+                    <span>{selectedDeliveryZone.eta}</span>
+                  </div>
+
+                  <label className="field">
                     <span>Delivery address</span>
                     <textarea
                       rows="3"
@@ -2169,6 +2836,10 @@ export default function App() {
               <p className="form-message form-message--error">{checkoutState.error}</p>
             ) : null}
 
+            <p className="cart-help">
+              Prefer chat? Send this cart to PEM on WhatsApp and continue the order there.
+            </p>
+
             <div className="cart-total">
               <span>Subtotal</span>
               <strong>{formatPrice(subtotal)}</strong>
@@ -2177,11 +2848,22 @@ export default function App() {
               <span>Delivery</span>
               <strong>{formatPrice(delivery)}</strong>
             </div>
+            <div className="cart-total">
+              <span>Area</span>
+              <strong>{selectedDeliveryZone.label}</strong>
+            </div>
             <div className="cart-total cart-total--grand">
               <span>Total</span>
               <strong>{formatPrice(total)}</strong>
             </div>
 
+            <button
+              type="button"
+              className="button button--ghost button--full"
+              onClick={handleWhatsAppOrder}
+            >
+              Send Order To WhatsApp
+            </button>
             <button
               type="button"
               className="button button--primary button--full"

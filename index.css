@@ -252,6 +252,7 @@ button:disabled {
 
 .hero,
 .menu-section,
+.tracking-section,
 .contact-section,
 .catering-section,
 .admin-section {
@@ -323,6 +324,14 @@ button:disabled {
   gap: 1rem;
   flex-wrap: wrap;
   margin: 2rem 0;
+}
+
+.hero__status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0;
 }
 
 .button {
@@ -473,6 +482,20 @@ button:disabled {
   margin-bottom: 1rem;
 }
 
+.combo-section {
+  padding: 0 4.5rem 1.2rem;
+}
+
+.menu-section__header {
+  margin-bottom: 1rem;
+}
+
+.menu-structure {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .controls,
 .service-form__grid,
 .service-form__grid--three {
@@ -481,8 +504,12 @@ button:disabled {
 }
 
 .controls {
-  grid-template-columns: 1.5fr repeat(2, minmax(0, 0.7fr));
+  grid-template-columns: 1.5fr repeat(3, minmax(0, 0.7fr));
   margin-bottom: 1.15rem;
+}
+
+.field--toggle {
+  justify-content: flex-end;
 }
 
 .dietary-assistant {
@@ -711,6 +738,40 @@ button:disabled {
   margin-bottom: 1.6rem;
 }
 
+.menu-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.combo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.combo-card {
+  padding: 1.35rem;
+  border-radius: 1.55rem;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.combo-card h3 {
+  margin: 0.3rem 0 0.6rem;
+  font-size: 1.2rem;
+}
+
+.combo-card p:last-of-type {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .category-pill {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -815,6 +876,13 @@ button:disabled {
   gap: 1rem;
 }
 
+.meal-card__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+}
+
 .meal-card__top h3 {
   margin: 0.25rem 0 0;
   font-size: 1.22rem;
@@ -834,6 +902,23 @@ button:disabled {
   color: var(--brand);
   font-weight: 800;
   white-space: nowrap;
+}
+
+.favorite-button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.favorite-button.is-active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
 }
 
 .meal-card__description {
@@ -962,8 +1047,71 @@ button:disabled {
 }
 
 .contact-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 1.5rem;
+}
+
+.tracking-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+}
+
+.tracking-card {
+  padding: 1.5rem;
+  border-radius: 1.6rem;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.tracking-card h3 {
+  margin: 0;
+  font-family: "Instrument Serif", serif;
+  font-size: 1.9rem;
+  font-weight: 400;
+}
+
+.tracking-card p {
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.tracking-card__top,
+.tracking-card__meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tracking-card__meta {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.tracking-card__meta span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 0.3rem;
+}
+
+.tracking-card__meta strong {
+  font-size: 1.05rem;
+}
+
+.tracking-history {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.tracking-history__list {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .admin-section {
@@ -1039,6 +1187,11 @@ button:disabled {
 .admin-login__hint code {
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.9em;
+}
+
+.admin-zone-form {
+  display: grid;
+  gap: 1rem;
 }
 
 .admin-grid {
@@ -1424,6 +1577,41 @@ button:disabled {
   color: var(--brand);
 }
 
+.delivery-zone-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 16%, var(--line));
+  background: var(--brand-soft);
+}
+
+.delivery-zone-card__title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.delivery-zone-card strong {
+  color: var(--brand);
+  font-size: 1.1rem;
+}
+
+.delivery-zone-card span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.cart-help {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 0.92rem;
+}
+
 .cart-drawer__footer {
   border-top: 1px solid var(--line);
   border-bottom: 0;
@@ -1449,6 +1637,8 @@ button:disabled {
 @media (max-width: 1120px) {
   .hero,
   .menu-section,
+  .combo-section,
+  .tracking-section,
   .catering-section,
   .contact-section,
   .topbar {
@@ -1461,6 +1651,8 @@ button:disabled {
   }
 
   .menu-grid,
+  .combo-grid,
+  .tracking-grid,
   .catering-grid,
   .contact-grid,
   .admin-grid,
@@ -1486,6 +1678,8 @@ button:disabled {
 @media (max-width: 720px) {
   .hero,
   .menu-section,
+  .combo-section,
+  .tracking-section,
   .catering-section,
   .contact-section,
   .admin-section,
@@ -1497,6 +1691,8 @@ button:disabled {
   .topbar__actions,
   .controls,
   .menu-grid,
+  .combo-grid,
+  .tracking-grid,
   .catering-grid,
   .contact-grid,
   .admin-grid,
@@ -1558,6 +1754,10 @@ button:disabled {
     height: 17rem;
   }
 
+  .menu-summary,
+  .tracking-card__top,
+  .tracking-card__meta,
+  .meal-card__top,
   .meal-card__order,
   .meal-card__meta,
   .cart-item__top,

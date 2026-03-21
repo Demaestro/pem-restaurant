@@ -37,3 +37,12 @@ create table if not exists public.catering_requests (
   created_at timestamptz not null default now(),
   updated_at timestamptz
 );
+
+create table if not exists public.delivery_zones (
+  id bigint generated always as identity primary key,
+  zone_key text not null unique,
+  label text not null,
+  fee integer not null default 0,
+  eta text not null,
+  sort_order integer not null default 0
+);

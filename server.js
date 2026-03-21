@@ -20,13 +20,22 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 let adminPassword = process.env.ADMIN_PASSWORD || "pem-admin-1234";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
+const forceLocalStorage = process.env.STORAGE_MODE === "local";
 const adminSessions = new Map();
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const defaultDeliveryZones = [
+  { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
+  { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
+  { id: "maitama", label: "Maitama / Asokoro / Guzape", fee: 2200, eta: "50 to 70 mins" },
+  { id: "lugbe", label: "Lugbe / Airport Road", fee: 2500, eta: "60 to 85 mins" },
+  { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
+];
 const storage = createStorage({
   dataDir: DATA_DIR,
   dbPath: DB_PATH,
-  supabaseUrl: process.env.SUPABASE_URL,
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  supabaseUrl: forceLocalStorage ? "" : process.env.SUPABASE_URL,
+  supabaseServiceRoleKey: forceLocalStorage ? "" : process.env.SUPABASE_SERVICE_ROLE_KEY,
+  defaultDeliveryZones,
 });
 
 const allowedOrigins = [process.env.FRONTEND_URL, "http://localhost:5173", "http://127.0.0.1:5173"].filter(Boolean);
@@ -72,6 +81,12 @@ function requireAdmin(request, response, next) {
 
   request.adminSession = adminSessions.get(token);
   next();
+}
+
+function asyncHandler(handler) {
+  return (request, response, next) => {
+    Promise.resolve(handler(request, response, next)).catch(next);
+  };
 }
 
 function normalizeDietaryText(value) {
@@ -313,6 +328,11 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
+app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
+  const deliveryZones = await storage.getDeliveryZones();
+  response.json({ deliveryZones });
+}));
+
 app.post("/api/admin/login", (request, response) => {
   const { password } = request.body || {};
 
@@ -342,7 +362,7 @@ app.post("/api/admin/logout", requireAdmin, (request, response) => {
   response.json({ ok: true });
 });
 
-app.post("/api/admin/change-password", requireAdmin, async (request, response) => {
+app.post("/api/admin/change-password", requireAdmin, asyncHandler(async (request, response) => {
   const { currentPassword, newPassword, confirmPassword } = request.body || {};
 
   if (!currentPassword || !newPassword || !confirmPassword) {
@@ -371,14 +391,47 @@ app.post("/api/admin/change-password", requireAdmin, async (request, response) =
   response.json({
     message: "Admin password updated successfully. Please sign in again.",
   });
-});
+}));
 
-app.get("/api/admin/summary", requireAdmin, async (_request, response) => {
+app.get("/api/admin/summary", requireAdmin, asyncHandler(async (_request, response) => {
   const summary = await storage.getSummary();
   response.json(summary);
-});
+}));
 
-app.post("/api/orders", async (request, response) => {
+app.put("/api/admin/delivery-zones", requireAdmin, asyncHandler(async (request, response) => {
+  const zones = Array.isArray(request.body?.deliveryZones) ? request.body.deliveryZones : [];
+
+  if (zones.length === 0) {
+    return response.status(400).json({ error: "At least one delivery zone is required." });
+  }
+
+  const normalized = zones.map((zone, index) => ({
+    id: String(zone.id || `zone-${index + 1}`)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-"),
+    label: String(zone.label || "").trim(),
+    fee: Number(zone.fee) || 0,
+    eta: String(zone.eta || "").trim(),
+  }));
+
+  if (normalized.some((zone) => !zone.label || !zone.eta || zone.fee < 0)) {
+    return response.status(400).json({ error: "Each delivery zone needs a label, fee, and ETA." });
+  }
+
+  const uniqueIds = new Set(normalized.map((zone) => zone.id));
+  if (uniqueIds.size !== normalized.length) {
+    return response.status(400).json({ error: "Delivery zone IDs must be unique." });
+  }
+
+  const deliveryZones = await storage.updateDeliveryZones(normalized);
+  response.json({
+    message: "Delivery zones updated.",
+    deliveryZones,
+  });
+}));
+
+app.post("/api/orders", asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
 
   if (!customer?.customerName || !customer?.phone || !customer?.address) {
@@ -403,9 +456,26 @@ app.post("/api/orders", async (request, response) => {
     message: "Order received.",
     order: savedOrder,
   });
-});
+}));
 
-app.patch("/api/admin/orders/:reference/status", requireAdmin, async (request, response) => {
+app.get("/api/orders/:reference", asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim();
+
+  if (!reference) {
+    return response.status(400).json({ error: "Order reference is required." });
+  }
+
+  const order = await storage.getOrderByReference(reference);
+  if (!order) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  return response.json({
+    order,
+  });
+}));
+
+app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
   const allowedStatuses = ["received", "preparing", "ready", "delivered", "cancelled"];
@@ -423,9 +493,9 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, async (request, r
     message: "Order status updated.",
     order,
   });
-});
+}));
 
-app.post("/api/contact", async (request, response) => {
+app.post("/api/contact", asyncHandler(async (request, response) => {
   const { name, phone, message } = request.body || {};
 
   if (!name || !phone || !message) {
@@ -445,9 +515,9 @@ app.post("/api/contact", async (request, response) => {
   return response.status(201).json({
     message: savedEntry,
   });
-});
+}));
 
-app.post("/api/catering", async (request, response) => {
+app.post("/api/catering", asyncHandler(async (request, response) => {
   const { name, phone, eventDate, guestCount, eventType, details } = request.body || {};
 
   if (!name || !phone || !eventDate || !guestCount || !details) {
@@ -472,9 +542,9 @@ app.post("/api/catering", async (request, response) => {
   return response.status(201).json({
     request: savedEntry,
   });
-});
+}));
 
-app.post("/api/ai/dietary-match", async (request, response) => {
+app.post("/api/ai/dietary-match", asyncHandler(async (request, response) => {
   const needs = String(request.body?.needs || "").trim();
   const menuItems = sanitizeMenuItems(request.body?.menuItems);
 
@@ -504,9 +574,9 @@ app.post("/api/ai/dietary-match", async (request, response) => {
       degraded: true,
     });
   }
-});
+}));
 
-app.patch("/api/admin/contacts/:reference/status", requireAdmin, async (request, response) => {
+app.patch("/api/admin/contacts/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
   const allowedStatuses = ["new", "handled"];
@@ -524,9 +594,9 @@ app.patch("/api/admin/contacts/:reference/status", requireAdmin, async (request,
     message: "Contact status updated.",
     contact: entry,
   });
-});
+}));
 
-app.patch("/api/admin/catering/:reference/status", requireAdmin, async (request, response) => {
+app.patch("/api/admin/catering/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
   const allowedStatuses = ["new", "contacted", "booked"];
@@ -543,6 +613,13 @@ app.patch("/api/admin/catering/:reference/status", requireAdmin, async (request,
   return response.json({
     message: "Catering status updated.",
     request: entry,
+  });
+}));
+
+app.use((error, _request, response, _next) => {
+  console.error("API error:", error);
+  response.status(500).json({
+    error: error?.message || "Something went wrong on the server.",
   });
 });
 

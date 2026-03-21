@@ -25,6 +25,7 @@ This creates the tables PEM needs for:
 - orders
 - contact messages
 - catering requests
+- delivery zones
 
 ## 3. Copy the backend keys
 

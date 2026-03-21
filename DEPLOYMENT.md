@@ -102,6 +102,7 @@ Test these flows:
 - Contact form submission
 - Catering request submission
 - Dietary AI meal recommendations
+- Delivery zone loading and admin editing
 - Admin login
 - Order status update
 - CSV export
