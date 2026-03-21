@@ -421,6 +421,7 @@ const businessHours = [
 const initialCheckout = {
   customerName: "",
   phone: "",
+  email: "",
   address: "",
   deliveryZone: "gwarinpa",
   paymentMethod: "Pay on delivery",
@@ -439,6 +440,18 @@ const initialDeliveryZoneAdminState = {
   success: "",
   zones: defaultDeliveryZones,
 };
+const initialMenuAdminState = {
+  loading: false,
+  saving: false,
+  error: "",
+  success: "",
+  items: menuItems.map((item) => ({ ...item, soldOut: false, hidden: false })),
+};
+const menuVisibilityOptions = [
+  { value: "available", label: "Available" },
+  { value: "sold-out", label: "Sold out" },
+  { value: "hidden", label: "Hidden" },
+];
 
 const initialContact = {
   name: "",
@@ -475,7 +488,7 @@ const initialDietaryState = {
   degraded: false,
 };
 
-const orderStatuses = ["all", "received", "preparing", "ready", "delivered", "cancelled"];
+const orderStatuses = ["all", "awaiting_payment", "received", "preparing", "ready", "delivered", "cancelled"];
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -530,7 +543,17 @@ function getBusinessStatus() {
   };
 }
 
-function buildClientDietaryFallback(needs) {
+function mergeMenuCatalog(baseItems, remoteItems) {
+  const remoteById = new Map((remoteItems || []).map((item) => [item.id, item]));
+  return baseItems.map((item) => ({
+    ...item,
+    ...(remoteById.get(item.id) || {}),
+    soldOut: Boolean(remoteById.get(item.id)?.soldOut),
+    hidden: Boolean(remoteById.get(item.id)?.hidden),
+  }));
+}
+
+function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   const normalizedNeeds = needs.trim().toLowerCase();
   const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
   const needsLowSpice = /\b(low spice|less spicy|mild|not spicy|no pepper)\b/.test(normalizedNeeds);
@@ -553,7 +576,7 @@ function buildClientDietaryFallback(needs) {
     };
   }
 
-  const matches = menuItems
+  const matches = sourceItems
     .map((item) => {
       const haystack = [
         item.name,
@@ -656,14 +679,14 @@ function RatingStars({ rating }) {
   );
 }
 
-function QuantityControl({ value, onDecrease, onIncrease }) {
+function QuantityControl({ value, onDecrease, onIncrease, disabled = false }) {
   return (
     <div className="qty-control">
-      <button type="button" onClick={onDecrease} aria-label="Decrease quantity">
+      <button type="button" onClick={onDecrease} aria-label="Decrease quantity" disabled={disabled}>
         -
       </button>
       <span>{value}</span>
-      <button type="button" onClick={onIncrease} aria-label="Increase quantity">
+      <button type="button" onClick={onIncrease} aria-label="Increase quantity" disabled={disabled}>
         +
       </button>
     </div>
@@ -678,6 +701,7 @@ export default function App() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState("reviews");
   const [minimumRating, setMinimumRating] = useState(0);
+  const [menuCatalog, setMenuCatalog] = useState(() => mergeMenuCatalog(menuItems, []));
   const [cart, setCart] = useState({});
   const [notes, setNotes] = useState({});
   const [favorites, setFavorites] = useState([]);
@@ -694,6 +718,7 @@ export default function App() {
   const [trackingReference, setTrackingReference] = useState("");
   const [trackingState, setTrackingState] = useState(initialTrackingState);
   const [deliveryZoneAdminState, setDeliveryZoneAdminState] = useState(initialDeliveryZoneAdminState);
+  const [menuAdminState, setMenuAdminState] = useState(initialMenuAdminState);
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [dietaryNeeds, setDietaryNeeds] = useState("");
   const [dietaryState, setDietaryState] = useState(initialDietaryState);
@@ -703,6 +728,7 @@ export default function App() {
   const [adminToken, setAdminToken] = useState("");
   const [adminLoginState, setAdminLoginState] = useState({ loading: false, error: "" });
   const [adminQuery, setAdminQuery] = useState("");
+  const [menuAdminQuery, setMenuAdminQuery] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -712,6 +738,12 @@ export default function App() {
   const [passwordState, setPasswordState] = useState({ loading: false, error: "", success: "" });
   const [orderActionState, setOrderActionState] = useState({ loadingRef: "", error: "", success: "" });
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
+  const visibleMenuItems = menuCatalog.filter((item) => !item.hidden);
+  const visibleMenuCount = visibleMenuItems.length;
+  const visibleDrinkCount = visibleMenuItems.filter((item) => item.category.includes("Drink")).length;
+  const visibleLocalDishCount = visibleMenuItems.filter(
+    (item) => item.category === "Soup" || item.category === "Local Special",
+  ).length;
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("pem-theme");
@@ -761,6 +793,7 @@ export default function App() {
       window.localStorage.setItem("pem-admin-token", adminToken);
       loadAdminData(adminToken);
       loadDeliveryZones(adminToken);
+      loadMenuCatalog(adminToken);
     } else {
       window.localStorage.removeItem("pem-admin-token");
       setAdminState(initialAdminState);
@@ -769,12 +802,64 @@ export default function App() {
 
   useEffect(() => {
     loadPublicDeliveryZones();
+    loadMenuCatalog();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    const reference = params.get("reference");
+
+    if (payment !== "paystack" || !reference) {
+      return;
+    }
+
+    async function verifyPayment() {
+      try {
+        const response = await fetch(apiUrl(`/api/payments/paystack/verify/${encodeURIComponent(reference)}`));
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to verify your payment right now.");
+        }
+        if (!data.verified) {
+          throw new Error("Payment is still pending. Please confirm the transaction in Paystack and try again.");
+        }
+        setOrderPlaced(`Payment confirmed for order ${reference}. PEM will continue processing it.`);
+        setTrackingReference(reference);
+        if (data.order) {
+          setTrackingState({
+            loading: false,
+            error: "",
+            order: data.order,
+          });
+          setSavedReferences((previous) => [
+            reference,
+            ...previous.filter((item) => item !== reference),
+          ].slice(0, 5));
+        }
+      } catch (error) {
+        setOrderPlaced(error.message);
+      } finally {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("payment");
+        url.searchParams.delete("reference");
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+
+    verifyPayment();
   }, []);
 
   const visibleCategories = useMemo(() => {
+    const availableCategories = ["All", ...new Set(menuCatalog.filter((item) => !item.hidden).map((item) => item.category))];
     const section = menuSections.find((item) => item.id === activeMenuSection);
-    return section ? section.categories : categories;
-  }, [activeMenuSection]);
+    if (!section) {
+      return availableCategories;
+    }
+    return section.id === "all"
+      ? availableCategories
+      : ["All", ...section.categories.filter((category) => category !== "All" && availableCategories.includes(category))];
+  }, [activeMenuSection, menuCatalog]);
 
   useEffect(() => {
     if (!visibleCategories.includes(activeCategory)) {
@@ -786,12 +871,13 @@ export default function App() {
     const normalizedSearch = search.trim().toLowerCase();
     const recommendedIdSet = new Set(recommendedItemIds);
 
-    let items = menuItems.filter((item) => {
+    let items = menuCatalog.filter((item) => {
       const section = menuSections.find((menuSection) => menuSection.id === activeMenuSection);
       const matchesSection = !section || section.id === "all" || section.categories.includes(item.category);
       const matchesCategory = activeCategory === "All" || item.category === activeCategory;
       const matchesRating = item.rating >= minimumRating;
       const matchesFavorites = !showFavoritesOnly || favorites.includes(item.id);
+      const matchesAvailability = !item.hidden;
       const matchesDietarySelection =
         !showDietaryMatchesOnly || recommendedIdSet.size === 0 || recommendedIdSet.has(item.id);
       const matchesSearch =
@@ -805,6 +891,7 @@ export default function App() {
         matchesSection &&
         matchesCategory &&
         matchesRating &&
+        matchesAvailability &&
         matchesFavorites &&
         matchesSearch &&
         matchesDietarySelection
@@ -820,18 +907,22 @@ export default function App() {
     }
 
     return items;
-  }, [activeCategory, activeMenuSection, favorites, minimumRating, recommendedItemIds, search, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
+  }, [activeCategory, activeMenuSection, favorites, menuCatalog, minimumRating, recommendedItemIds, search, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
 
   const cartItems = Object.entries(cart)
     .filter(([, quantity]) => quantity > 0)
     .map(([id, quantity]) => {
-      const item = menuItems.find((menuItem) => menuItem.id === Number(id));
+      const item = menuCatalog.find((menuItem) => menuItem.id === Number(id));
+      if (!item) {
+        return null;
+      }
       return {
         ...item,
         quantity,
         note: notes[id] || "",
       };
-    });
+    })
+    .filter(Boolean);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const selectedDeliveryZone =
@@ -839,7 +930,9 @@ export default function App() {
   const delivery = subtotal > 0 ? selectedDeliveryZone.fee : 0;
   const total = subtotal + delivery;
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden);
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
+  const normalizedMenuAdminQuery = menuAdminQuery.trim().toLowerCase();
 
   const filteredAdminOrders = adminState.data.orders.filter((order) => {
     const matchesQuery =
@@ -875,7 +968,53 @@ export default function App() {
     );
   });
 
+  const filteredMenuAdminItems = menuAdminState.items.filter((item) => {
+    return (
+      normalizedMenuAdminQuery === "" ||
+      item.name.toLowerCase().includes(normalizedMenuAdminQuery) ||
+      item.category.toLowerCase().includes(normalizedMenuAdminQuery) ||
+      item.badge.toLowerCase().includes(normalizedMenuAdminQuery)
+    );
+  });
+
+  useEffect(() => {
+    const unavailableItems = Object.entries(cart)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([id]) => menuCatalog.find((item) => item.id === Number(id)))
+      .filter((item) => item && (item.soldOut || item.hidden));
+
+    if (unavailableItems.length === 0) {
+      return;
+    }
+
+    const unavailableIds = new Set(unavailableItems.map((item) => item.id));
+
+    setCart((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([id, quantity]) => quantity > 0 && !unavailableIds.has(Number(id))),
+      ),
+    );
+    setNotes((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([id]) => !unavailableIds.has(Number(id)))),
+    );
+    setOrderPlaced(
+      `${unavailableItems.map((item) => item.name).join(", ")} ${
+        unavailableItems.length > 1 ? "were" : "was"
+      } removed from your cart because ${unavailableItems.length > 1 ? "they are" : "it is"} unavailable.`,
+    );
+
+    const timeoutId = window.setTimeout(() => {
+      setOrderPlaced("");
+    }, 4500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [cart, menuCatalog]);
+
   function updateQuantity(itemId, delta) {
+    const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
+    if (item?.soldOut && delta > 0) {
+      return;
+    }
     setCart((previous) => {
       const nextValue = Math.max(0, (previous[itemId] || 0) + delta);
       return {
@@ -886,6 +1025,10 @@ export default function App() {
   }
 
   function setQuantity(itemId, quantity) {
+    const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
+    if (item?.soldOut && quantity > 0) {
+      return;
+    }
     setCart((previous) => ({
       ...previous,
       [itemId]: Math.max(0, quantity),
@@ -911,7 +1054,10 @@ export default function App() {
     setCart((previous) => {
       const nextCart = { ...previous };
       combo.itemIds.forEach((itemId) => {
-        nextCart[itemId] = (nextCart[itemId] || 0) + 1;
+        const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
+        if (!item?.soldOut && !item?.hidden) {
+          nextCart[itemId] = (nextCart[itemId] || 0) + 1;
+        }
       });
       return nextCart;
     });
@@ -923,15 +1069,33 @@ export default function App() {
     const nextNotes = {};
 
     order.items.forEach((item) => {
-      nextCart[item.id] = (nextCart[item.id] || 0) + item.quantity;
-      if (item.note) {
-        nextNotes[item.id] = item.note;
+      const liveItem = menuCatalog.find((menuItem) => menuItem.id === item.id);
+      if (!liveItem?.soldOut && !liveItem?.hidden) {
+        nextCart[item.id] = (nextCart[item.id] || 0) + item.quantity;
+        if (item.note) {
+          nextNotes[item.id] = item.note;
+        }
       }
     });
 
     setCart(nextCart);
     setNotes(nextNotes);
     setShowCart(true);
+  }
+
+  function updateMenuAdminItem(itemId, updates) {
+    setMenuAdminState((previous) => ({
+      ...previous,
+      success: "",
+      items: previous.items.map((item) => (item.id === itemId ? { ...item, ...updates } : item)),
+    }));
+  }
+
+  function handleMenuAvailabilityChange(itemId, nextValue) {
+    updateMenuAdminItem(itemId, {
+      soldOut: nextValue === "sold-out",
+      hidden: nextValue === "hidden",
+    });
   }
 
   async function loadPublicDeliveryZones() {
@@ -950,6 +1114,41 @@ export default function App() {
       }
     } catch {
       setDeliveryZones(defaultDeliveryZones);
+    }
+  }
+
+  async function loadMenuCatalog(tokenOverride = adminToken) {
+    try {
+      setMenuAdminState((previous) => ({
+        ...previous,
+        loading: true,
+        error: "",
+      }));
+      const response = await fetch(apiUrl("/api/menu"), tokenOverride ? {
+        headers: {
+          Authorization: `Bearer ${tokenOverride}`,
+        },
+      } : undefined);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to load the PEM menu.");
+      }
+      const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
+      setMenuCatalog(mergedItems);
+      setMenuAdminState({
+        loading: false,
+        saving: false,
+        error: "",
+        success: "",
+        items: mergedItems,
+      });
+    } catch (error) {
+      setMenuCatalog(mergeMenuCatalog(menuItems, []));
+      setMenuAdminState((previous) => ({
+        ...previous,
+        loading: false,
+        error: error.message,
+      }));
     }
   }
 
@@ -1149,6 +1348,49 @@ export default function App() {
       }));
     } catch (error) {
       setDeliveryZoneAdminState((previous) => ({
+        ...previous,
+        saving: false,
+        error: error.message,
+        success: "",
+      }));
+    }
+  }
+
+  async function handleMenuSave(event) {
+    event.preventDefault();
+
+    try {
+      setMenuAdminState((previous) => ({
+        ...previous,
+        saving: true,
+        error: "",
+        success: "",
+      }));
+      const response = await fetch(apiUrl("/api/admin/menu"), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          menuItems: menuAdminState.items,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to save the PEM menu.");
+      }
+      const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
+      setMenuCatalog(mergedItems);
+      setMenuAdminState({
+        loading: false,
+        saving: false,
+        error: "",
+        success: "Menu updated successfully.",
+        items: mergedItems,
+      });
+    } catch (error) {
+      setMenuAdminState((previous) => ({
         ...previous,
         saving: false,
         error: error.message,
@@ -1428,10 +1670,26 @@ export default function App() {
       return;
     }
 
+    if (unavailableCartItem) {
+      setCheckoutState({
+        loading: false,
+        error: `${unavailableCartItem.name} is no longer available. Please remove it or choose another meal.`,
+      });
+      return;
+    }
+
     if (!checkoutForm.customerName || !checkoutForm.phone || !checkoutForm.address) {
       setCheckoutState({
         loading: false,
         error: "Please enter your name, phone number, and delivery address.",
+      });
+      return;
+    }
+
+    if (checkoutForm.paymentMethod === "Paystack" && !checkoutForm.email) {
+      setCheckoutState({
+        loading: false,
+        error: "Please enter your email address to pay with Paystack.",
       });
       return;
     }
@@ -1452,6 +1710,22 @@ export default function App() {
           total,
         },
       });
+
+      if (checkoutForm.paymentMethod === "Paystack") {
+        const paymentResult = await postJson("/api/payments/paystack/initialize", {
+          orderReference: result.order.reference,
+          email: checkoutForm.email,
+          amount: total,
+          customerName: checkoutForm.customerName,
+        });
+
+        setSavedReferences((previous) => [
+          result.order.reference,
+          ...previous.filter((reference) => reference !== result.order.reference),
+        ].slice(0, 5));
+        window.location.href = paymentResult.payment.authorization_url;
+        return;
+      }
 
       setOrderPlaced(`Order ${result.order.reference} submitted successfully.`);
       setTrackingReference(result.order.reference);
@@ -1585,7 +1859,7 @@ export default function App() {
 
       const result = await postJson("/api/ai/dietary-match", {
         needs: dietaryNeeds,
-        menuItems: menuItems.map((item) => ({
+        menuItems: menuCatalog.filter((item) => !item.hidden).map((item) => ({
           id: item.id,
           name: item.name,
           category: item.category,
@@ -1610,7 +1884,7 @@ export default function App() {
       });
       setShowDietaryMatchesOnly(Array.isArray(result.matches) && result.matches.length > 0);
     } catch (error) {
-      const fallbackResult = buildClientDietaryFallback(dietaryNeeds);
+      const fallbackResult = buildClientDietaryFallback(dietaryNeeds, menuCatalog.filter((item) => !item.hidden));
       setDietaryState(fallbackResult);
       setShowDietaryMatchesOnly(fallbackResult.matches.length > 0);
     }
@@ -1750,7 +2024,7 @@ export default function App() {
 
             <div className="hero__stats">
               <div>
-                <strong>{menuItems.length}</strong>
+                <strong>{visibleMenuCount}</strong>
                 <span>Food and drink items</span>
               </div>
               <div>
@@ -1758,7 +2032,7 @@ export default function App() {
                 <span>Average customer rating</span>
               </div>
               <div>
-                <strong>{drinkCount + localDishCount}</strong>
+                <strong>{visibleDrinkCount + visibleLocalDishCount}</strong>
                 <span>Local dishes and drinks</span>
               </div>
             </div>
@@ -1854,7 +2128,16 @@ export default function App() {
                       <span>Items</span>
                       <strong>{trackingState.order.items.reduce((sum, item) => sum + item.quantity, 0)}</strong>
                     </div>
+                    <div>
+                      <span>Payment</span>
+                      <strong>{trackingState.order.customer.paymentMethod}</strong>
+                    </div>
                   </div>
+                  {trackingState.order.status === "awaiting_payment" ? (
+                    <p className="tracking-card__hint">
+                      PEM is waiting for payment confirmation before the kitchen starts preparing this order.
+                    </p>
+                  ) : null}
                   <button
                     type="button"
                     className="button button--ghost"
@@ -1888,7 +2171,7 @@ export default function App() {
                 <h3>{combo.description}</h3>
                 <p>
                   {combo.itemIds
-                    .map((itemId) => menuItems.find((item) => item.id === itemId)?.name)
+                    .map((itemId) => menuCatalog.find((item) => item.id === itemId && !item.hidden)?.name)
                     .filter(Boolean)
                     .join(", ")}
                 </p>
@@ -1973,7 +2256,7 @@ export default function App() {
                   {dietaryState.matches.length > 0 ? (
                     <div className="dietary-result__list">
                       {dietaryState.matches.map((match) => {
-                        const item = menuItems.find((menuItem) => menuItem.id === match.itemId);
+                        const item = menuCatalog.find((menuItem) => menuItem.id === match.itemId);
 
                         if (!item) {
                           return null;
@@ -2120,6 +2403,7 @@ export default function App() {
                       <small>{item.badge}</small>
                       {item.spicy ? <small>Spicy</small> : null}
                       {recommendedItemIds.includes(item.id) ? <small>Dietary match</small> : null}
+                      {item.soldOut ? <small>Sold out</small> : null}
                     </div>
                   </div>
 
@@ -2160,14 +2444,16 @@ export default function App() {
                         value={quantity}
                         onDecrease={() => updateQuantity(item.id, -1)}
                         onIncrease={() => updateQuantity(item.id, 1)}
+                        disabled={item.soldOut}
                       />
 
                       <button
                         type="button"
                         className="button button--primary button--small"
                         onClick={() => setQuantity(item.id, quantity === 0 ? 1 : 0)}
+                        disabled={item.soldOut}
                       >
-                        {quantity === 0 ? "Add meal" : "Reset"}
+                        {item.soldOut ? "Unavailable" : quantity === 0 ? "Add meal" : "Reset"}
                       </button>
                     </div>
 
@@ -2178,6 +2464,7 @@ export default function App() {
                         value={notes[item.id] || ""}
                         onChange={(event) => updateNote(item.id, event.target.value)}
                         placeholder="Extra pepper, no onions, soft swallow..."
+                        disabled={item.soldOut}
                       />
                     </label>
                   </div>
@@ -2599,6 +2886,106 @@ export default function App() {
                   </form>
                 </article>
 
+                <article className="admin-card reveal reveal--up reveal--delay-1">
+                  <div className="admin-card__header">
+                    <h3>Menu Manager</h3>
+                    <span>{filteredMenuAdminItems.length}</span>
+                  </div>
+                  <form className="admin-zone-form" onSubmit={handleMenuSave}>
+                    <label className="search-field">
+                      <span>Search menu items</span>
+                      <input
+                        type="text"
+                        value={menuAdminQuery}
+                        onChange={(event) => setMenuAdminQuery(event.target.value)}
+                        placeholder="Search by meal name, category, or badge"
+                      />
+                    </label>
+                    <div className="admin-list">
+                      {filteredMenuAdminItems.map((item) => (
+                        <div key={item.id} className="admin-item">
+                          <div className="admin-item__row">
+                            <div>
+                              <strong>{item.name}</strong>
+                              <p className="admin-item__subtle">{item.category}</p>
+                            </div>
+                            <span className={`status-pill ${item.hidden ? "status-pill--new" : item.soldOut ? "status-pill--cancelled" : "status-pill--delivered"}`}>
+                              {item.hidden ? "hidden" : item.soldOut ? "sold out" : "available"}
+                            </span>
+                          </div>
+
+                          <div className="service-form__grid">
+                            <label className="field">
+                              <span>Price (NGN)</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.price}
+                                onChange={(event) =>
+                                  updateMenuAdminItem(item.id, { price: Number(event.target.value) || 0 })
+                                }
+                              />
+                            </label>
+
+                            <label className="field">
+                              <span>Availability</span>
+                              <select
+                                value={item.hidden ? "hidden" : item.soldOut ? "sold-out" : "available"}
+                                onChange={(event) => handleMenuAvailabilityChange(item.id, event.target.value)}
+                              >
+                                {menuVisibilityOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+
+                          <label className="field">
+                            <span>Menu badge</span>
+                            <input
+                              type="text"
+                              value={item.badge}
+                              onChange={(event) => updateMenuAdminItem(item.id, { badge: event.target.value })}
+                            />
+                          </label>
+
+                          <label className="note-field">
+                            <span>Description</span>
+                            <textarea
+                              rows="3"
+                              value={item.description}
+                              onChange={(event) =>
+                                updateMenuAdminItem(item.id, { description: event.target.value })
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+
+                    {filteredMenuAdminItems.length === 0 ? (
+                      <p className="admin-empty">No menu items matched that search.</p>
+                    ) : null}
+
+                    {menuAdminState.error ? (
+                      <p className="form-message form-message--error">{menuAdminState.error}</p>
+                    ) : null}
+                    {menuAdminState.success ? (
+                      <p className="form-message form-message--success">{menuAdminState.success}</p>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      className="button button--primary"
+                      disabled={menuAdminState.saving || menuAdminState.loading}
+                    >
+                      {menuAdminState.saving ? "Saving menu..." : "Save Menu Changes"}
+                    </button>
+                  </form>
+                </article>
+
                 <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
                     <h3>Recent Orders</h3>
@@ -2850,6 +3237,7 @@ export default function App() {
                       <div>
                         <h3>{item.name}</h3>
                         <p>{formatPrice(item.price)} each</p>
+                        {item.soldOut ? <p className="cart-item__note">This item is currently sold out.</p> : null}
                       </div>
                       <strong>{formatPrice(item.price * item.quantity)}</strong>
                     </div>
@@ -2858,6 +3246,7 @@ export default function App() {
                       value={item.quantity}
                       onDecrease={() => updateQuantity(item.id, -1)}
                       onIncrease={() => updateQuantity(item.id, 1)}
+                      disabled={item.soldOut}
                     />
 
                     {item.note ? <p className="cart-item__note">Note: {item.note}</p> : null}
@@ -2893,6 +3282,21 @@ export default function App() {
                         }))
                       }
                       placeholder="0803 334 5161"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Email address</span>
+                    <input
+                      type="email"
+                      value={checkoutForm.email}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          email: event.target.value,
+                        }))
+                      }
+                      placeholder="you@example.com"
                     />
                   </label>
 
@@ -2953,8 +3357,15 @@ export default function App() {
                       <option>Pay on delivery</option>
                       <option>Bank transfer</option>
                       <option>POS on delivery</option>
+                      <option>Paystack</option>
                     </select>
                   </label>
+
+                  {checkoutForm.paymentMethod === "Paystack" ? (
+                    <p className="cart-help">
+                      PEM will take you to Paystack to complete your payment securely before returning to the app.
+                    </p>
+                  ) : null}
                 </div>
               </>
             )}
@@ -2999,7 +3410,11 @@ export default function App() {
               onClick={handlePlaceOrder}
               disabled={checkoutState.loading}
             >
-              {checkoutState.loading ? "Submitting order..." : "Place Order"}
+              {checkoutState.loading
+                ? "Submitting order..."
+                : checkoutForm.paymentMethod === "Paystack"
+                  ? "Proceed To Paystack"
+                  : "Place Order"}
             </button>
           </div>
         </div>

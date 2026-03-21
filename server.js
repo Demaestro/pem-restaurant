@@ -21,6 +21,11 @@ const PORT = process.env.PORT || 4000;
 let adminPassword = process.env.ADMIN_PASSWORD || "pem-admin-1234";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const forceLocalStorage = process.env.STORAGE_MODE === "local";
+const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || "";
+const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS || "").split(",")]
+  .map((value) => String(value || "").trim())
+  .filter(Boolean);
 const adminSessions = new Map();
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const defaultDeliveryZones = [
@@ -31,15 +36,40 @@ const defaultDeliveryZones = [
   { id: "owerri", label: "Owerri, Imo State", fee: 4500, eta: "Next-day confirmation with PEM" },
   { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
 ];
+const defaultMenuItems = [
+  { id: 1, name: "Jollof Rice & Grilled Chicken", category: "Rice", price: 3800, rating: 4.9, reviews: 241, spicy: false, badge: "Popular", description: "Classic Nigerian party jollof with grilled chicken and sweet plantain.", dietaryTags: ["Chicken", "Rice-based", "Mild"], dietaryProfile: "Contains grilled chicken and rice. Mild heat and a balanced, filling profile.", soldOut: false, hidden: false },
+  { id: 2, name: "Fried Rice & Beef Stew", category: "Rice", price: 4000, rating: 4.8, reviews: 188, spicy: false, badge: "Signature", description: "Colorful fried rice served with rich beef stew for a hearty PEM favorite.", dietaryTags: ["Beef", "Rice-based", "Mild"], dietaryProfile: "Contains beef stew and fried rice. Hearty and filling, but not suitable for beef-free diets.", soldOut: false, hidden: false },
+  { id: 3, name: "Egusi Soup & Pounded Yam", category: "Soup", price: 4500, rating: 4.9, reviews: 214, spicy: false, badge: "Best Seller", description: "Rich egusi soup with assorted protein and soft pounded yam.", dietaryTags: ["Soup", "Swallow", "Rich"], dietaryProfile: "Traditional soup meal with assorted protein and pounded yam. Rich and satisfying.", soldOut: false, hidden: false },
+  { id: 4, name: "Pepper Soup (Goat Meat)", category: "Soup", price: 4300, rating: 4.8, reviews: 167, spicy: true, badge: "Hot", description: "Aromatic pepper soup with goat meat, local spices, and deep warming flavor.", dietaryTags: ["Goat meat", "Spicy", "Soup"], dietaryProfile: "Spicy goat meat pepper soup. The closest fit on this menu for guests asking for lower-carb soup options.", soldOut: false, hidden: false },
+  { id: 5, name: "Ogbono Soup & Eba", category: "Soup", price: 3900, rating: 4.7, reviews: 151, spicy: false, badge: "Classic", description: "Smooth ogbono soup paired with fresh eba and a balanced local taste.", dietaryTags: ["Soup", "Swallow", "Local"], dietaryProfile: "Traditional ogbono soup served with eba. Mild compared with the hotter soups on the menu.", soldOut: false, hidden: false },
+  { id: 6, name: "Delicious Okro Soup", category: "Soup", price: 4100, rating: 4.8, reviews: 132, spicy: true, badge: "Local", description: "Fresh okro soup with a rich blend of stock, spice, and satisfying texture.", dietaryTags: ["Soup", "Spicy", "Local"], dietaryProfile: "Spicier local soup option with rich texture and a more traditional feel.", soldOut: false, hidden: false },
+  { id: 7, name: "Delicious Ukwa", category: "Local Special", price: 3600, rating: 4.6, reviews: 98, spicy: false, badge: "Traditional", description: "African breadfruit prepared in a comforting local style for a distinct PEM meal.", dietaryTags: ["Traditional", "Local special", "Mild"], dietaryProfile: "Traditional African breadfruit dish with a comforting local style and mild flavor profile.", soldOut: false, hidden: false },
+  { id: 8, name: "Spaghetti Bolognese", category: "Pasta", price: 3500, rating: 4.5, reviews: 89, spicy: false, badge: "Continental", description: "Savory spaghetti in a rich tomato and meat sauce for guests who want variety.", dietaryTags: ["Pasta", "Meat sauce", "Mild"], dietaryProfile: "Pasta dish with meat sauce. Better for guests who want a softer, non-spicy continental option.", soldOut: false, hidden: false },
+  { id: 9, name: "Abacha", category: "Local Special", price: 3200, rating: 4.7, reviews: 84, spicy: true, badge: "Eastern Favorite", description: "Traditional African salad with a lively local taste and classic market-style flavor.", dietaryTags: ["Traditional", "Local", "Spicy"], dietaryProfile: "A local specialty with a stronger traditional profile. Good for guests asking for native dishes.", soldOut: false, hidden: false },
+  { id: 10, name: "Afang Soup", category: "Soup", price: 4600, rating: 4.9, reviews: 176, spicy: false, badge: "Premium Local", description: "Rich afang soup with deep flavor, hearty texture, and a polished event-ready finish.", dietaryTags: ["Soup", "Local", "Rich"], dietaryProfile: "Rich local soup option with a traditional, filling profile for guests who want premium native dishes.", soldOut: false, hidden: false },
+  { id: 11, name: "Asun", category: "Grills", price: 4200, rating: 4.7, reviews: 92, spicy: true, badge: "Smoky", description: "Spicy grilled asun with a bold smoky finish for guests who want something lively.", dietaryTags: ["Grill", "Spicy", "Protein"], dietaryProfile: "A spicy grilled protein option suited to guests who want bold flavor and a meat-focused choice.", soldOut: false, hidden: false },
+  { id: 12, name: "Coleslaw", category: "Sides", price: 1500, rating: 4.4, reviews: 41, spicy: false, badge: "Fresh Side", description: "Creamy fresh coleslaw that pairs well with rice dishes, grills, and party packs.", dietaryTags: ["Side", "Fresh", "Mild"], dietaryProfile: "A mild side dish that helps balance heavier or spicier meals.", soldOut: false, hidden: false },
+  { id: 13, name: "Moi Moi", category: "Sides", price: 1800, rating: 4.6, reviews: 67, spicy: false, badge: "Protein Side", description: "Soft steamed bean pudding that works well as a side or light meal addition.", dietaryTags: ["Beans", "Side", "Mild"], dietaryProfile: "A lighter bean-based side that can support guests asking for something softer and less spicy.", soldOut: false, hidden: false },
+  { id: 14, name: "Oha Soup", category: "Soup", price: 4400, rating: 4.8, reviews: 103, spicy: false, badge: "Native Choice", description: "A warm, comforting oha soup with a beautiful home-style local finish.", dietaryTags: ["Soup", "Traditional", "Local"], dietaryProfile: "Milder native soup option with a home-style feel and strong local appeal.", soldOut: false, hidden: false },
+  { id: 15, name: "Parfait", category: "Drinks & Desserts", price: 2500, rating: 4.5, reviews: 38, spicy: false, badge: "Cool Treat", description: "Layered parfait for guests who want a chilled, sweet add-on to their order.", dietaryTags: ["Dessert", "Cool", "Sweet"], dietaryProfile: "A dessert-style add-on rather than a main meal. Good for lighter, chilled indulgence.", soldOut: false, hidden: false },
+  { id: 16, name: "Plantain", category: "Sides", price: 1400, rating: 4.7, reviews: 59, spicy: false, badge: "Side Favorite", description: "Golden fried plantain that pairs easily with rice, soup, and grilled meals.", dietaryTags: ["Side", "Sweet", "Mild"], dietaryProfile: "A mild popular side that complements many PEM dishes.", soldOut: false, hidden: false },
+  { id: 17, name: "Porridge Beans and Plantain", category: "Local Special", price: 3300, rating: 4.6, reviews: 73, spicy: false, badge: "Comfort Meal", description: "Comforting beans porridge served with sweet plantain for a filling local option.", dietaryTags: ["Beans", "Local", "Mild"], dietaryProfile: "A gentler local comfort meal and one of the softer non-spicy options on the menu.", soldOut: false, hidden: false },
+  { id: 18, name: "White Rice and Sauce", category: "Rice", price: 3400, rating: 4.5, reviews: 64, spicy: false, badge: "Simple Choice", description: "Plain white rice served with rich sauce for guests who want a simpler plate.", dietaryTags: ["Rice-based", "Mild", "Simple"], dietaryProfile: "A simpler rice dish for guests who want a less intense flavor profile.", soldOut: false, hidden: false },
+  { id: 19, name: "White Soup (Ofe Nsala)", category: "Soup", price: 4700, rating: 4.8, reviews: 88, spicy: false, badge: "Chef's Pick", description: "Delicate white soup with a refined native flavor and rich event-style presentation.", dietaryTags: ["Soup", "Native", "Mild"], dietaryProfile: "A polished native soup option with milder flavor than the hotter soup choices.", soldOut: false, hidden: false },
+  { id: 20, name: "Hollandia", category: "Drinks", price: 1200, rating: 4.4, reviews: 22, spicy: false, badge: "Chilled Drink", description: "Cold dairy drink for guests who want something smooth and refreshing with their meal.", dietaryTags: ["Drink", "Cold", "Mild"], dietaryProfile: "A chilled drink option that pairs well with spicy or heavy meals.", soldOut: false, hidden: false },
+  { id: 21, name: "Smoothie", category: "Drinks", price: 2200, rating: 4.6, reviews: 31, spicy: false, badge: "Fresh Blend", description: "Fresh smoothie with a cooler, lighter feel for customers who want a premium drink.", dietaryTags: ["Drink", "Cold", "Fresh"], dietaryProfile: "A lighter premium drink option for customers who want something refreshing.", soldOut: false, hidden: false },
+  { id: 22, name: "Water", category: "Drinks", price: 500, rating: 4.8, reviews: 18, spicy: false, badge: "Essential", description: "Simple bottled water to complete any PEM order.", dietaryTags: ["Drink", "Hydration", "Zero spice"], dietaryProfile: "The simplest drink choice for every customer.", soldOut: false, hidden: false },
+];
 const storage = createStorage({
   dataDir: DATA_DIR,
   dbPath: DB_PATH,
   supabaseUrl: forceLocalStorage ? "" : process.env.SUPABASE_URL,
   supabaseServiceRoleKey: forceLocalStorage ? "" : process.env.SUPABASE_SERVICE_ROLE_KEY,
   defaultDeliveryZones,
+  defaultMenuItems,
 });
 
-const allowedOrigins = [process.env.FRONTEND_URL, "http://localhost:5173", "http://127.0.0.1:5173"].filter(Boolean);
+const allowedOrigins = [...new Set([...frontendUrls, "http://localhost:5173", "http://127.0.0.1:5173"])];
 
 app.use(
   cors({
@@ -325,9 +355,59 @@ async function persistAdminPassword(nextPassword) {
   adminPassword = nextPassword;
 }
 
+async function initializePaystackTransaction({ email, amount, reference, metadata }) {
+  const response = await fetch("https://api.paystack.co/transaction/initialize", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${paystackSecretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      amount,
+      reference,
+      callback_url: `${frontendUrl}/?payment=paystack`,
+      metadata,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.status === false) {
+    throw new Error(data.message || "Unable to initialize Paystack payment.");
+  }
+
+  return data.data;
+}
+
+async function verifyPaystackTransaction(reference) {
+  const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+    headers: {
+      Authorization: `Bearer ${paystackSecretKey}`,
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.status === false) {
+    throw new Error(data.message || "Unable to verify Paystack payment.");
+  }
+
+  return data.data;
+}
+
 app.get("/api/health", (_request, response) => {
-  response.json({ ok: true });
+  response.json({
+    ok: true,
+    storageMode: storage.mode,
+    aiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    paystackConfigured: Boolean(paystackSecretKey),
+    allowedOrigins,
+  });
 });
+
+app.get("/api/menu", asyncHandler(async (_request, response) => {
+  const menuItems = await storage.getMenuItems();
+  response.json({ menuItems });
+}));
 
 app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   const deliveryZones = await storage.getDeliveryZones();
@@ -432,6 +512,40 @@ app.put("/api/admin/delivery-zones", requireAdmin, asyncHandler(async (request, 
   });
 }));
 
+app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) => {
+  const menuItems = Array.isArray(request.body?.menuItems) ? request.body.menuItems : [];
+
+  if (menuItems.length === 0) {
+    return response.status(400).json({ error: "At least one menu item is required." });
+  }
+
+  const normalized = menuItems.map((item) => ({
+    id: Number(item.id),
+    name: String(item.name || "").trim(),
+    category: String(item.category || "").trim(),
+    price: Number(item.price) || 0,
+    rating: Number(item.rating) || 0,
+    reviews: Number(item.reviews) || 0,
+    spicy: Boolean(item.spicy),
+    badge: String(item.badge || "").trim(),
+    description: String(item.description || "").trim(),
+    dietaryTags: Array.isArray(item.dietaryTags) ? item.dietaryTags : [],
+    dietaryProfile: String(item.dietaryProfile || "").trim(),
+    soldOut: Boolean(item.soldOut),
+    hidden: Boolean(item.hidden),
+  }));
+
+  if (normalized.some((item) => !item.id || !item.name || !item.category || item.price < 0)) {
+    return response.status(400).json({ error: "Each menu item needs an id, name, category, and valid price." });
+  }
+
+  const saved = await storage.updateMenuItems(normalized);
+  response.json({
+    message: "Menu updated successfully.",
+    menuItems: saved,
+  });
+}));
+
 app.post("/api/orders", asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
 
@@ -443,19 +557,73 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "At least one order item is required." });
   }
 
+  const menuItems = await storage.getMenuItems();
+  const soldOutItems = items.filter((item) =>
+    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
+  );
+
+  if (soldOutItems.length > 0) {
+    return response.status(400).json({
+      error: `${soldOutItems[0].name} is currently sold out. Please remove it and try again.`,
+    });
+  }
+
   const order = {
     reference: makeReference("PEM-ORD"),
     customer,
     items,
     pricing,
     createdAt: new Date().toISOString(),
-    status: "received",
+    status: customer?.paymentMethod === "Paystack" ? "awaiting_payment" : "received",
   };
   const savedOrder = await storage.createOrder(order);
 
   return response.status(201).json({
     message: "Order received.",
     order: savedOrder,
+  });
+}));
+
+app.post("/api/payments/paystack/initialize", asyncHandler(async (request, response) => {
+  if (!paystackSecretKey) {
+    return response.status(400).json({ error: "Paystack is not configured on the server." });
+  }
+
+  const { orderReference, email, amount, customerName } = request.body || {};
+  if (!orderReference || !email || !amount) {
+    return response.status(400).json({ error: "Order reference, email, and amount are required." });
+  }
+
+  const payment = await initializePaystackTransaction({
+    email,
+    amount: Math.round(Number(amount) * 100),
+    reference: orderReference,
+    metadata: {
+      orderReference,
+      customerName,
+    },
+  });
+
+  response.json({ payment });
+}));
+
+app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request, response) => {
+  if (!paystackSecretKey) {
+    return response.status(400).json({ error: "Paystack is not configured on the server." });
+  }
+
+  const reference = String(request.params.reference || "").trim();
+  const payment = await verifyPaystackTransaction(reference);
+  let order = await storage.getOrderByReference(reference);
+
+  if (payment.status === "success" && order && order.status === "awaiting_payment") {
+    order = await storage.updateOrderStatus(reference, "received");
+  }
+
+  response.json({
+    payment,
+    verified: payment.status === "success",
+    order,
   });
 }));
 

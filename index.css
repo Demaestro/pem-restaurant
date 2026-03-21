@@ -989,6 +989,11 @@ button:disabled {
   cursor: pointer;
 }
 
+.qty-control button:disabled {
+  background: color-mix(in srgb, var(--surface-strong) 80%, transparent);
+  color: var(--muted);
+}
+
 .qty-control span {
   min-width: 2rem;
   text-align: center;
@@ -1100,6 +1105,15 @@ button:disabled {
 
 .tracking-card__meta strong {
   font-size: 1.05rem;
+}
+
+.tracking-card__hint {
+  margin-top: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: var(--brand-soft);
+  border: 1px solid color-mix(in srgb, var(--brand) 16%, var(--line));
+  color: var(--muted);
 }
 
 .tracking-history {
@@ -1264,6 +1278,12 @@ button:disabled {
   word-break: break-word;
 }
 
+.admin-item__subtle {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 .admin-status-row {
   display: flex;
   align-items: center;
@@ -1298,6 +1318,11 @@ button:disabled {
 .status-pill--received {
   background: rgba(88, 118, 255, 0.12);
   color: #4b63d1;
+}
+
+.status-pill--awaiting_payment {
+  background: rgba(168, 101, 29, 0.14);
+  color: #9a5b10;
 }
 
 .status-pill--preparing {
@@ -1342,6 +1367,10 @@ button:disabled {
 
 :root[data-theme="dark"] .status-pill--received {
   color: #adc0ff;
+}
+
+:root[data-theme="dark"] .status-pill--awaiting_payment {
+  color: #ffd29a;
 }
 
 :root[data-theme="dark"] .status-pill--preparing {

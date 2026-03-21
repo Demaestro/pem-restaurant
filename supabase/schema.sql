@@ -46,3 +46,20 @@ create table if not exists public.delivery_zones (
   eta text not null,
   sort_order integer not null default 0
 );
+
+create table if not exists public.menu_items (
+  id bigint generated always as identity primary key,
+  item_id integer not null unique,
+  name text not null,
+  category text not null,
+  price integer not null default 0,
+  rating numeric not null default 0,
+  reviews integer not null default 0,
+  spicy boolean not null default false,
+  badge text,
+  description text,
+  dietary_tags jsonb not null default '[]'::jsonb,
+  dietary_profile text,
+  sold_out boolean not null default false,
+  hidden boolean not null default false
+);

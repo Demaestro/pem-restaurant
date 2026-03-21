@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:web\" \"npm run dev:api\"",
+    "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
     "dev:api": "node server.js",
     "build": "vite build",

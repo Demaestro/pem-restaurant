@@ -29,20 +29,24 @@ Set these values:
 
 - `ADMIN_PASSWORD`
 - `FRONTEND_URL`
+- `FRONTEND_URLS` if you want to allow more than one frontend domain
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `PAYSTACK_SECRET_KEY`
 
 Example:
 
 ```env
 ADMIN_PASSWORD=use-a-strong-password-here
 FRONTEND_URL=https://your-frontend-domain.vercel.app
+FRONTEND_URLS=https://your-frontend-domain.vercel.app,https://your-preview-domain.vercel.app
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-5-mini
+PAYSTACK_SECRET_KEY=your-paystack-secret-key
 ```
 
 ## 3. Frontend environment variables
@@ -92,7 +96,9 @@ to the Vercel environment variables.
 Make sure:
 
 - `FRONTEND_URL` on the backend matches your deployed frontend domain
+- `FRONTEND_URLS` includes any extra preview or alternate frontend domains you want to allow
 - `VITE_API_BASE_URL` on the frontend matches your deployed backend domain
+- `PAYSTACK_SECRET_KEY` is set on the backend before enabling Paystack checkout
 
 ## 7. Test after deployment
 
@@ -107,6 +113,7 @@ Test these flows:
 - Order status update
 - CSV export
 - Password change
+- Paystack payment return updates the order from `awaiting_payment` to `received`
 
 ## Notes
 
