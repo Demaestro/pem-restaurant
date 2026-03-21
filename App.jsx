@@ -529,6 +529,94 @@ function getBusinessStatus() {
   };
 }
 
+function buildClientDietaryFallback(needs) {
+  const normalizedNeeds = needs.trim().toLowerCase();
+  const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
+  const needsLowSpice = /\b(low spice|less spicy|mild|not spicy|no pepper)\b/.test(normalizedNeeds);
+  const needsSpicy = !needsLowSpice && /\b(spicy|hot|pepper|pepper soup)\b/.test(normalizedNeeds);
+  const wantsLocal = /\b(local|traditional|native|swallow|soup)\b/.test(normalizedNeeds);
+  const wantsBudget = /\b(cheap|budget|affordable|low price)\b/.test(normalizedNeeds);
+  const wantsProtein = /\b(high protein|protein|filling|gym)\b/.test(normalizedNeeds);
+  const avoidsBeef = /\b(no beef|without beef|avoid beef)\b/.test(normalizedNeeds);
+
+  if (needsVegetarian) {
+    return {
+      loading: false,
+      error: "",
+      summary: "PEM does not currently show a clearly vegetarian or vegan main meal in this menu.",
+      caution:
+        "For strict vegetarian, vegan, allergy, or medical needs, please contact PEM directly before ordering.",
+      matches: [],
+      mode: "smart-filter",
+      degraded: true,
+    };
+  }
+
+  const matches = menuItems
+    .map((item) => {
+      const haystack = [
+        item.name,
+        item.category,
+        item.badge,
+        item.description,
+        item.dietaryProfile,
+        item.dietaryTags.join(" "),
+      ]
+        .join(" ")
+        .toLowerCase();
+      let score = item.rating;
+      let reason = "matches your request more closely than other current menu options";
+
+      if (needsLowSpice && item.spicy) score -= 4;
+      if (needsLowSpice && !item.spicy) {
+        score += 2;
+        reason = "better for a milder spice preference";
+      }
+      if (needsSpicy && item.spicy) {
+        score += 2;
+        reason = "good fit for guests who want more heat";
+      }
+      if (wantsLocal && /\b(local|traditional|native|soup|classic)\b/.test(haystack)) {
+        score += 2;
+        reason = "closer to the traditional local dishes PEM offers";
+      }
+      if (wantsBudget && item.price <= 3900) {
+        score += 1.5;
+        reason = "one of the better-value options on the menu";
+      }
+      if (wantsProtein && /\b(chicken|beef|goat|protein|meat)\b/.test(haystack)) {
+        score += 1.8;
+        reason = "more filling for protein-focused orders";
+      }
+      if (avoidsBeef && /\bbeef\b/.test(haystack)) {
+        score -= 4;
+      }
+
+      return {
+        itemId: item.id,
+        score,
+        reason,
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .filter((item) => item.score > 1)
+    .map(({ itemId, reason }) => ({ itemId, reason }));
+
+  return {
+    loading: false,
+    error: "",
+    summary: matches.length
+      ? "These dishes are the closest matches to the dietary preference you entered."
+      : "PEM could not find a strong exact match from the current menu, but you can still browse or contact the team for a custom recommendation.",
+    caution:
+      "Dietary guidance is based on current menu descriptions and should be confirmed with PEM for strict needs.",
+    matches,
+    mode: "smart-filter",
+    degraded: true,
+  };
+}
+
 async function postJson(url, payload) {
   const response = await fetch(apiUrl(url), {
     method: "POST",
@@ -1496,11 +1584,9 @@ export default function App() {
       });
       setShowDietaryMatchesOnly(Array.isArray(result.matches) && result.matches.length > 0);
     } catch (error) {
-      setDietaryState({
-        ...initialDietaryState,
-        error: error.message,
-      });
-      setShowDietaryMatchesOnly(false);
+      const fallbackResult = buildClientDietaryFallback(dietaryNeeds);
+      setDietaryState(fallbackResult);
+      setShowDietaryMatchesOnly(fallbackResult.matches.length > 0);
     }
   }
 
