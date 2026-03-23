@@ -12,13 +12,19 @@ import abachaImage from "./Abacha.jpg";
 import afangImage from "./Afang Soup.jpg";
 import asunImage from "./Asun.jpeg";
 import coleslawImage from "./Coleslaw.jpg";
+import cokeImage from "./coke.webp";
+import edikaikongImage from "./Edikaikong Soup.webp";
+import fantaImage from "./Fanta.jpg";
 import hollandiaImage from "./Hollandia.jpg";
 import moiMoiImage from "./Moimoi.jpg";
+import nkwobiImage from "./Nkwobi.webp";
 import ohaImage from "./Oha soup.jpg";
 import parfaitImage from "./Parfaits.jpg";
 import plantainImage from "./Plantain.jpg";
 import beansPlantainImage from "./Porridge beans and plantain.jpg";
+import smallChopsImage from "./Small chops.webp";
 import smoothieImage from "./Smoothie.jpg";
+import spriteImage from "./Spirite.webp";
 import waterImage from "./Water.jpg";
 import whiteRiceSauceImage from "./White rice and Sauce.jpeg";
 import whiteSoupImage from "./White Soup (Ofe Nsala).jpg";
@@ -332,6 +338,90 @@ const menuItems = [
     dietaryTags: ["Drink", "Hydration", "Zero spice"],
     dietaryProfile: "The simplest drink choice for every customer.",
   },
+  {
+    id: 23,
+    name: "Edikaikong Soup",
+    category: "Soup",
+    price: 4800,
+    rating: 4.8,
+    reviews: 54,
+    image: edikaikongImage,
+    spicy: false,
+    badge: "Deep Local",
+    description: "Rich edikaikong soup prepared with leafy depth, local flavour, and a fuller native finish.",
+    dietaryTags: ["Soup", "Local", "Rich"],
+    dietaryProfile: "A rich native soup with a deep local profile for customers who want another premium traditional option.",
+  },
+  {
+    id: 24,
+    name: "Nkwobi",
+    category: "Local Special",
+    price: 4500,
+    rating: 4.7,
+    reviews: 39,
+    image: nkwobiImage,
+    spicy: true,
+    badge: "Spicy Local",
+    description: "Bold nkwobi with a spicy palm-oil finish for customers who want a strong traditional bite.",
+    dietaryTags: ["Local", "Spicy", "Protein"],
+    dietaryProfile: "A bold native delicacy with a spicy profile, better suited to customers who enjoy stronger traditional flavours.",
+  },
+  {
+    id: 25,
+    name: "Small Chops",
+    category: "Starters",
+    price: 3000,
+    rating: 4.6,
+    reviews: 47,
+    image: smallChopsImage,
+    spicy: false,
+    badge: "Party Tray",
+    description: "Assorted small chops for quick snacking, events, and add-on party orders.",
+    dietaryTags: ["Starter", "Party", "Shareable"],
+    dietaryProfile: "A shareable starter pack that works well for events, office orders, and quick add-ons.",
+  },
+  {
+    id: 26,
+    name: "Fanta",
+    category: "Drinks",
+    price: 700,
+    rating: 4.5,
+    reviews: 21,
+    image: fantaImage,
+    spicy: false,
+    badge: "Cold Drink",
+    description: "Chilled orange soda for customers who want a familiar sweet drink with their meal.",
+    dietaryTags: ["Drink", "Cold", "Sweet"],
+    dietaryProfile: "A classic soft drink choice that pairs well with rice meals, grills, and party trays.",
+  },
+  {
+    id: 27,
+    name: "Coke",
+    category: "Drinks",
+    price: 700,
+    rating: 4.6,
+    reviews: 28,
+    image: cokeImage,
+    spicy: false,
+    badge: "Classic Soda",
+    description: "Cold Coke served as an easy everyday drink option for lunch, dinner, or event orders.",
+    dietaryTags: ["Drink", "Cold", "Classic"],
+    dietaryProfile: "A dependable soft drink option for customers who want something simple and familiar.",
+  },
+  {
+    id: 28,
+    name: "Sprite",
+    category: "Drinks",
+    price: 700,
+    rating: 4.4,
+    reviews: 17,
+    image: spriteImage,
+    spicy: false,
+    badge: "Lemon-Lime",
+    description: "Refreshing lemon-lime soda that works nicely with soups, local dishes, and spicy meals.",
+    dietaryTags: ["Drink", "Cold", "Refreshing"],
+    dietaryProfile: "A crisp soft drink option with a lighter feel for spicy meals and native dishes.",
+  },
 ];
 
 const cateringPackages = [
@@ -362,14 +452,13 @@ const menuSections = [
   { id: "all", label: "Everything", categories },
   { id: "mains", label: "Main Meals", categories: ["All", "Rice", "Pasta", "Grills", "Local Special"] },
   { id: "soups", label: "Soups", categories: ["All", "Soup"] },
-  { id: "sides", label: "Sides", categories: ["All", "Sides"] },
+  { id: "sides", label: "Sides", categories: ["All", "Sides", "Starters"] },
   { id: "drinks", label: "Drinks & Desserts", categories: ["All", "Drinks", "Drinks & Desserts"] },
 ];
 const drinkCount = menuItems.filter((item) => item.category.includes("Drink")).length;
 const localDishCount = menuItems.filter(
   (item) => item.category === "Soup" || item.category === "Local Special",
 ).length;
-const whatsappPhone = "2348033345161";
 const dietaryPrompts = [
   "I want something less spicy.",
   "Show me high-protein meals.",
@@ -432,10 +521,22 @@ const initialCheckout = {
   fulfillmentMethod: "delivery",
   scheduledFor: "",
   deliveryZone: "gwarinpa",
-  paymentMethod: "Pay on delivery",
+  paymentMethod: "Pay on arrival",
   paymentReference: "",
   promoCode: "",
 };
+
+const cardPaymentMethodLabel = "Pay with card";
+
+const checkoutPaymentOptions = [
+  { label: "Pay on arrival", icon: "ARR" },
+  { label: cardPaymentMethodLabel, icon: "CARD" },
+  { label: "Bank transfer", icon: "TRF" },
+];
+
+function isCardPaymentMethod(method) {
+  return [cardPaymentMethodLabel, "Paystack"].includes(String(method || "").trim());
+}
 
 const initialTrackingState = {
   loading: false,
@@ -519,6 +620,15 @@ const initialDietaryState = {
   mode: "",
   degraded: false,
 };
+const initialPromoValidationState = {
+  loading: false,
+  valid: false,
+  amount: 0,
+  code: "",
+  minimumOrder: 0,
+  subtotal: 0,
+  error: "",
+};
 
 const initialBusinessSettings = {
   businessName: "Precious Events Makers",
@@ -538,8 +648,8 @@ const initialBusinessSettings = {
   bankAccountNumber: "0123456789",
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
   minimumOrder: 1500,
-  promoCodesText: "WELCOME10|percent|10|5000\nPARTY500|flat|500|7000",
-  staffAdminsText: "manager|PemStaff2026|Floor Manager",
+  promoCodesText: "",
+  staffAdminsText: "",
   branchLocationsText:
     "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
   receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
@@ -599,18 +709,55 @@ const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "prep
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const CACHE_TTL = {
+  account: 10 * 60 * 1000,
+  deliveryZones: 30 * 60 * 1000,
+  menu: 10 * 60 * 1000,
+  settings: 15 * 60 * 1000,
+  admin: 2 * 60 * 1000,
+  tracking: 10 * 60 * 1000,
+};
+const ORDER_ITEM_LIMIT = 10;
 
 function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
 }
 
-function readCachedJson(key, fallback = null) {
+function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINITY) {
   if (typeof window === "undefined") {
     return fallback;
   }
   try {
     const rawValue = window.localStorage.getItem(key);
-    return rawValue ? JSON.parse(rawValue) : fallback;
+    if (!rawValue) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(rawValue);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.prototype.hasOwnProperty.call(parsed, "savedAt") &&
+      Object.prototype.hasOwnProperty.call(parsed, "value")
+    ) {
+      if (
+        Number.isFinite(maxAgeMs) &&
+        maxAgeMs !== Number.POSITIVE_INFINITY &&
+        Date.now() - Number(parsed.savedAt || 0) > maxAgeMs
+      ) {
+        window.localStorage.removeItem(key);
+        return fallback;
+      }
+      return parsed.value;
+    }
+
+    if (Number.isFinite(maxAgeMs) && maxAgeMs !== Number.POSITIVE_INFINITY) {
+      window.localStorage.removeItem(key);
+      return fallback;
+    }
+
+    return parsed;
   } catch {
     return fallback;
   }
@@ -621,7 +768,13 @@ function writeCachedJson(key, value) {
     return;
   }
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        savedAt: Date.now(),
+        value,
+      }),
+    );
   } catch {
     // Ignore cache write failures.
   }
@@ -642,8 +795,9 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-function getDeliveryZone(zoneId) {
-  return defaultDeliveryZones.find((zone) => zone.id === zoneId) || defaultDeliveryZones[0];
+function getDeliveryZone(zoneId, zones = defaultDeliveryZones) {
+  const sourceZones = Array.isArray(zones) && zones.length > 0 ? zones : defaultDeliveryZones;
+  return sourceZones.find((zone) => zone.id === zoneId) || sourceZones[0];
 }
 
 function formatHour(hour) {
@@ -688,11 +842,100 @@ function getLagosNowParts() {
   };
 }
 
-function isMenuItemScheduledNow(item) {
+function parseTimeLabelToMinutes(value) {
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(String(value || "").trim());
+  if (!match) {
+    return null;
+  }
+
+  let hours = Number(match[1]) || 0;
+  const minutes = Number(match[2] || 0) || 0;
+  const suffix = String(match[3] || "").toUpperCase();
+
+  if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  if (suffix === "AM") {
+    hours = hours === 12 ? 0 : hours;
+  } else {
+    hours = hours === 12 ? 12 : hours + 12;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function parseHoursWindow(hoursText) {
+  const [openLabel, closeLabel] = String(hoursText || "")
+    .split("-")
+    .map((part) => String(part || "").trim());
+  const openMinutes = parseTimeLabelToMinutes(openLabel);
+  const closeMinutes = parseTimeLabelToMinutes(closeLabel);
+
+  if (openMinutes === null || closeMinutes === null) {
+    return null;
+  }
+
+  return { openMinutes, closeMinutes };
+}
+
+function isTimeWithinWindow(targetMinutes, window) {
+  if (!window || typeof targetMinutes !== "number") {
+    return true;
+  }
+
+  if (window.openMinutes === window.closeMinutes) {
+    return false;
+  }
+
+  if (window.openMinutes < window.closeMinutes) {
+    return targetMinutes >= window.openMinutes && targetMinutes <= window.closeMinutes;
+  }
+
+  return targetMinutes >= window.openMinutes || targetMinutes <= window.closeMinutes;
+}
+
+function isScheduledWithinBusinessHours(scheduledFor, hoursText) {
+  if (!scheduledFor) {
+    return true;
+  }
+
+  const scheduledDate = new Date(scheduledFor);
+  if (Number.isNaN(scheduledDate.getTime())) {
+    return false;
+  }
+
+  const hoursWindow = parseHoursWindow(hoursText);
+  if (!hoursWindow) {
+    return true;
+  }
+
+  return isTimeWithinWindow(
+    scheduledDate.getHours() * 60 + scheduledDate.getMinutes(),
+    hoursWindow,
+  );
+}
+
+function normalizePhoneDigits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function sanitizePhoneInput(value) {
+  return String(value || "")
+    .replace(/[^\d+\s()-]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trimStart()
+    .slice(0, 22);
+}
+
+function getWhatsAppPhone(settings) {
+  return String(settings?.whatsappPhone || initialBusinessSettings.whatsappPhone || "").replace(/\D/g, "");
+}
+
+function isMenuItemScheduledNow(item, now = getLagosNowParts()) {
   const days = normalizeScheduleDays(item.availableDays);
   const startsAt = parseTimeToMinutes(item.availableFrom);
   const endsAt = parseTimeToMinutes(item.availableUntil);
-  const now = getLagosNowParts();
 
   if (!days.includes(now.day)) {
     return false;
@@ -709,7 +952,7 @@ function isMenuItemScheduledNow(item) {
   return now.minutes >= startsAt || now.minutes <= endsAt;
 }
 
-function formatScheduleLabel(item) {
+function formatScheduleLabelLegacy(item) {
   const days = normalizeScheduleDays(item.availableDays);
   const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
   const hasTimeWindow = item.availableFrom && item.availableUntil;
@@ -731,8 +974,18 @@ function getBusinessStatus() {
   const parts = formatter.formatToParts(new Date());
   const weekday = parts.find((part) => part.type === "weekday")?.value;
   const hourValue = Number(parts.find((part) => part.type === "hour")?.value || 0);
-  const schedule = businessHours.find((entry) => entry.day === weekday) || businessHours[0];
-  const isOpen = hourValue >= schedule.open && hourValue < schedule.close;
+  const schedule = businessHours.find((entry) => entry.day === weekday);
+
+  if (!schedule) {
+    return {
+      isOpen: false,
+      label: "Closed today",
+    };
+  }
+
+  const isOpen = schedule.close <= schedule.open
+    ? hourValue >= schedule.open || hourValue < schedule.close
+    : hourValue >= schedule.open && hourValue < schedule.close;
 
   return {
     isOpen,
@@ -747,7 +1000,8 @@ function mergeMenuCatalog(baseItems, remoteItems) {
   return baseItems.map((item) => ({
     ...item,
     ...(remoteById.get(item.id) || {}),
-    imageUrl: remoteById.get(item.id)?.imageUrl || item.imageUrl || "",
+    image: String(remoteById.get(item.id)?.imageUrl || item.image || "").trim(),
+    imageUrl: String(remoteById.get(item.id)?.imageUrl || item.imageUrl || "").trim(),
     stockQuantity: Number(remoteById.get(item.id)?.stockQuantity ?? item.stockQuantity ?? 12) || 0,
     availableFrom: String(remoteById.get(item.id)?.availableFrom ?? item.availableFrom ?? defaultMenuSchedule.availableFrom),
     availableUntil: String(remoteById.get(item.id)?.availableUntil ?? item.availableUntil ?? defaultMenuSchedule.availableUntil),
@@ -809,6 +1063,9 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
 }
 
 function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
+  const fallbackAddress = String(settings.address || "").trim() || "Address confirmed by PEM";
+  const fallbackPhone = String(settings.phone || "").trim() || "Phone confirmed by PEM";
+  const fallbackHours = String(settings.businessHoursText || "").trim() || "Hours confirmed by PEM";
   const parsed = String(rawValue || "")
     .split("\n")
     .map((line) => line.trim())
@@ -821,9 +1078,9 @@ function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
       return {
         id: id.toLowerCase(),
         label,
-        address: address || settings.address,
-        phone: phone || settings.phone,
-        hours: hours || settings.businessHoursText,
+        address: address || fallbackAddress,
+        phone: phone || fallbackPhone,
+        hours: hours || fallbackHours,
         note: note || `Service support from ${label}.`,
         rank: index,
       };
@@ -835,15 +1092,15 @@ function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
   }
 
   return [
-    {
-      id: "main-branch",
-      label: `${settings.appName} Main Branch`,
-      address: settings.address,
-      phone: settings.phone,
-      hours: settings.businessHoursText,
-      note: `${settings.businessName} main branch.`,
-      rank: 0,
-    },
+      {
+        id: "main-branch",
+        label: `${settings.appName} Main Branch`,
+        address: fallbackAddress,
+        phone: fallbackPhone,
+        hours: fallbackHours,
+        note: `${settings.businessName} main branch.`,
+        rank: 0,
+      },
   ];
 }
 
@@ -914,7 +1171,7 @@ function getTrackingStatusSummary(order, selectedZoneLabel = "") {
   return "Track this reference again in a few minutes if the status does not update immediately.";
 }
 
-function menuItemMatchesSearch(item, rawSearch, branch) {
+function menuItemMatchesSearch(item, rawSearch, branch, nowParts = getLagosNowParts()) {
   const normalizedSearch = String(rawSearch || "").trim().toLowerCase();
   if (!normalizedSearch) {
     return true;
@@ -964,13 +1221,13 @@ function menuItemMatchesSearch(item, rawSearch, branch) {
       return !item.spicy || /mild|soft|gentle/.test(haystack);
     }
     if (["available", "today", "now"].includes(token)) {
-      return isMenuItemScheduledNow(item) && !item.soldOut && !item.hidden;
+      return isMenuItemScheduledNow(item, nowParts) && !item.soldOut && !item.hidden;
     }
     return false;
   });
 }
 
-function getBranchAvailabilityMeta(item, branch) {
+function getBranchAvailabilityMeta(item, branch, nowParts = getLagosNowParts()) {
   const branchLabel = branch?.label || "PEM Branch";
 
   if (item.hidden) {
@@ -979,7 +1236,7 @@ function getBranchAvailabilityMeta(item, branch) {
   if (item.soldOut) {
     return { label: `Unavailable at ${branchLabel}`, tone: "warn" };
   }
-  if (!isMenuItemScheduledNow(item)) {
+  if (!isMenuItemScheduledNow(item, nowParts)) {
     return { label: `Next serving window from ${branchLabel}`, tone: "soft" };
   }
   if (Number(item.stockQuantity || 0) > 0 && Number(item.stockQuantity || 0) <= 4) {
@@ -989,7 +1246,7 @@ function getBranchAvailabilityMeta(item, branch) {
   return { label: `Available from ${branchLabel} today`, tone: "ok" };
 }
 
-function getSuggestedAddOns(cartItems, menuCatalog) {
+function getSuggestedAddOns(cartItems, menuCatalog, nowParts = getLagosNowParts()) {
   if (!Array.isArray(cartItems) || cartItems.length === 0) {
     return [];
   }
@@ -1001,7 +1258,7 @@ function getSuggestedAddOns(cartItems, menuCatalog) {
   const hasRice = cartItems.some((item) => /rice|pasta/i.test(item.name + " " + item.category));
 
   return menuCatalog
-    .filter((item) => !item.hidden && !item.soldOut && isMenuItemScheduledNow(item) && !cartIds.has(item.id))
+    .filter((item) => !item.hidden && !item.soldOut && isMenuItemScheduledNow(item, nowParts) && !cartIds.has(item.id))
     .filter((item) => {
       if (!hasDrink && item.category.toLowerCase().includes("drink")) {
         return true;
@@ -1021,7 +1278,110 @@ function getSuggestedAddOns(cartItems, menuCatalog) {
     .slice(0, 3);
 }
 
-function buildWhatsAppConfirmationUrl(order, settings, fallbackNumber) {
+function getRelatedMenuItems(item, menuCatalog, nowParts = getLagosNowParts()) {
+  if (!item) {
+    return [];
+  }
+
+  const normalizedCategory = String(item.category || "").toLowerCase();
+  const sourceTags = Array.isArray(item.dietaryTags) ? item.dietaryTags.join(" ").toLowerCase() : "";
+
+  return menuCatalog
+    .filter((candidate) => candidate.id !== item.id)
+    .filter((candidate) => !candidate.hidden && !candidate.soldOut && isMenuItemScheduledNow(candidate, nowParts))
+    .filter((candidate) => {
+      const candidateCategory = String(candidate.category || "").toLowerCase();
+      const candidateTags = Array.isArray(candidate.dietaryTags) ? candidate.dietaryTags.join(" ").toLowerCase() : "";
+
+      if (normalizedCategory.includes("soup")) {
+        return /side|swallow|local special/.test(candidateCategory) || /swallow|side|mild/.test(candidateTags);
+      }
+      if (normalizedCategory.includes("rice") || normalizedCategory.includes("pasta")) {
+        return candidateCategory.includes("drink") || /side|dessert/.test(candidateCategory);
+      }
+      if (normalizedCategory.includes("drink")) {
+        return /dessert|side/.test(candidateCategory);
+      }
+      return candidateCategory === normalizedCategory || candidateTags.includes(sourceTags);
+    })
+    .sort((left, right) => left.price - right.price)
+    .slice(0, 2);
+}
+
+function getBadgeTone(badge) {
+  const normalized = String(badge || "").trim().toLowerCase();
+  if (/popular|best seller|favorite/.test(normalized)) {
+    return "popular";
+  }
+  if (/hot|spicy|smoky/.test(normalized)) {
+    return "hot";
+  }
+  if (/signature|premium|chef/.test(normalized)) {
+    return "signature";
+  }
+  if (/local|traditional|native|eastern/.test(normalized)) {
+    return "local";
+  }
+  return "neutral";
+}
+
+function getDietaryTagTone(tag) {
+  const normalized = String(tag || "").trim().toLowerCase();
+  if (/spicy|hot|pepper/.test(normalized)) {
+    return "spicy";
+  }
+  if (/mild|soft|zero spice/.test(normalized)) {
+    return "mild";
+  }
+  if (/drink|cold|fresh|hydration/.test(normalized)) {
+    return "drink";
+  }
+  if (/local|traditional|native|swallow|soup/.test(normalized)) {
+    return "local";
+  }
+  if (/protein|beef|chicken|goat|meat/.test(normalized)) {
+    return "protein";
+  }
+  return "neutral";
+}
+
+function parseEtaMinutes(etaLabel) {
+  const values = String(etaLabel || "").match(/\d+/g);
+  if (!values || values.length === 0) {
+    return null;
+  }
+  return Number(values[values.length - 1]) || null;
+}
+
+function getEtaCountdown(order, deliveryZones) {
+  if (!order?.createdAt || order?.customer?.fulfillmentMethod === "pickup") {
+    return "";
+  }
+
+  const zone = deliveryZones.find((entry) => entry.label === order.customer?.deliveryZone);
+  const etaMinutes = parseEtaMinutes(order.customer?.deliveryEta || zone?.eta);
+  if (!etaMinutes) {
+    return "";
+  }
+
+  const dueAt = new Date(order.createdAt).getTime() + etaMinutes * 60 * 1000;
+  const remainingMs = dueAt - Date.now();
+
+  if (remainingMs <= 0) {
+    return "Delivery window is due now.";
+  }
+
+  const remainingMinutes = Math.ceil(remainingMs / 60000);
+  if (remainingMinutes >= 60) {
+    const hours = Math.floor(remainingMinutes / 60);
+    const minutes = remainingMinutes % 60;
+    return `${hours}h ${minutes}m remaining in the current delivery window.`;
+  }
+
+  return `${remainingMinutes} min remaining in the current delivery window.`;
+}
+
+function buildWhatsAppConfirmationUrlLegacy(order, settings, fallbackNumber) {
   if (!order?.reference) {
     return "";
   }
@@ -1038,7 +1398,63 @@ function buildWhatsAppConfirmationUrl(order, settings, fallbackNumber) {
     `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
   ];
 
-  return `https://wa.me/${settings.whatsappPhone || fallbackNumber}?text=${encodeURIComponent(lines.join("\n"))}`;
+  const targetNumber = getWhatsAppPhone(settings) || String(fallbackNumber || "").replace(/\D/g, "");
+  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
+}
+
+function formatScheduleLabel(item) {
+  const days = normalizeScheduleDays(item.availableDays);
+  const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
+  const hasTimeWindow = item.availableFrom && item.availableUntil;
+  if (!hasCustomDays && !hasTimeWindow) {
+    return "";
+  }
+  const dayLabel = hasCustomDays ? days.map((day) => day.toUpperCase()).join(", ") : "Daily";
+  const timeLabel = hasTimeWindow ? `${item.availableFrom} - ${item.availableUntil}` : "All day";
+  return `${dayLabel} - ${timeLabel}`;
+}
+
+function buildWhatsAppConfirmationUrl(order, settings) {
+  if (!order?.reference) {
+    return "";
+  }
+
+  const branchName = order.customer?.branchName || settings.appName || "PEM";
+  const lines = [
+    `Hello ${branchName}, I am confirming my PEM order.`,
+    "",
+    `Reference: ${order.reference}`,
+    `Name: ${order.customer?.customerName || "Customer"}`,
+    `Branch: ${branchName}`,
+    `Total: ${formatPrice(order.pricing?.total || 0)}`,
+    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
+    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
+  ];
+
+  const targetNumber = getWhatsAppPhone(settings);
+  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
+}
+
+function StarRatingInputLegacy({ value, onChange }) {
+  const numericValue = Number(value) || 0;
+
+  return (
+    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
+          aria-checked={star === numericValue}
+          role="radio"
+          onClick={() => onChange(String(star))}
+        >
+          {"\u2605"}
+        </button>
+      ))}
+      <span className="star-input__label">{numericValue}/5</span>
+    </div>
+  );
 }
 
 function resolvePageFromHash(hashValue = "") {
@@ -1145,7 +1561,7 @@ async function postJson(url, payload, headers = {}) {
   });
 }
 
-async function requestJson(url, { method = "GET", payload, headers = {} } = {}) {
+async function requestJson(url, { method = "GET", payload, headers = {}, retryOnTimeout = method === "GET", attempt = 1 } = {}) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     throw new Error("You're offline right now. Reconnect and try again.");
   }
@@ -1173,7 +1589,19 @@ async function requestJson(url, { method = "GET", payload, headers = {} } = {}) 
     return data;
   } catch (error) {
     if (error.name === "AbortError") {
+      if (retryOnTimeout && attempt < 2) {
+        return requestJson(url, {
+          method,
+          payload,
+          headers,
+          retryOnTimeout,
+          attempt: attempt + 1,
+        });
+      }
       throw new Error("PEM is taking too long to respond. Please try again.");
+    }
+    if (error instanceof TypeError) {
+      throw new Error("PEM could not reach the server. Check your internet or refresh and try again.");
     }
     throw error;
   } finally {
@@ -1192,7 +1620,7 @@ function RatingStars({ rating }) {
             key={star}
             className={star <= filled ? "rating__star rating__star--filled" : "rating__star"}
           >
-            *
+            {"\u2605"}
           </span>
         ))}
       </div>
@@ -1216,6 +1644,28 @@ function StarRatingInput({ value, onChange }) {
           onClick={() => onChange(String(star))}
         >
           ★
+        </button>
+      ))}
+      <span className="star-input__label">{numericValue}/5</span>
+    </div>
+  );
+}
+
+function CleanStarRatingInput({ value, onChange }) {
+  const numericValue = Number(value) || 0;
+
+  return (
+    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
+          aria-checked={star === numericValue}
+          role="radio"
+          onClick={() => onChange(String(star))}
+        >
+          {"\u2605"}
         </button>
       ))}
       <span className="star-input__label">{numericValue}/5</span>
@@ -1263,6 +1713,7 @@ export default function App() {
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [lagosNowTick, setLagosNowTick] = useState(() => Date.now());
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [isCompactHeader, setIsCompactHeader] = useState(false);
   const [activePage, setActivePage] = useState(() =>
@@ -1293,9 +1744,13 @@ export default function App() {
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
   const [addressDraft, setAddressDraft] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [priceRange, setPriceRange] = useState("all");
   const [showCart, setShowCart] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
+  const [lastAddedItemId, setLastAddedItemId] = useState(null);
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
   const [checkoutState, setCheckoutState] = useState({ loading: false, error: "" });
   const [checkoutFieldErrors, setCheckoutFieldErrors] = useState({});
@@ -1314,6 +1769,7 @@ export default function App() {
   const [businessSettings, setBusinessSettings] = useState(initialBusinessSettings);
   const [dietaryNeeds, setDietaryNeeds] = useState("");
   const [dietaryState, setDietaryState] = useState(initialDietaryState);
+  const [promoValidationState, setPromoValidationState] = useState(initialPromoValidationState);
   const [showDietaryMatchesOnly, setShowDietaryMatchesOnly] = useState(false);
   const [adminState, setAdminState] = useState(initialAdminState);
   const [adminPassword, setAdminPassword] = useState("");
@@ -1324,6 +1780,8 @@ export default function App() {
   const [adminQuery, setAdminQuery] = useState("");
   const [menuAdminQuery, setMenuAdminQuery] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [selectedOrderReferences, setSelectedOrderReferences] = useState([]);
+  const [bulkOrderStatus, setBulkOrderStatus] = useState("received");
   const [adminBranchFilter, setAdminBranchFilter] = useState("all");
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -1340,10 +1798,11 @@ export default function App() {
     () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
     [businessSettings],
   );
+  const lagosNow = useMemo(() => getLagosNowParts(), [lagosNowTick]);
   const selectedBranch =
     branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
-  const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item));
+  const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item, lagosNow));
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
 
   function validateCheckoutField(field, value) {
@@ -1351,11 +1810,16 @@ export default function App() {
     if (field === "customerName" && String(value || "").trim().length < 2) {
       error = "Enter your full name";
     }
-    if (field === "phone" && String(value || "").replace(/\D/g, "").length < 10) {
+    if (field === "phone" && normalizePhoneDigits(value).length < 10) {
       error = "Phone must be at least 10 digits";
     }
-    if (field === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) {
-      error = "Enter a valid email";
+    if (field === "email") {
+      const normalizedValue = String(value || "").trim();
+      if (isCardPaymentMethod(checkoutForm.paymentMethod) && !normalizedValue) {
+        error = "Email is required for card payment";
+      } else if (normalizedValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedValue)) {
+        error = "Enter a valid email";
+      }
     }
     if (field === "address" && checkoutForm.fulfillmentMethod !== "pickup" && String(value || "").trim().length < 5) {
       error = "Enter a delivery address";
@@ -1363,8 +1827,112 @@ export default function App() {
     setCheckoutFieldErrors((previous) => ({ ...previous, [field]: error }));
   }
 
+  function focusCheckoutField(field) {
+    if (typeof document === "undefined" || !field) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const fieldElement = document.querySelector(
+        `[data-checkout-field="${field}"] input, [data-checkout-field="${field}"] textarea, [data-checkout-field="${field}"] select`,
+      );
+
+      if (fieldElement instanceof HTMLElement) {
+        fieldElement.focus();
+        fieldElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+  }
+
+  function failCheckout(error, fieldErrors = {}, focusField = "") {
+    setCheckoutState({ loading: false, error });
+    if (Object.keys(fieldErrors).length > 0) {
+      setCheckoutFieldErrors((previous) => ({ ...previous, ...fieldErrors }));
+    }
+    focusCheckoutField(focusField);
+  }
+
   function trackView(itemId) {
     setRecentlyViewed((previous) => [itemId, ...previous.filter((id) => id !== itemId)].slice(0, 6));
+  }
+
+  function rememberPlacedOrderLocally(order) {
+    if (!order?.reference) {
+      return;
+    }
+
+    const nextSavedReferences = [
+      order.reference,
+      ...savedReferences.filter((reference) => reference !== order.reference),
+    ].slice(0, 5);
+    setSavedReferences(nextSavedReferences);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("pem-order-history", JSON.stringify(nextSavedReferences));
+    }
+
+    if (!accountToken) {
+      return;
+    }
+
+    const nextAccountUser = {
+      ...accountUser,
+      phone: accountUser.phone || order.customer?.phone || "",
+      savedAddresses: order.customer?.address
+        ? [
+            order.customer.address,
+            ...(accountUser.savedAddresses || []).filter((item) => item !== order.customer.address),
+          ].slice(0, 5)
+        : accountUser.savedAddresses || [],
+      orderReferences: [
+        order.reference,
+        ...(accountUser.orderReferences || []).filter((reference) => reference !== order.reference),
+      ].slice(0, 20),
+    };
+    const nextAccountOrders = [
+      order,
+      ...accountOrders.filter((existingOrder) => existingOrder.reference !== order.reference),
+    ];
+
+    setAccountUser(nextAccountUser);
+    setAccountOrders(nextAccountOrders);
+    writeCachedJson("pem-account-cache", {
+      user: nextAccountUser,
+      orders: nextAccountOrders,
+    });
+  }
+
+  function resetCheckoutAfterOrder() {
+    setShowCart(false);
+    setCart({});
+    setNotes({});
+    setBranchCarts((previous) => (
+      selectedBranchId
+        ? {
+            ...previous,
+            [selectedBranchId]: { cart: {}, notes: {} },
+          }
+        : previous
+    ));
+    setCheckoutForm(initialCheckout);
+    setCheckoutFieldErrors({});
+    setPromoValidationState(initialPromoValidationState);
+    if (typeof window !== "undefined") {
+      if (selectedBranchId) {
+        try {
+          const persistedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
+          window.localStorage.setItem(
+            "pem-branch-carts",
+            JSON.stringify({
+              ...persistedBranchCarts,
+              [selectedBranchId]: { cart: {}, notes: {} },
+            }),
+          );
+        } catch {
+          // Ignore local storage write issues.
+        }
+      }
+      window.localStorage.removeItem("pem-checkout-draft");
+    }
   }
 
   useEffect(() => {
@@ -1373,6 +1941,14 @@ export default function App() {
       setTheme(savedTheme);
     }
   }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -1393,6 +1969,14 @@ export default function App() {
     window.addEventListener("scroll", handleHeaderScroll, { passive: true });
 
     return () => window.removeEventListener("scroll", handleHeaderScroll);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setLagosNowTick(Date.now());
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -1491,6 +2075,17 @@ export default function App() {
   }, [savedReferences]);
 
   useEffect(() => {
+    if (!accountToken) {
+      return;
+    }
+
+    writeCachedJson("pem-account-cache", {
+      user: accountUser,
+      orders: accountOrders,
+    });
+  }, [accountOrders, accountToken, accountUser]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(
         "pem-checkout-draft",
@@ -1514,6 +2109,18 @@ export default function App() {
     checkoutForm.landmark,
     checkoutForm.phone,
   ]);
+
+  useEffect(() => {
+    if (checkoutPaymentOptions.some((option) => option.label === checkoutForm.paymentMethod)) {
+      return;
+    }
+
+    setCheckoutForm((previous) => ({
+      ...previous,
+      paymentMethod: initialCheckout.paymentMethod,
+      paymentReference: "",
+    }));
+  }, [checkoutForm.paymentMethod]);
 
   useEffect(() => {
     const savedAccountToken = window.localStorage.getItem("pem-account-token");
@@ -1610,6 +2217,19 @@ export default function App() {
   }, [branchLocations, selectedBranchId]);
 
   useEffect(() => {
+    if (!deliveryZones.length) {
+      return;
+    }
+
+    if (!deliveryZones.some((zone) => zone.id === checkoutForm.deliveryZone)) {
+      setCheckoutForm((previous) => ({
+        ...previous,
+        deliveryZone: deliveryZones[0].id,
+      }));
+    }
+  }, [checkoutForm.deliveryZone, deliveryZones]);
+
+  useEffect(() => {
     if (!selectedBranchId) {
       return;
     }
@@ -1696,13 +2316,9 @@ export default function App() {
 
     async function verifyPayment() {
       try {
-        const response = await fetch(apiUrl(`/api/payments/paystack/verify/${encodeURIComponent(reference)}`));
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(data.error || "Unable to verify your payment right now.");
-        }
+        const data = await requestJson(`/api/payments/paystack/verify/${encodeURIComponent(reference)}`);
         if (!data.verified) {
-          throw new Error("Payment is still pending. Please confirm the transaction in Paystack and try again.");
+          throw new Error("Payment is still pending. Please confirm the card transaction and try again.");
         }
         setOrderPlaced(`Payment confirmed for order ${reference}. PEM will continue processing it.`);
         setTrackingReference(reference);
@@ -1712,11 +2328,10 @@ export default function App() {
             error: "",
             order: data.order,
           });
-          setSavedReferences((previous) => [
-            reference,
-            ...previous.filter((item) => item !== reference),
-          ].slice(0, 5));
+          setReceiptOrder(data.order);
+          rememberPlacedOrderLocally(data.order);
         }
+        resetCheckoutAfterOrder();
         if (accountToken) {
           loadAccount();
         }
@@ -1734,7 +2349,10 @@ export default function App() {
   }, [accountToken]);
 
   const visibleCategories = useMemo(() => {
-    const availableCategories = ["All", ...new Set(menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item)).map((item) => item.category))];
+    const availableCategories = [
+      "All",
+      ...new Set(menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item, lagosNow)).map((item) => item.category)),
+    ];
     const section = menuSections.find((item) => item.id === activeMenuSection);
     if (!section) {
       return availableCategories;
@@ -1742,7 +2360,7 @@ export default function App() {
     return section.id === "all"
       ? availableCategories
       : ["All", ...section.categories.filter((category) => category !== "All" && availableCategories.includes(category))];
-  }, [activeMenuSection, menuCatalog]);
+  }, [activeMenuSection, lagosNow, menuCatalog]);
 
   useEffect(() => {
     if (!visibleCategories.includes(activeCategory)) {
@@ -1759,16 +2377,22 @@ export default function App() {
       const matchesCategory = activeCategory === "All" || item.category === activeCategory;
       const matchesRating = item.rating >= minimumRating;
       const matchesFavorites = !showFavoritesOnly || favorites.includes(item.id);
-      const matchesAvailability = !item.hidden && isMenuItemScheduledNow(item);
+      const matchesAvailability = !item.hidden && isMenuItemScheduledNow(item, lagosNow);
+      const matchesPriceRange =
+        priceRange === "all" ||
+        (priceRange === "under-2000" && item.price < 2000) ||
+        (priceRange === "2000-4000" && item.price >= 2000 && item.price <= 4000) ||
+        (priceRange === "above-4000" && item.price > 4000);
       const matchesDietarySelection =
         !showDietaryMatchesOnly || recommendedIdSet.size === 0 || recommendedIdSet.has(item.id);
-      const matchesSearch = menuItemMatchesSearch(item, search, selectedBranch);
+      const matchesSearch = menuItemMatchesSearch(item, search, selectedBranch, lagosNow);
 
       return (
         matchesSection &&
         matchesCategory &&
         matchesRating &&
         matchesAvailability &&
+        matchesPriceRange &&
         matchesFavorites &&
         matchesSearch &&
         matchesDietarySelection
@@ -1784,7 +2408,7 @@ export default function App() {
     }
 
     return items;
-  }, [activeCategory, activeMenuSection, favorites, menuCatalog, minimumRating, recommendedItemIds, search, selectedBranch, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
+  }, [activeCategory, activeMenuSection, favorites, lagosNow, menuCatalog, minimumRating, priceRange, recommendedItemIds, search, selectedBranch, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
 
   const cartItems = Object.entries(cart)
     .filter(([, quantity]) => quantity > 0)
@@ -1803,17 +2427,89 @@ export default function App() {
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const selectedDeliveryZone =
-    deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || deliveryZones[0] || getDeliveryZone();
+    deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || getDeliveryZone(checkoutForm.deliveryZone, deliveryZones);
   const delivery = subtotal > 0 && checkoutForm.fulfillmentMethod !== "pickup" ? selectedDeliveryZone.fee : 0;
-  const promoCodes = useMemo(() => parsePromoCodes(businessSettings.promoCodesText), [businessSettings.promoCodesText]);
-  const promoDiscount = getPromoDiscount(checkoutForm.promoCode, subtotal, promoCodes);
-  const discount = promoDiscount.valid ? promoDiscount.amount : 0;
+  const discount = promoValidationState.valid ? promoValidationState.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
+  useEffect(() => {
+    const normalizedPromoCode = checkoutForm.promoCode.trim().toUpperCase();
+
+    if (!normalizedPromoCode || subtotal <= 0) {
+      setPromoValidationState(initialPromoValidationState);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setPromoValidationState((previous) => ({
+          ...previous,
+          loading: true,
+          error: "",
+          code: normalizedPromoCode,
+          subtotal,
+        }));
+
+        const data = await requestJson("/api/promo/validate", {
+          method: "POST",
+          payload: {
+            promoCode: normalizedPromoCode,
+            subtotal,
+          },
+          retryOnTimeout: true,
+        });
+        const promo = data.promo || initialPromoValidationState;
+        setPromoValidationState({
+          loading: false,
+          valid: Boolean(promo.valid),
+          amount: Number(promo.amount) || 0,
+          code: String(promo.code || normalizedPromoCode),
+          minimumOrder: Number(promo.minimumOrder) || 0,
+          subtotal,
+          error: "",
+        });
+      } catch (error) {
+        setPromoValidationState({
+          loading: false,
+          valid: false,
+          amount: 0,
+          code: normalizedPromoCode,
+          minimumOrder: 0,
+          subtotal,
+          error: error.message,
+        });
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [checkoutForm.promoCode, subtotal]);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const deliveryEtaLabel = checkoutForm.fulfillmentMethod === "pickup"
     ? `Pickup from ${selectedBranch?.label || `${businessSettings.appName} Branch`} will be confirmed by PEM.`
     : `${selectedDeliveryZone.eta} from ${selectedBranch?.label || `${businessSettings.appName} Branch`}.`;
-  const smartCartSuggestions = useMemo(() => getSuggestedAddOns(cartItems, menuCatalog), [cartItems, menuCatalog]);
+  const smartCartSuggestions = useMemo(() => getSuggestedAddOns(cartItems, menuCatalog, lagosNow), [cartItems, lagosNow, menuCatalog]);
+  const recentOrderItems = useMemo(() => {
+    const recentIds = [];
+    accountOrders.forEach((order) => {
+      order.items.forEach((item) => {
+        if (!recentIds.includes(item.id)) {
+          recentIds.push(item.id);
+        }
+      });
+    });
+
+    return recentIds
+      .map((itemId) => menuCatalog.find((item) => item.id === itemId))
+      .filter((item) => item && !item.hidden && !item.soldOut && isMenuItemScheduledNow(item, lagosNow))
+      .slice(0, 4);
+  }, [accountOrders, lagosNow, menuCatalog]);
+  const lowStockMenuItems = useMemo(
+    () =>
+      menuAdminState.items
+        .filter((item) => !item.hidden && !item.soldOut && Number(item.stockQuantity || 0) > 0 && Number(item.stockQuantity || 0) <= 3)
+        .sort((left, right) => Number(left.stockQuantity || 0) - Number(right.stockQuantity || 0))
+        .slice(0, 6),
+    [menuAdminState.items],
+  );
   const trustHighlights = [
     {
       title: "Fresh local dishes",
@@ -1828,10 +2524,10 @@ export default function App() {
       text: "Customers can move from the app to WhatsApp support without losing their order context.",
     },
   ];
-  const receiptWhatsAppUrl = receiptOrder
-    ? buildWhatsAppConfirmationUrl(receiptOrder, businessSettings, whatsappPhone)
-    : "";
-  const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item));
+  const receiptWhatsAppUrl = receiptOrder ? buildWhatsAppConfirmationUrl(receiptOrder, businessSettings) : "";
+  const receiptEtaCountdown = receiptOrder ? getEtaCountdown(receiptOrder, deliveryZones) : "";
+  const trackingEtaCountdown = trackingState.order ? getEtaCountdown(trackingState.order, deliveryZones) : "";
+  const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item, lagosNow));
   const overStockCartItem = cartItems.find((item) => Number(item.stockQuantity || 0) > 0 && item.quantity > Number(item.stockQuantity || 0));
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
   const normalizedMenuAdminQuery = menuAdminQuery.trim().toLowerCase();
@@ -1917,9 +2613,18 @@ export default function App() {
     .slice(0, 5);
   const chartMaxCount = Math.max(1, ...statusChart.map((entry) => entry.count));
   const chartMaxRevenue = Math.max(1, ...branchSalesChart.map((entry) => entry.totalAmount));
-  const supportWhatsAppUrl = `https://wa.me/${businessSettings.whatsappPhone || whatsappPhone}?text=${encodeURIComponent(
-    `Hello ${businessSettings.appName}, I need help with my order.`,
-  )}`;
+  const supportWhatsAppPhone = getWhatsAppPhone(businessSettings);
+  const supportWhatsAppUrl = supportWhatsAppPhone
+    ? `https://wa.me/${supportWhatsAppPhone}?text=${encodeURIComponent(
+        `Hello ${businessSettings.appName}, I need help with my order.`,
+      )}`
+    : "#";
+  const selectedPaymentIsCard = isCardPaymentMethod(checkoutForm.paymentMethod);
+  const bankTransferReady = Boolean(
+    String(businessSettings.bankName || "").trim() &&
+      String(businessSettings.bankAccountName || "").trim() &&
+      String(businessSettings.bankAccountNumber || "").trim(),
+  );
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
   const loyaltyProgress = Math.min(
     100,
@@ -1993,6 +2698,12 @@ export default function App() {
   });
   const recentReviews = branchScopedReviews.slice(0, 6);
 
+  useEffect(() => {
+    setSelectedOrderReferences((previous) =>
+      previous.filter((reference) => filteredAdminOrders.some((order) => order.reference === reference)),
+    );
+  }, [filteredAdminOrders]);
+
   const filteredMenuAdminItems = menuAdminState.items.filter((item) => {
     return (
       normalizedMenuAdminQuery === "" ||
@@ -2006,7 +2717,7 @@ export default function App() {
     const unavailableItems = Object.entries(cart)
       .filter(([, quantity]) => quantity > 0)
       .map(([id]) => menuCatalog.find((item) => item.id === Number(id)))
-      .filter((item) => item && (item.soldOut || item.hidden || !isMenuItemScheduledNow(item)));
+      .filter((item) => item && (item.soldOut || item.hidden || !isMenuItemScheduledNow(item, lagosNow)));
 
     if (unavailableItems.length === 0) {
       return;
@@ -2040,11 +2751,18 @@ export default function App() {
     if (item?.soldOut && delta > 0) {
       return;
     }
+    if ((cart[itemId] || 0) >= ORDER_ITEM_LIMIT && delta > 0) {
+      setOrderPlaced(`You can order up to ${ORDER_ITEM_LIMIT} portions of ${item?.name || "this meal"} at once.`);
+      window.setTimeout(() => setOrderPlaced(""), 3200);
+      return;
+    }
     if (delta > 0) {
       trackView(itemId);
+      setLastAddedItemId(itemId);
+      window.setTimeout(() => setLastAddedItemId((current) => (current === itemId ? null : current)), 900);
     }
     setCart((previous) => {
-      const nextValue = Math.max(0, (previous[itemId] || 0) + delta);
+      const nextValue = Math.max(0, Math.min(ORDER_ITEM_LIMIT, (previous[itemId] || 0) + delta));
       return {
         ...previous,
         [itemId]: nextValue,
@@ -2057,12 +2775,18 @@ export default function App() {
     if (item?.soldOut && quantity > 0) {
       return;
     }
+    if (quantity > ORDER_ITEM_LIMIT) {
+      setOrderPlaced(`You can order up to ${ORDER_ITEM_LIMIT} portions of ${item?.name || "this meal"} at once.`);
+      window.setTimeout(() => setOrderPlaced(""), 3200);
+    }
     if (quantity > 0) {
       trackView(itemId);
+      setLastAddedItemId(itemId);
+      window.setTimeout(() => setLastAddedItemId((current) => (current === itemId ? null : current)), 900);
     }
     setCart((previous) => ({
       ...previous,
-      [itemId]: Math.max(0, quantity),
+      [itemId]: Math.max(0, Math.min(ORDER_ITEM_LIMIT, quantity)),
     }));
   }
 
@@ -2087,8 +2811,10 @@ export default function App() {
       combo.itemIds.forEach((itemId) => {
         const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
         if (!item?.soldOut && !item?.hidden) {
-          nextCart[itemId] = (nextCart[itemId] || 0) + 1;
+          nextCart[itemId] = Math.min(ORDER_ITEM_LIMIT, (nextCart[itemId] || 0) + 1);
           trackView(itemId);
+          setLastAddedItemId(itemId);
+          window.setTimeout(() => setLastAddedItemId((current) => (current === itemId ? null : current)), 900);
         }
       });
       return nextCart;
@@ -2103,7 +2829,7 @@ export default function App() {
     order.items.forEach((item) => {
       const liveItem = menuCatalog.find((menuItem) => menuItem.id === item.id);
       if (!liveItem?.soldOut && !liveItem?.hidden) {
-        nextCart[item.id] = (nextCart[item.id] || 0) + item.quantity;
+        nextCart[item.id] = Math.min(ORDER_ITEM_LIMIT, (nextCart[item.id] || 0) + item.quantity);
         trackView(item.id);
         if (item.note) {
           nextNotes[item.id] = item.note;
@@ -2219,7 +2945,7 @@ export default function App() {
         error: "",
       }));
     } catch (error) {
-      const cachedAccount = readCachedJson("pem-account-cache");
+      const cachedAccount = readCachedJson("pem-account-cache", null, CACHE_TTL.account);
       if (cachedAccount?.user) {
         const nextUser = { ...initialAccountUser, ...(cachedAccount.user || {}) };
         setAccountUser(nextUser);
@@ -2263,11 +2989,7 @@ export default function App() {
 
   async function loadPublicDeliveryZones() {
     try {
-      const response = await fetch(apiUrl("/api/delivery-zones"));
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load delivery zones.");
-      }
+      const data = await requestJson("/api/delivery-zones");
       if (Array.isArray(data.deliveryZones) && data.deliveryZones.length > 0) {
         setDeliveryZones(data.deliveryZones);
         writeCachedJson("pem-delivery-zones-cache", data.deliveryZones);
@@ -2277,7 +2999,7 @@ export default function App() {
         }));
       }
     } catch {
-      const cachedZones = readCachedJson("pem-delivery-zones-cache", defaultDeliveryZones);
+      const cachedZones = readCachedJson("pem-delivery-zones-cache", defaultDeliveryZones, CACHE_TTL.deliveryZones);
       setDeliveryZones(Array.isArray(cachedZones) && cachedZones.length > 0 ? cachedZones : defaultDeliveryZones);
     }
   }
@@ -2289,15 +3011,13 @@ export default function App() {
         loading: true,
         error: "",
       }));
-      const response = await fetch(apiUrl("/api/menu"), tokenOverride ? {
-        headers: {
-          Authorization: `Bearer ${tokenOverride}`,
-        },
-      } : undefined);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load the PEM menu.");
-      }
+      const data = await requestJson("/api/menu", {
+        headers: tokenOverride
+          ? {
+              Authorization: `Bearer ${tokenOverride}`,
+            }
+          : {},
+      });
       const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
       setMenuCatalog(mergedItems);
       writeCachedJson("pem-menu-cache", mergedItems);
@@ -2309,7 +3029,7 @@ export default function App() {
         items: mergedItems,
       });
     } catch (error) {
-      const cachedMenu = readCachedJson("pem-menu-cache");
+      const cachedMenu = readCachedJson("pem-menu-cache", null, CACHE_TTL.menu);
       setMenuCatalog(Array.isArray(cachedMenu) && cachedMenu.length > 0 ? mergeMenuCatalog(menuItems, cachedMenu) : mergeMenuCatalog(menuItems, []));
       setMenuAdminState((previous) => ({
         ...previous,
@@ -2320,26 +3040,31 @@ export default function App() {
   }
 
   async function loadPublicSettings(tokenOverride = adminToken) {
+    const cacheKey = tokenOverride ? "pem-admin-settings-cache" : "pem-settings-cache";
+
     try {
       setSettingsAdminState((previous) => ({
         ...previous,
         loading: true,
         error: "",
       }));
-      const response = await fetch(apiUrl("/api/settings"), {
+      const data = await requestJson("/api/settings", {
         headers: tokenOverride
           ? {
               Authorization: `Bearer ${tokenOverride}`,
             }
-          : undefined,
+          : {},
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load PEM business settings.");
-      }
       const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
+      const cachedSettingsValue = tokenOverride
+        ? nextSettings
+        : {
+            ...nextSettings,
+            promoCodesText: "",
+            staffAdminsText: "",
+          };
       setBusinessSettings(nextSettings);
-      writeCachedJson("pem-settings-cache", nextSettings);
+      writeCachedJson(cacheKey, cachedSettingsValue);
       setSettingsAdminState({
         loading: false,
         saving: false,
@@ -2348,9 +3073,14 @@ export default function App() {
         settings: nextSettings,
       });
     } catch (error) {
-      const cachedSettings = readCachedJson("pem-settings-cache");
+      const cachedSettings = readCachedJson(cacheKey, null, CACHE_TTL.settings);
       if (cachedSettings) {
-        setBusinessSettings({ ...initialBusinessSettings, ...cachedSettings });
+        setBusinessSettings({
+          ...initialBusinessSettings,
+          ...cachedSettings,
+          promoCodesText: tokenOverride ? cachedSettings.promoCodesText : "",
+          staffAdminsText: tokenOverride ? cachedSettings.staffAdminsText : "",
+        });
       }
       setSettingsAdminState((previous) => ({
         ...previous,
@@ -2404,11 +3134,7 @@ export default function App() {
   async function loadPublicReviews(branchId = selectedBranch?.id || "") {
     try {
       const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
-      const response = await fetch(apiUrl(`/api/reviews${query}`));
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to load PEM reviews.");
-      }
+      const data = await requestJson(`/api/reviews${query}`);
       setPublicReviews(Array.isArray(data.reviews) ? data.reviews : []);
     } catch {
       setPublicReviews([]);
@@ -2455,7 +3181,7 @@ export default function App() {
       if (error.message === "Admin login required.") {
         setAdminToken("");
       }
-      const cachedAdmin = readCachedJson("pem-admin-summary-cache");
+      const cachedAdmin = readCachedJson("pem-admin-summary-cache", null, CACHE_TTL.admin);
       if (cachedAdmin && error.message !== "Admin login required.") {
         setAdminState({
           loading: false,
@@ -2746,6 +3472,58 @@ export default function App() {
         },
       }));
       setOrderActionState({ loadingRef: "", error: "", success: `Updated ${reference} to ${status}.` });
+    } catch (error) {
+      setOrderActionState({ loadingRef: "", error: error.message, success: "" });
+    }
+  }
+
+  async function handleBulkOrderStatusUpdate() {
+    if (selectedOrderReferences.length === 0) {
+      setOrderActionState({
+        loadingRef: "",
+        error: "Select at least one order before running a bulk status update.",
+        success: "",
+      });
+      return;
+    }
+
+    try {
+      setOrderActionState({
+        loadingRef: "bulk",
+        error: "",
+        success: "",
+      });
+
+      for (const reference of selectedOrderReferences) {
+        const response = await fetch(apiUrl(`/api/admin/orders/${reference}/status`), {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ status: bulkOrderStatus }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Unable to update ${reference}.`);
+        }
+        setAdminState((previous) => ({
+          ...previous,
+          data: {
+            ...previous.data,
+            orders: previous.data.orders.map((order) =>
+              order.reference === reference ? data.order : order,
+            ),
+          },
+        }));
+      }
+
+      setSelectedOrderReferences([]);
+      setOrderActionState({
+        loadingRef: "",
+        error: "",
+        success: `Updated ${selectedOrderReferences.length} order(s) to ${bulkOrderStatus}.`,
+      });
     } catch (error) {
       setOrderActionState({ loadingRef: "", error: error.message, success: "" });
     }
@@ -3216,74 +3994,107 @@ export default function App() {
   }
 
   async function handlePlaceOrder() {
+    const normalizedCustomerName = String(checkoutForm.customerName || "").trim();
+    const normalizedCheckoutPhone = sanitizePhoneInput(checkoutForm.phone);
+    const normalizedEmail = String(checkoutForm.email || "").trim();
+    const normalizedAddress = String(checkoutForm.address || "").trim();
+    const normalizedPromoCode = checkoutForm.promoCode.trim().toUpperCase();
+    const normalizedPaymentReference = String(checkoutForm.paymentReference || "").trim();
+    const nextFieldErrors = {};
+
+    setCheckoutState({ loading: false, error: "" });
+    setCheckoutFieldErrors({});
+
     if (cartItems.length === 0) {
-      setCheckoutState({ loading: false, error: "Add at least one meal before checkout." });
+      failCheckout("Add at least one meal before checkout.");
       return;
     }
 
     if (unavailableCartItem) {
-      setCheckoutState({
-        loading: false,
-        error: `${unavailableCartItem.name} is no longer available. Please remove it or choose another meal.`,
-      });
+      failCheckout(`${unavailableCartItem.name} is no longer available. Please remove it or choose another meal.`);
       return;
     }
 
     if (overStockCartItem) {
-      setCheckoutState({
-        loading: false,
-        error: `${overStockCartItem.name} does not have enough remaining stock for that quantity.`,
-      });
+      failCheckout(`${overStockCartItem.name} does not have enough remaining stock for that quantity.`);
       return;
     }
 
     if (total < Number(businessSettings.minimumOrder || 0)) {
-      setCheckoutState({
-        loading: false,
-        error: `The current minimum order is ${formatPrice(Number(businessSettings.minimumOrder || 0))}.`,
-      });
+      failCheckout(`The current minimum order is ${formatPrice(Number(businessSettings.minimumOrder || 0))}.`);
       return;
     }
 
-    if (!checkoutForm.customerName || !checkoutForm.phone || (checkoutForm.fulfillmentMethod !== "pickup" && !checkoutForm.address)) {
-      setCheckoutState({
-        loading: false,
-        error: "Please enter your name, phone number, and delivery details.",
-      });
+    if (!businessStatus.isOpen && !checkoutForm.scheduledFor) {
+      failCheckout(
+        `PEM is currently closed. ${businessStatus.label}. Schedule this order for later to continue.`,
+        {},
+        "scheduledFor",
+      );
       return;
     }
 
-    if (checkoutForm.phone.replace(/\D/g, "").length < 10) {
-      setCheckoutState({
-        loading: false,
-        error: "Please enter a valid phone number.",
-      });
+    if (normalizedCustomerName.length < 2) {
+      nextFieldErrors.customerName = "Enter your full name";
+    }
+
+    if (normalizePhoneDigits(normalizedCheckoutPhone).length < 10) {
+      nextFieldErrors.phone = "Phone must be at least 10 digits";
+    }
+
+    if (selectedPaymentIsCard && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail || accountUser.email || "")) {
+      nextFieldErrors.email = "Enter a valid email for card payment";
+    }
+
+    if (checkoutForm.fulfillmentMethod !== "pickup" && normalizedAddress.length < 5) {
+      nextFieldErrors.address = "Enter a delivery address";
+    }
+
+    if (
+      checkoutForm.scheduledFor &&
+      !isScheduledWithinBusinessHours(checkoutForm.scheduledFor, selectedBranch?.hours || businessSettings.businessHoursText)
+    ) {
+      nextFieldErrors.scheduledFor = "Choose a time within PEM business hours";
+    }
+
+    if (checkoutForm.paymentMethod === "Bank transfer" && normalizedPaymentReference.length < 3) {
+      nextFieldErrors.paymentReference = "Add your transfer reference";
+    }
+
+    if (checkoutForm.paymentMethod === "Bank transfer" && !bankTransferReady) {
+      failCheckout(
+        "PEM has not finished setting up bank transfer details yet. Please use pay on arrival or contact the team.",
+      );
       return;
     }
 
-    if (checkoutForm.paymentMethod === "Paystack" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(checkoutForm.email)) {
-      setCheckoutState({
-        loading: false,
-        error: "Please enter your email address to pay with Paystack.",
-      });
+    const firstInvalidField = Object.keys(nextFieldErrors).find((field) => nextFieldErrors[field]);
+    if (firstInvalidField) {
+      failCheckout("Please complete the highlighted checkout fields before placing your order.", nextFieldErrors, firstInvalidField);
       return;
     }
 
-    if (checkoutForm.paymentMethod === "Bank transfer" && checkoutForm.paymentReference.trim().length < 3) {
-      setCheckoutState({
-        loading: false,
-        error: "Add your bank transfer payment reference before placing this order.",
-      });
+    if (normalizedPromoCode && promoValidationState.loading) {
+      failCheckout("Please wait while PEM validates your promo code.", {}, "promoCode");
       return;
     }
 
-    if (checkoutForm.promoCode.trim() && !promoDiscount.valid) {
-      setCheckoutState({
-        loading: false,
-        error: promoDiscount.minimumOrder
-          ? `This promo code needs a minimum subtotal of ${formatPrice(promoDiscount.minimumOrder)}.`
+    if (
+      normalizedPromoCode &&
+      (
+        promoValidationState.error ||
+        promoValidationState.code !== normalizedPromoCode ||
+        promoValidationState.subtotal !== subtotal ||
+        !promoValidationState.valid
+      )
+    ) {
+      failCheckout(
+        promoValidationState.minimumOrder
+          ? `This promo code needs a minimum subtotal of ${formatPrice(promoValidationState.minimumOrder)}.`
           : "That promo code is not valid right now.",
-      });
+        {},
+        "promoCode",
+      );
       return;
     }
 
@@ -3293,14 +4104,18 @@ export default function App() {
       const result = await postJson("/api/orders", {
         customer: {
           ...checkoutForm,
+          customerName: normalizedCustomerName,
+          phone: normalizedCheckoutPhone,
+          promoCode: normalizedPromoCode,
           branchId: selectedBranch?.id || "",
           branchName: selectedBranch?.label || "",
           branchAddress: selectedBranch?.address || businessSettings.address,
           branchPhone: selectedBranch?.phone || businessSettings.phone,
-          email: checkoutForm.email || accountUser.email || "",
+          email: normalizedEmail || accountUser.email || "",
+          address: normalizedAddress,
           deliveryZone: checkoutForm.fulfillmentMethod === "pickup" ? "Pickup at PEM" : selectedDeliveryZone.label,
           deliveryEta: checkoutForm.fulfillmentMethod === "pickup" ? "Pickup time confirmed by PEM" : selectedDeliveryZone.eta,
-          paymentReference: checkoutForm.paymentReference,
+          paymentReference: normalizedPaymentReference,
         },
         items: cartItems,
         pricing: {
@@ -3311,21 +4126,54 @@ export default function App() {
         },
       }, getUserAuthHeaders());
 
-      if (checkoutForm.paymentMethod === "Paystack") {
-        const paymentResult = await postJson("/api/payments/paystack/initialize", {
-          orderReference: result.order.reference,
-          email: checkoutForm.email,
-          amount: total,
-          customerName: checkoutForm.customerName,
-        });
+      if (selectedPaymentIsCard) {
+        const finalizeOrderState = (message) => {
+          setOrderPlaced(message);
+          setReceiptOrder(result.order);
+          setTrackingReference(result.order.reference);
+          setTrackingState({
+            loading: false,
+            error: "",
+            order: result.order,
+          });
+          rememberPlacedOrderLocally(result.order);
+          setCheckoutState({ loading: false, error: "" });
+          loadAdminData();
+          if (accountToken) {
+            loadAccount();
+          }
+        };
 
-        setSavedReferences((previous) => [
-          result.order.reference,
-          ...previous.filter((reference) => reference !== result.order.reference),
-        ].slice(0, 5));
-        setReceiptOrder(result.order);
-        window.location.href = paymentResult.payment.authorization_url;
-        return;
+        try {
+          const paymentResult = await postJson(
+            "/api/payments/paystack/initialize",
+            {
+              orderReference: result.order.reference,
+              email: normalizedEmail || accountUser.email || "",
+              amount: result.order.pricing?.total || total,
+              customerName: normalizedCustomerName,
+            },
+            getUserAuthHeaders(),
+          );
+
+          if (!paymentResult.payment?.authorization_url) {
+            throw new Error("PEM could not open card payment right now.");
+          }
+
+          finalizeOrderState(`Redirecting you to secure card payment for order ${result.order.reference}.`);
+          window.location.assign(paymentResult.payment.authorization_url);
+          return;
+        } catch (paymentError) {
+          finalizeOrderState(
+            `Order ${result.order.reference} was saved, but card payment could not start. ${
+              paymentError.message || "Please try again or contact PEM."
+            }`,
+          );
+          window.setTimeout(() => {
+            setOrderPlaced("");
+          }, 8000);
+          return;
+        }
       }
 
       setOrderPlaced(`Order ${result.order.reference} submitted successfully.`);
@@ -3336,14 +4184,8 @@ export default function App() {
         error: "",
         order: result.order,
       });
-      setSavedReferences((previous) => [
-        result.order.reference,
-        ...previous.filter((reference) => reference !== result.order.reference),
-      ].slice(0, 5));
-      setShowCart(false);
-      setCart({});
-      setNotes({});
-      setCheckoutForm(initialCheckout);
+      rememberPlacedOrderLocally(result.order);
+      resetCheckoutAfterOrder();
       setCheckoutState({ loading: false, error: "" });
       loadAdminData();
       if (accountToken) {
@@ -3354,10 +4196,7 @@ export default function App() {
         setOrderPlaced("");
       }, 5000);
     } catch (error) {
-      setCheckoutState({
-        loading: false,
-        error: error.message,
-      });
+      failCheckout(error.message || "PEM could not place this order right now. Please try again.");
     }
   }
 
@@ -3385,7 +4224,7 @@ export default function App() {
       "",
       `Name: ${checkoutForm.customerName}`,
       `Branch: ${selectedBranch?.label || businessSettings.appName}`,
-      `Phone: ${checkoutForm.phone}`,
+      `Phone: ${sanitizePhoneInput(checkoutForm.phone)}`,
       `Address: ${checkoutForm.address || "Will confirm on WhatsApp"}`,
       `Landmark: ${checkoutForm.landmark || "Will confirm on WhatsApp"}`,
       `Area: ${selectedDeliveryZone.label}`,
@@ -3404,9 +4243,47 @@ export default function App() {
       `Total: ${formatPrice(total)}`,
     ].join("\n");
 
+    const targetPhone = getWhatsAppPhone(businessSettings);
+    if (!targetPhone) {
+      setCheckoutState({
+        loading: false,
+        error: "PEM WhatsApp support is not configured right now.",
+      });
+      return;
+    }
     setOrderPlaced("Opening WhatsApp with your PEM order summary.");
     window.setTimeout(() => setOrderPlaced(""), 3500);
-    window.open(`https://wa.me/${businessSettings.whatsappPhone || whatsappPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  }
+
+  async function copyBankTransferDetail(label, value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      setOrderPlaced(`No ${label.toLowerCase()} is available to copy yet.`);
+      window.setTimeout(() => setOrderPlaced(""), 2800);
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const helper = document.createElement("textarea");
+        helper.value = text;
+        helper.setAttribute("readonly", "true");
+        helper.style.position = "absolute";
+        helper.style.left = "-9999px";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        document.body.removeChild(helper);
+      }
+      setOrderPlaced(`${label} copied.`);
+    } catch {
+      setOrderPlaced(`Could not copy ${label.toLowerCase()}.`);
+    }
+
+    window.setTimeout(() => setOrderPlaced(""), 2800);
   }
 
   async function handleContactSubmit(event) {
@@ -3596,12 +4473,7 @@ export default function App() {
         order: null,
       });
 
-      const response = await fetch(apiUrl(`/api/orders/${encodeURIComponent(normalizedReference)}`));
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data.error || "Unable to find that order right now.");
-      }
+      const data = await requestJson(`/api/orders/${encodeURIComponent(normalizedReference)}`);
 
       setTrackingState({
         loading: false,
@@ -3618,7 +4490,7 @@ export default function App() {
         ...previous.filter((reference) => reference !== normalizedReference),
       ].slice(0, 5));
     } catch (error) {
-      const cachedOrder = readCachedJson(`pem-track-${normalizedReference}`);
+      const cachedOrder = readCachedJson(`pem-track-${normalizedReference}`, null, CACHE_TTL.tracking);
       if (cachedOrder) {
         setTrackingState({
           loading: false,
@@ -3719,7 +4591,7 @@ export default function App() {
                 </div>
 
                 <div className="service-form__grid">
-                  <label className="field">
+                  <label className="field" data-checkout-field="customerName">
                     <span>Email</span>
                     <input
                       type="email"
@@ -3731,7 +4603,7 @@ export default function App() {
                     />
                   </label>
 
-                  <label className="field">
+                  <label className="field" data-checkout-field="phone">
                     <span>Password</span>
                     <input
                       type="password"
@@ -3786,7 +4658,7 @@ export default function App() {
                 </div>
 
                 <div className="service-form__grid">
-                  <label className="field">
+                  <label className="field" data-checkout-field="email">
                     <span>Full name</span>
                     <input
                       type="text"
@@ -3798,7 +4670,7 @@ export default function App() {
                     />
                   </label>
 
-                  <label className="field">
+                  <label className="field" data-checkout-field="scheduledFor">
                     <span>Phone number</span>
                     <input
                       type="tel"
@@ -3808,9 +4680,10 @@ export default function App() {
                       }
                       placeholder="0803 334 5161"
                     />
+                    {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
                   </label>
 
-                  <label className="field">
+                  <label className="field" data-checkout-field="address">
                     <span>Email</span>
                     <input
                       type="email"
@@ -3822,7 +4695,7 @@ export default function App() {
                     />
                   </label>
 
-                  <label className="field">
+                  <label className="field" data-checkout-field="paymentReference">
                     <span>Password</span>
                     <input
                       type="password"
@@ -3832,9 +4705,10 @@ export default function App() {
                       }
                       placeholder="At least 6 characters"
                     />
+                    {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
                   </label>
 
-                  <label className="field">
+                  <label className="field" data-checkout-field="promoCode">
                     <span>Referral code</span>
                     <input
                       type="text"
@@ -4046,6 +4920,12 @@ export default function App() {
       >
         Need Help?
       </a>
+      {!showCart ? (
+        <button type="button" className="cart-fab" onClick={() => setShowCart(true)}>
+          <span>Cart</span>
+          <strong>{totalItems}</strong>
+        </button>
+      ) : null}
 
       <main>
         <section className="branch-bar">
@@ -4093,22 +4973,49 @@ export default function App() {
 
         {receiptOrder ? (
           <section className="receipt-section">
-            <div className="receipt-card reveal reveal--up">
-              <div className="account-card__header">
-                <div>
-                  <p className="eyebrow">Checkout complete</p>
+              <div className="receipt-card reveal reveal--up">
+                <div className="account-card__header">
+                  <div>
+                  <p className="eyebrow">{receiptOrder.status === "awaiting_payment" ? "Payment pending" : "Checkout complete"}</p>
                   <h2>{receiptOrder.reference}</h2>
+                  </div>
+                  <span>{receiptOrder.status.replaceAll("_", " ")}</span>
                 </div>
-                <span>{receiptOrder.status.replaceAll("_", " ")}</span>
-              </div>
               <p>
-                PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
-                You can track it below, download the receipt, or continue browsing the menu.
+                {receiptOrder.status === "awaiting_payment" ? (
+                  <>
+                    PEM saved your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>, but it will only be confirmed after your card payment succeeds.
+                    Complete payment to move it into the kitchen queue.
+                  </>
+                ) : (
+                  <>
+                    PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
+                    You can track it below, download the receipt, or continue browsing the menu.
+                  </>
+                )}
               </p>
               <p className="cart-help">Branch: <strong>{receiptOrder.customer?.branchName || selectedBranch?.label || "PEM Branch"}</strong></p>
+              {receiptEtaCountdown ? <p className="cart-help">{receiptEtaCountdown}</p> : null}
               <div className="account-list__actions">
                 <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
                   Download Receipt
+                </button>
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={() => {
+                    setCheckoutForm((previous) => ({
+                      ...previous,
+                      customerName: receiptOrder.customer?.customerName || previous.customerName,
+                      phone: receiptOrder.customer?.phone || previous.phone,
+                      address: receiptOrder.customer?.address || previous.address,
+                      landmark: receiptOrder.customer?.landmark || previous.landmark,
+                      deliveryZone: deliveryZones.find((zone) => zone.label === receiptOrder.customer?.deliveryZone)?.id || previous.deliveryZone,
+                    }));
+                    setShowCart(true);
+                  }}
+                >
+                  Edit Order Details
                 </button>
                 {receiptWhatsAppUrl ? (
                   <a
@@ -4282,6 +5189,25 @@ export default function App() {
                 <p className="account-helper">
                   Your referral code: <strong>{accountUser.referralCode || "Will appear after signup"}</strong>
                 </p>
+                {accountUser.referralCode ? (
+                  <button
+                    type="button"
+                    className="button button--ghost button--small"
+                    onClick={async () => {
+                      const referralLink = `${window.location.origin}${window.location.pathname}#account?ref=${accountUser.referralCode}`;
+                      try {
+                        await navigator.clipboard.writeText(referralLink);
+                        setOrderPlaced("Referral link copied.");
+                        window.setTimeout(() => setOrderPlaced(""), 2200);
+                      } catch {
+                        setOrderPlaced("Copy failed. You can share your referral code manually.");
+                        window.setTimeout(() => setOrderPlaced(""), 2200);
+                      }
+                    }}
+                  >
+                    Copy Referral Link
+                  </button>
+                ) : null}
 
                 <form className="service-form account-card__panel" onSubmit={handleProfileSave}>
                   <div className="service-form__grid">
@@ -4630,6 +5556,7 @@ export default function App() {
                       Delivery ETA: <strong>{trackingState.order.customer.deliveryEta}</strong>
                     </p>
                   ) : null}
+                  {trackingEtaCountdown ? <p className="tracking-card__hint">{trackingEtaCountdown}</p> : null}
                   {trackingState.order.customer.landmark ? (
                     <p>Landmark: <strong>{trackingState.order.customer.landmark}</strong></p>
                   ) : null}
@@ -4656,7 +5583,7 @@ export default function App() {
                     <form className="service-form account-card__panel" onSubmit={handleReviewSubmit}>
                       <label className="field">
                         <span>Tap the stars to rate this order</span>
-                        <StarRatingInput
+                        <CleanStarRatingInput
                           value={reviewForm.rating}
                           onChange={(nextRating) =>
                             setReviewForm((previous) => ({ ...previous, rating: nextRating }))
@@ -4772,7 +5699,38 @@ export default function App() {
         <section className="menu-section" id="menu">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Menu</p>
+            <div className="menu-status-row">
+              <span className={businessStatus.isOpen ? "status-pill status-pill--delivered" : "status-pill status-pill--cancelled"}>
+                {businessStatus.isOpen ? "Open now" : "Closed now"}
+              </span>
+              <small>{businessStatus.label}</small>
+            </div>
           </div>
+
+          {recentOrderItems.length > 0 ? (
+            <section className="quick-repeat reveal reveal--up reveal--delay-1">
+              <div className="section-heading section-heading--compact">
+                <p className="eyebrow">Order Again</p>
+                <h2>Repeat what worked last time.</h2>
+              </div>
+              <div className="combo-grid combo-grid--compact">
+                {recentOrderItems.map((item) => (
+                  <article key={item.id} className="combo-card">
+                    <p className="eyebrow">{item.category}</p>
+                    <h3>{item.name}</h3>
+                    <p>{formatPrice(item.price)}</p>
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => updateQuantity(item.id, 1)}
+                    >
+                      Order Again
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="dietary-assistant reveal reveal--up reveal--delay-1" aria-label="Dietary meal assistant">
             <div className="dietary-assistant__intro">
@@ -4909,10 +5867,11 @@ export default function App() {
               <span>Search meals</span>
               <input
                 type="text"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
                 placeholder="Egusi, budget meals, drinks, spicy soups..."
               />
+              {searchInput && searchInput !== search ? <small className="cart-help">Searching...</small> : null}
             </label>
 
             <label className="field">
@@ -4934,6 +5893,16 @@ export default function App() {
                 <option value={4}>4.0 and above</option>
                 <option value={4.5}>4.5 and above</option>
                 <option value={4.8}>4.8 and above</option>
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Price range</span>
+              <select value={priceRange} onChange={(event) => setPriceRange(event.target.value)}>
+                <option value="all">All prices</option>
+                <option value="under-2000">Under ₦2,000</option>
+                <option value="2000-4000">₦2,000 - ₦4,000</option>
+                <option value="above-4000">Above ₦4,000</option>
               </select>
             </label>
 
@@ -4972,10 +5941,49 @@ export default function App() {
             Search by dish name, budget, spice level, category, drink, local soup, or what is available today.
           </p>
 
-          <div className="menu-grid">
+          {menuAdminState.loading ? (
+            <div className="menu-skeleton-grid" aria-hidden="true">
+              {[1, 2, 3, 4].map((slot) => (
+                <div key={slot} className="meal-skeleton-card">
+                  <div className="meal-skeleton-card__media" />
+                  <div className="meal-skeleton-card__line meal-skeleton-card__line--title" />
+                  <div className="meal-skeleton-card__line" />
+                  <div className="meal-skeleton-card__line meal-skeleton-card__line--short" />
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {filteredItems.length === 0 ? (
+            <div className="empty-state reveal reveal--up">
+              <div className="empty-state__icon" aria-hidden="true">🍽</div>
+              <h3>No meals matched that search yet.</h3>
+              <p>Try another category, clear your filters, or use the dietary assistant for guided suggestions.</p>
+              <div className="empty-state__actions">
+                <button type="button" className="button button--ghost" onClick={() => {
+                  setActiveCategory("All");
+                  setActiveMenuSection("all");
+                  setPriceRange("all");
+                  setMinimumRating(0);
+                  setSearchInput("");
+                  setSearch("");
+                }}>
+                  Clear Filters
+                </button>
+                <button type="button" className="button button--ghost" onClick={() => setDietaryNeeds("Show me local dishes available today")}>
+                  Try Dietary Guide
+                </button>
+              </div>
+            </div>
+          ) : (
+          <div className={menuAdminState.loading ? "menu-grid menu-grid--loading" : "menu-grid"}>
             {filteredItems.map((item) => {
               const quantity = cart[item.id] || 0;
-              const branchAvailability = getBranchAvailabilityMeta(item, selectedBranch);
+              const branchAvailability = getBranchAvailabilityMeta(item, selectedBranch, lagosNow);
+              const relatedItems = getRelatedMenuItems(item, menuCatalog, lagosNow);
+              const isExpanded = Boolean(expandedDescriptions[item.id]);
+              const needsDescriptionToggle = String(item.description || "").length > 88;
+              const dietaryTagList = Array.isArray(item.dietaryTags) ? item.dietaryTags.slice(0, 4) : [];
 
               return (
                 <article
@@ -4983,18 +5991,22 @@ export default function App() {
                   className={
                     recommendedItemIds.includes(item.id)
                       ? "meal-card meal-card--recommended reveal reveal--up"
-                      : "meal-card reveal reveal--up"
+                      : lastAddedItemId === item.id
+                        ? "meal-card meal-card--fresh reveal reveal--up"
+                        : item.soldOut
+                          ? "meal-card meal-card--sold-out reveal reveal--up"
+                          : "meal-card reveal reveal--up"
                   }
                 >
                   <div className="meal-card__media">
                     <img src={item.imageUrl || item.image} alt={item.name} />
                     <div className="meal-card__gradient" />
+                    {item.soldOut ? <div className="meal-card__overlay">Sold Out</div> : null}
                     <div className="meal-card__chips">
-                      <small>{item.badge}</small>
-                      {item.spicy ? <small>Spicy</small> : null}
-                      {recommendedItemIds.includes(item.id) ? <small>Dietary match</small> : null}
-                      {item.soldOut ? <small>Sold out</small> : null}
-                      {item.stockQuantity > 0 && !item.soldOut ? <small>{item.stockQuantity} left</small> : null}
+                      <small className={`chip chip--${getBadgeTone(item.badge)}`}>{item.badge}</small>
+                      {item.spicy ? <small className="chip chip--hot">Spicy</small> : null}
+                      {recommendedItemIds.includes(item.id) ? <small className="chip chip--signature">Dietary match</small> : null}
+                      {item.stockQuantity > 0 && !item.soldOut ? <small className="chip chip--neutral">{item.stockQuantity} left</small> : null}
                     </div>
                   </div>
 
@@ -5017,12 +6029,30 @@ export default function App() {
                       </div>
                     </div>
 
-                    <p className="meal-card__description">{item.description}</p>
+                    <p className="meal-card__description">
+                      {isExpanded || !needsDescriptionToggle
+                        ? item.description
+                        : `${String(item.description || "").slice(0, 88).trim()}...`}
+                    </p>
+                    {needsDescriptionToggle ? (
+                      <button
+                        type="button"
+                        className="meal-card__description-toggle"
+                        onClick={() =>
+                          setExpandedDescriptions((previous) => ({
+                            ...previous,
+                            [item.id]: !previous[item.id],
+                          }))
+                        }
+                      >
+                        {isExpanded ? "Show less" : "Read more"}
+                      </button>
+                    ) : null}
                     {formatScheduleLabel(item) ? <p className="meal-card__schedule">{formatScheduleLabel(item)}</p> : null}
 
                     <div className="meal-card__tags">
-                      {item.dietaryTags.map((tag) => (
-                        <span key={tag}>{tag}</span>
+                      {dietaryTagList.map((tag) => (
+                        <span key={tag} className={`dietary-tag dietary-tag--${getDietaryTagTone(tag)}`}>{tag}</span>
                       ))}
                     </div>
 
@@ -5033,6 +6063,23 @@ export default function App() {
                     <p className={`meal-card__availability meal-card__availability--${branchAvailability.tone}`}>
                       {branchAvailability.label}
                     </p>
+                    {relatedItems.length > 0 ? (
+                      <div className="meal-card__related">
+                        <span>Pairs well with:</span>
+                        <div className="meal-card__related-list">
+                          {relatedItems.map((relatedItem) => (
+                            <button
+                              key={relatedItem.id}
+                              type="button"
+                              className="meal-card__related-pill"
+                              onClick={() => updateQuantity(relatedItem.id, 1)}
+                            >
+                              {relatedItem.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="meal-card__order">
                       <QuantityControl
@@ -5048,7 +6095,7 @@ export default function App() {
                         onClick={() => setQuantity(item.id, quantity === 0 ? 1 : 0)}
                         disabled={item.soldOut}
                       >
-                        {item.soldOut ? "Unavailable" : quantity === 0 ? "Add meal" : "Reset"}
+                        {item.soldOut ? "Unavailable" : lastAddedItemId === item.id ? "Added" : quantity === 0 ? "Add meal" : "Reset"}
                       </button>
                     </div>
 
@@ -5067,6 +6114,7 @@ export default function App() {
               );
             })}
           </div>
+          )}
         </section>
         ) : null}
 
@@ -6147,6 +7195,32 @@ export default function App() {
                     <h3>Recent Orders</h3>
                     <span>{filteredAdminOrders.length}</span>
                   </div>
+                  {filteredAdminOrders.length > 0 ? (
+                    <div className="admin-bulk-bar">
+                      <label className="field">
+                        <span>Bulk status</span>
+                        <select value={bulkOrderStatus} onChange={(event) => setBulkOrderStatus(event.target.value)}>
+                          {orderStatuses
+                            .filter((status) => status !== "all")
+                            .map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="button button--ghost"
+                        onClick={handleBulkOrderStatusUpdate}
+                        disabled={orderActionState.loadingRef === "bulk" || selectedOrderReferences.length === 0}
+                      >
+                        {orderActionState.loadingRef === "bulk"
+                          ? "Updating..."
+                          : `Update ${selectedOrderReferences.length} selected`}
+                      </button>
+                    </div>
+                  ) : null}
 
                   {filteredAdminOrders.length === 0 ? (
                     <p className="admin-empty">No orders yet.</p>
@@ -6155,7 +7229,20 @@ export default function App() {
                       {filteredAdminOrders.map((order) => (
                         <div key={order.reference} className="admin-item">
                           <div className="admin-item__row">
-                            <strong>{order.customer.customerName}</strong>
+                            <label className="admin-check">
+                              <input
+                                type="checkbox"
+                                checked={selectedOrderReferences.includes(order.reference)}
+                                onChange={(event) =>
+                                  setSelectedOrderReferences((previous) =>
+                                    event.target.checked
+                                      ? [...previous, order.reference]
+                                      : previous.filter((reference) => reference !== order.reference),
+                                  )
+                                }
+                              />
+                              <strong>{order.customer.customerName}</strong>
+                            </label>
                             <span>{order.reference}</span>
                           </div>
                           <p className="admin-item__subtle">{getRecordBranchName(order)}</p>
@@ -6213,6 +7300,29 @@ export default function App() {
                           </div>
                           <p>{formatDateTime(order.updatedAt || order.createdAt)}</p>
                           <p>{order.customer.address}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Low Stock Alert</h3>
+                    <span>{lowStockMenuItems.length}</span>
+                  </div>
+                  {lowStockMenuItems.length === 0 ? (
+                    <p className="admin-empty">No low-stock items right now.</p>
+                  ) : (
+                    <div className="admin-list">
+                      {lowStockMenuItems.map((item) => (
+                        <div key={item.id} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{item.name}</strong>
+                            <span>{item.stockQuantity} left</span>
+                          </div>
+                          <p className="admin-item__subtle">{item.category}</p>
+                          <p>Flag this item in Menu Manager before it runs out completely.</p>
                         </div>
                       ))}
                     </div>
@@ -6506,6 +7616,11 @@ export default function App() {
                 <div className="checkout-fields">
                   <p className="checkout-fields__title">Delivery details</p>
                   <p className="cart-help">Minimum order: {formatPrice(Number(businessSettings.minimumOrder || 0))}</p>
+                  <div className="checkout-group">
+                    <div className="checkout-group__header">
+                      <strong>Contact</strong>
+                      <span>Who PEM should reach</span>
+                    </div>
                   <div className="delivery-zone-card delivery-zone-card--accent">
                     <p className="delivery-zone-card__title">Estimated handoff</p>
                     <strong>{deliveryEtaLabel}</strong>
@@ -6546,7 +7661,7 @@ export default function App() {
                       onChange={(event) =>
                         setCheckoutForm((previous) => ({
                           ...previous,
-                          phone: event.target.value,
+                          phone: sanitizePhoneInput(event.target.value),
                         }))
                       }
                       onBlur={(event) => validateCheckoutField("phone", event.target.value)}
@@ -6556,7 +7671,7 @@ export default function App() {
                   </label>
 
                   <label className="field">
-                    <span>Email address</span>
+                    <span>{selectedPaymentIsCard ? "Email address" : "Email address (optional)"}</span>
                     <input
                       type="email"
                       value={checkoutForm.email}
@@ -6570,8 +7685,17 @@ export default function App() {
                       placeholder="you@example.com"
                     />
                     {checkoutFieldErrors.email ? <small className="field__error">{checkoutFieldErrors.email}</small> : null}
+                    {selectedPaymentIsCard && !checkoutFieldErrors.email ? (
+                      <small className="cart-help">PEM needs your email to open secure card payment.</small>
+                    ) : null}
                   </label>
+                  </div>
 
+                  <div className="checkout-group">
+                    <div className="checkout-group__header">
+                      <strong>Delivery</strong>
+                      <span>Where and when the meal should get to you</span>
+                    </div>
                   <label className="field">
                     <span>Fulfillment</span>
                     <select
@@ -6616,7 +7740,7 @@ export default function App() {
                     >
                       {deliveryZones.map((zone) => (
                         <option key={zone.id} value={zone.id}>
-                          {zone.label}
+                          {`${zone.label} - ${formatPrice(zone.fee)} - ${zone.eta}`}
                         </option>
                       ))}
                     </select>
@@ -6664,29 +7788,38 @@ export default function App() {
                       placeholder="Bus stop, estate gate, popular shop"
                     />
                   </label>
+                  </div>
 
-                  <label className="field">
-                    <span>Payment method</span>
-                    <select
-                      value={checkoutForm.paymentMethod}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          paymentMethod: event.target.value,
-                        }))
-                      }
-                    >
-                      <option>Pay on delivery</option>
-                      <option>Bank transfer</option>
-                      <option>POS on delivery</option>
-                      <option>Paystack</option>
-                    </select>
-                  </label>
+                  <div className="checkout-group">
+                    <div className="checkout-group__header">
+                      <strong>Payment</strong>
+                      <span>Choose how you want to pay</span>
+                    </div>
+<div className="payment-options">
+                      {checkoutPaymentOptions.map((option) => (
+                        <button
+                          key={option.label}
+                          type="button"
+                          className={checkoutForm.paymentMethod === option.label ? "payment-option is-active" : "payment-option"}
+                          onClick={() =>
+                            setCheckoutForm((previous) => ({
+                              ...previous,
+                              paymentMethod: option.label,
+                              paymentReference: option.label === "Bank transfer" ? previous.paymentReference : "",
+                            }))
+                          }
+                        >
+                          <span aria-hidden="true">{option.icon}</span>
+                          <strong>{option.label}</strong>
+                        </button>
+                      ))}
+                    </div>
 
                   <label className="field">
                     <span>Payment reference</span>
                     <input
                       type="text"
+                      disabled={checkoutForm.paymentMethod !== "Bank transfer"}
                       value={checkoutForm.paymentReference}
                       onChange={(event) =>
                         setCheckoutForm((previous) => ({
@@ -6694,7 +7827,7 @@ export default function App() {
                           paymentReference: event.target.value,
                         }))
                       }
-                      placeholder="Transaction ID or teller reference"
+                      placeholder="Bank transfer reference"
                     />
                   </label>
 
@@ -6711,20 +7844,85 @@ export default function App() {
                       }
                       placeholder="WELCOME10"
                     />
+                    {checkoutForm.promoCode.trim() ? (
+                      <small className={promoValidationState.valid ? "field__success" : promoValidationState.error ? "field__error" : "cart-help"}>
+                        {promoValidationState.loading
+                          ? "Validating promo code..."
+                          : promoValidationState.valid
+                            ? `Promo applied: -${formatPrice(promoValidationState.amount)}`
+                            : promoValidationState.error
+                              ? promoValidationState.error
+                              : promoValidationState.minimumOrder
+                                ? `Promo needs a minimum subtotal of ${formatPrice(promoValidationState.minimumOrder)}.`
+                        : "That promo code is not valid right now."}
+                      </small>
+                    ) : null}
                   </label>
+                  </div>
 
-                  {checkoutForm.paymentMethod === "Paystack" ? (
-                    <p className="cart-help">
-                      PEM will take you to Paystack to complete your payment securely before returning to the app.
-                    </p>
-                  ) : null}
                   {checkoutForm.paymentMethod === "Bank transfer" ? (
+                    bankTransferReady ? (
+                      <div className="delivery-zone-card transfer-card">
+                        <div className="transfer-card__header">
+                          <div>
+                            <p className="delivery-zone-card__title">Bank transfer details</p>
+                            <strong>{businessSettings.bankName}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() =>
+                              copyBankTransferDetail(
+                                "bank details",
+                                `${businessSettings.bankName}\n${businessSettings.bankAccountName}\n${businessSettings.bankAccountNumber}`,
+                              )
+                            }
+                          >
+                            Copy all
+                          </button>
+                        </div>
+                        <div className="transfer-card__row">
+                          <div>
+                            <span className="transfer-card__label">Account name</span>
+                            <strong className="transfer-card__value">{businessSettings.bankAccountName}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => copyBankTransferDetail("account name", businessSettings.bankAccountName)}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <div className="transfer-card__row">
+                          <div>
+                            <span className="transfer-card__label">Account number</span>
+                            <strong className="transfer-card__value">{businessSettings.bankAccountNumber}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => copyBankTransferDetail("account number", businessSettings.bankAccountNumber)}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <small>{businessSettings.bankInstructions}</small>
+                      </div>
+                    ) : (
+                      <div className="delivery-zone-card">
+                        <p className="delivery-zone-card__title">Bank transfer details</p>
+                        <strong>Bank transfer not set yet</strong>
+                        <small>PEM has not added transfer details in Admin. Use pay on arrival or contact the team.</small>
+                      </div>
+                    )
+                  ) : null}
+
+                  {selectedPaymentIsCard ? (
                     <div className="delivery-zone-card">
-                      <p className="delivery-zone-card__title">Bank transfer details</p>
-                      <strong>{businessSettings.bankName}</strong>
-                      <span>{businessSettings.bankAccountName}</span>
-                      <span>{businessSettings.bankAccountNumber}</span>
-                      <small>{businessSettings.bankInstructions}</small>
+                      <p className="delivery-zone-card__title">Card payment</p>
+                      <strong>Secure online checkout</strong>
+                      <small>PEM will open a secure card payment page after your order is created.</small>
                     </div>
                   ) : null}
                 </div>
@@ -6769,6 +7967,16 @@ export default function App() {
               <span>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup ready confirmation by PEM" : deliveryEtaLabel}</span>
               <span>{selectedBranch?.label || `${businessSettings.appName} Branch`}</span>
             </div>
+            <div className="cart-order-summary">
+              <div>
+                <span>Branch</span>
+                <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
+              </div>
+              <div>
+                <span>Area</span>
+                <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : selectedDeliveryZone.label}</strong>
+              </div>
+            </div>
 
             <div className="cart-total">
               <span>Subtotal</span>
@@ -6784,14 +7992,6 @@ export default function App() {
                 <strong>-{formatPrice(discount)}</strong>
               </div>
             ) : null}
-            <div className="cart-total">
-              <span>Branch</span>
-              <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
-            </div>
-            <div className="cart-total">
-              <span>Area</span>
-              <strong>{selectedDeliveryZone.label}</strong>
-            </div>
             <div className="cart-total cart-total--grand">
               <span>Total</span>
               <strong>{formatPrice(total)}</strong>
@@ -6799,7 +7999,7 @@ export default function App() {
 
             <button
               type="button"
-              className="button button--ghost button--full"
+              className="button button--ghost button--full cart-button--secondary"
               onClick={handleWhatsAppOrder}
               disabled={!isOnline}
             >
@@ -6812,9 +8012,11 @@ export default function App() {
               disabled={checkoutState.loading || !isOnline}
             >
               {checkoutState.loading
-                ? "Submitting order..."
-                : checkoutForm.paymentMethod === "Paystack"
-                  ? "Proceed To Paystack"
+                ? selectedPaymentIsCard
+                  ? "Opening secure card payment..."
+                  : "Submitting order..."
+                : selectedPaymentIsCard
+                  ? "Proceed to card payment"
                   : "Place Order"}
             </button>
           </div>

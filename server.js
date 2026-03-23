@@ -168,6 +168,11 @@ function getOptionalUserSession(request) {
   return token ? userSessions.get(token) || null : null;
 }
 
+function getOptionalAdminSession(request) {
+  const token = getBearerToken(request);
+  return token ? adminSessions.get(token) || null : null;
+}
+
 function asyncHandler(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
@@ -186,6 +191,10 @@ function verifyPassword(password, storedHash) {
   }
   const comparison = crypto.scryptSync(password, salt, 64).toString("hex");
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(comparison, "hex"));
+}
+
+function isCardPaymentMethod(method) {
+  return ["Pay with card", "Paystack"].includes(String(method || "").trim());
 }
 
 function sanitizeUser(user) {
@@ -258,6 +267,82 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
     type: promo.type,
     minimumOrder: promo.minimumOrder,
   };
+}
+
+function normalizePhoneDigits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function sanitizePhoneInput(value) {
+  return String(value || "")
+    .replace(/[^\d+\s()-]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trimStart()
+    .slice(0, 22);
+}
+
+function parseTimeLabelToMinutes(label) {
+  const normalized = String(label || "").trim().toUpperCase();
+  const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]) % 12;
+  const minutes = Number(match[2] || 0);
+  if (match[3] === "PM") {
+    hour += 12;
+  }
+
+  return hour * 60 + minutes;
+}
+
+function parseHoursWindow(hoursLabel) {
+  const [openLabel = "", closeLabel = ""] = String(hoursLabel || "").split("-").map((part) => part.trim());
+  const openMinutes = parseTimeLabelToMinutes(openLabel);
+  const closeMinutes = parseTimeLabelToMinutes(closeLabel);
+
+  if (openMinutes === null || closeMinutes === null) {
+    return null;
+  }
+
+  return {
+    open: openMinutes,
+    close: closeMinutes,
+  };
+}
+
+function isTimeWithinWindow(minutes, window) {
+  if (!window) {
+    return true;
+  }
+
+  if (window.open === window.close) {
+    return true;
+  }
+
+  if (window.open < window.close) {
+    return minutes >= window.open && minutes <= window.close;
+  }
+
+  return minutes >= window.open || minutes <= window.close;
+}
+
+function isScheduledWithinBusinessHours(scheduledFor, hoursLabel) {
+  const scheduledDate = new Date(scheduledFor);
+  if (Number.isNaN(scheduledDate.getTime())) {
+    return false;
+  }
+
+  const hoursWindow = parseHoursWindow(hoursLabel);
+  if (!hoursWindow) {
+    return true;
+  }
+
+  return isTimeWithinWindow(
+    scheduledDate.getHours() * 60 + scheduledDate.getMinutes(),
+    hoursWindow,
+  );
 }
 
 function parseStaffAdmins(rawValue) {
@@ -608,7 +693,7 @@ async function initializePaystackTransaction({ email, amount, reference, metadat
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.status === false) {
-    throw new Error(data.message || "Unable to initialize Paystack payment.");
+    throw new Error(data.message || "Unable to initialize card payment.");
   }
 
   return data.data;
@@ -623,7 +708,7 @@ async function verifyPaystackTransaction(reference) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.status === false) {
-    throw new Error(data.message || "Unable to verify Paystack payment.");
+    throw new Error(data.message || "Unable to verify card payment.");
   }
 
   return data.data;
@@ -644,9 +729,34 @@ app.get("/api/menu", asyncHandler(async (_request, response) => {
   response.json({ menuItems });
 }));
 
-app.get("/api/settings", asyncHandler(async (_request, response) => {
+app.get("/api/settings", asyncHandler(async (request, response) => {
   const settings = await storage.getSettings();
-  response.json({ settings });
+  const adminSession = getOptionalAdminSession(request);
+  response.json({
+    settings: adminSession
+      ? settings
+      : {
+          ...settings,
+          promoCodesText: "",
+          staffAdminsText: "",
+        },
+  });
+}));
+
+app.post("/api/promo/validate", asyncHandler(async (request, response) => {
+  const settings = await storage.getSettings();
+  const subtotal = Number(request.body?.subtotal) || 0;
+  const promoCode = String(request.body?.promoCode || "").trim();
+
+  if (!promoCode) {
+    return response.json({
+      promo: { valid: false, amount: 0, code: "", minimumOrder: 0 },
+    });
+  }
+
+  const promoCodes = parsePromoCodes(settings.promoCodesText);
+  const promo = getPromoDiscount(promoCode, subtotal, promoCodes);
+  response.json({ promo });
 }));
 
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
@@ -1028,8 +1138,9 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   const settings = await storage.getSettings();
   const promoCodes = parsePromoCodes(settings.promoCodesText);
   const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
+  const sanitizedPhone = sanitizePhoneInput(customer?.phone);
 
-  if (!customer?.customerName || !customer?.phone) {
+  if (!customer?.customerName || !sanitizedPhone) {
     return response.status(400).json({ error: "Customer name and phone are required." });
   }
 
@@ -1037,12 +1148,16 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Delivery address is required unless this is a pickup order." });
   }
 
-  if (String(customer.phone || "").replace(/\D/g, "").length < 10) {
+  if (normalizePhoneDigits(sanitizedPhone).length < 10) {
     return response.status(400).json({ error: "Please enter a valid phone number." });
   }
 
-  if (customer.paymentMethod === "Paystack" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || "").trim())) {
-    return response.status(400).json({ error: "A valid email address is required for Paystack checkout." });
+  if (isCardPaymentMethod(customer.paymentMethod) && !paystackSecretKey) {
+    return response.status(400).json({ error: "Card payment is not available right now. Please use bank transfer or pay on arrival." });
+  }
+
+  if (isCardPaymentMethod(customer.paymentMethod) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || "").trim())) {
+    return response.status(400).json({ error: "A valid email address is required for card checkout." });
   }
 
   if (customer.paymentMethod === "Bank transfer" && String(customer.paymentReference || "").trim().length < 3) {
@@ -1055,6 +1170,10 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
 
   if (customer.scheduledFor && Number.isNaN(new Date(customer.scheduledFor).getTime())) {
     return response.status(400).json({ error: "Scheduled order time is invalid." });
+  }
+
+  if (customer.scheduledFor && !isScheduledWithinBusinessHours(customer.scheduledFor, selectedBranch.hours)) {
+    return response.status(400).json({ error: "Scheduled orders must fall within branch business hours." });
   }
 
   if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
@@ -1104,6 +1223,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     reference: makeReference("PEM-ORD"),
     customer: {
       ...customer,
+      phone: sanitizedPhone,
       branchId: selectedBranch.id,
       branchName: selectedBranch.label,
       branchAddress: selectedBranch.address,
@@ -1117,15 +1237,16 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       total,
     },
     payment: {
-      method: customer?.paymentMethod || "Pay on delivery",
-      status: customer?.paymentMethod === "Paystack" ? "pending" : "unpaid",
+      method: customer?.paymentMethod || "Pay on arrival",
+      status: isCardPaymentMethod(customer?.paymentMethod) ? "pending" : "unpaid",
       reference: String(customer?.paymentReference || "").trim(),
       paidAt: null,
     },
     createdAt: new Date().toISOString(),
-    status: customer?.paymentMethod === "Paystack" ? "awaiting_payment" : "received",
+    status: isCardPaymentMethod(customer?.paymentMethod) ? "awaiting_payment" : "received",
   };
   const savedOrder = await storage.createOrder(order);
+  const awaitingCardPayment = isCardPaymentMethod(customer?.paymentMethod);
 
   const nextMenuItems = menuItems.map((menuItem) => {
     const orderedItem = items.find((item) => Number(item.id) === Number(menuItem.id));
@@ -1151,7 +1272,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       ...(linkedUser.orderReferences || []).filter((reference) => reference !== savedOrder.reference),
     ].slice(0, 20);
     const notifications = [
-      createNotification(`Order ${savedOrder.reference} has been received by ${selectedBranch.label}.`, "order"),
+      createNotification(
+        awaitingCardPayment
+          ? `Order ${savedOrder.reference} is waiting for your card payment before ${selectedBranch.label} confirms it.`
+          : `Order ${savedOrder.reference} has been received by ${selectedBranch.label}.`,
+        "order",
+      ),
       ...(linkedUser.notifications || []),
     ].slice(0, 15);
     const nextSavedAddresses = customer?.address
@@ -1160,12 +1286,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
           ...(linkedUser.savedAddresses || []).filter((item) => item !== customer.address),
         ].slice(0, 5)
       : linkedUser.savedAddresses || [];
-    const addedPoints = Math.max(1, Math.floor((Number(savedOrder.pricing?.total) || 0) / 2500));
+    const addedPoints = awaitingCardPayment ? 0 : Math.max(1, Math.floor((Number(savedOrder.pricing?.total) || 0) / 2500));
     const loyaltyPoints = (Number(linkedUser.loyaltyPoints) || 0) + addedPoints;
 
     await storage.updateUser(linkedUser.email, {
       ...linkedUser,
-      phone: linkedUser.phone || String(customer?.phone || "").trim(),
+      phone: linkedUser.phone || sanitizedPhone,
       orderReferences,
       notifications,
       savedAddresses: nextSavedAddresses,
@@ -1176,14 +1302,14 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   }
 
   return response.status(201).json({
-    message: "Order received.",
+    message: awaitingCardPayment ? "Order saved. Payment is required before confirmation." : "Order received.",
     order: savedOrder,
   });
 }));
 
 app.post("/api/payments/paystack/initialize", asyncHandler(async (request, response) => {
   if (!paystackSecretKey) {
-    return response.status(400).json({ error: "Paystack is not configured on the server." });
+    return response.status(400).json({ error: "Card payment is not configured on the server." });
   }
 
   const { orderReference, email, amount, customerName } = request.body || {};
@@ -1202,7 +1328,7 @@ app.post("/api/payments/paystack/initialize", asyncHandler(async (request, respo
   });
 
   await storage.updateOrderPayment(orderReference, {
-    method: "Paystack",
+    method: "Pay with card",
     status: "pending",
     reference: orderReference,
     paidAt: null,
@@ -1213,7 +1339,7 @@ app.post("/api/payments/paystack/initialize", asyncHandler(async (request, respo
 
 app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request, response) => {
   if (!paystackSecretKey) {
-    return response.status(400).json({ error: "Paystack is not configured on the server." });
+    return response.status(400).json({ error: "Card payment is not configured on the server." });
   }
 
   const reference = String(request.params.reference || "").trim();
@@ -1225,7 +1351,7 @@ app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request,
       reference,
       {
         ...(order.payment || {}),
-        method: "Paystack",
+        method: "Pay with card",
         status: "paid",
         reference: payment.reference || reference,
         paidAt: payment.paid_at || new Date().toISOString(),
@@ -1236,12 +1362,16 @@ app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request,
     const customerEmail = String(order?.customer?.email || "").trim().toLowerCase();
     const linkedUser = customerEmail ? await storage.getUserByEmail(customerEmail) : null;
     if (linkedUser) {
+      const addedPoints = Math.max(1, Math.floor((Number(order?.pricing?.total) || 0) / 2500));
+      const loyaltyPoints = (Number(linkedUser.loyaltyPoints) || 0) + addedPoints;
       await storage.updateUser(linkedUser.email, {
         ...linkedUser,
         notifications: [
-          createNotification(`Payment was confirmed for order ${reference}.`, "payment"),
+          createNotification(`Payment was confirmed for order ${reference}. PEM has now confirmed the order.`, "payment"),
           ...(linkedUser.notifications || []),
         ].slice(0, 15),
+        loyaltyPoints,
+        loyaltyTier: buildLoyaltyTier(loyaltyPoints),
         updatedAt: new Date().toISOString(),
       });
     }
