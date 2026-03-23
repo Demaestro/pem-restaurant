@@ -1,6 +1,6 @@
-const CACHE_NAME = "pem-pwa-v2";
+const CACHE_NAME = "pem-pwa-v3";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/pem-icon.jpeg", "/offline.html"];
-const RUNTIME_CACHE = "pem-runtime-v2";
+const RUNTIME_CACHE = "pem-runtime-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

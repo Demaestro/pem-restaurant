@@ -1237,6 +1237,26 @@ function QuantityControl({ value, onDecrease, onIncrease, disabled = false }) {
   );
 }
 
+function ThemeToggle({ theme, onToggle, floating = false }) {
+  const isDark = theme === "dark";
+
+  return (
+    <button
+      type="button"
+      className={floating ? (isDark ? "theme-fab is-dark is-floating" : "theme-fab is-floating") : isDark ? "theme-fab is-dark" : "theme-fab"}
+      onClick={onToggle}
+      role="switch"
+      aria-checked={isDark}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      <span className="theme-fab__track" aria-hidden="true">
+        <span className="theme-fab__thumb" />
+      </span>
+    </button>
+  );
+}
+
 export default function App() {
   const businessStatus = getBusinessStatus();
   const [theme, setTheme] = useState("light");
@@ -1244,6 +1264,7 @@ export default function App() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [isCompactHeader, setIsCompactHeader] = useState(false);
   const [activePage, setActivePage] = useState(() =>
     typeof window === "undefined" ? "menu" : resolvePageFromHash(window.location.hash),
   );
@@ -1323,11 +1344,7 @@ export default function App() {
     branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item));
-  const visibleMenuCount = visibleMenuItems.length;
-  const visibleDrinkCount = visibleMenuItems.filter((item) => item.category.includes("Drink")).length;
-  const visibleLocalDishCount = visibleMenuItems.filter(
-    (item) => item.category === "Soup" || item.category === "Local Special",
-  ).length;
+  const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
 
   function validateCheckoutField(field, value) {
     let error = "";
@@ -1365,6 +1382,17 @@ export default function App() {
 
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    function handleHeaderScroll() {
+      setIsCompactHeader(window.scrollY > 32);
+    }
+
+    handleHeaderScroll();
+    window.addEventListener("scroll", handleHeaderScroll, { passive: true });
+
+    return () => window.removeEventListener("scroll", handleHeaderScroll);
   }, []);
 
   useEffect(() => {
@@ -3610,14 +3638,7 @@ export default function App() {
   if (!accountHydrated) {
     return (
       <div className="auth-shell">
-        <button
-          type="button"
-          className="theme-fab"
-          onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-        >
-          {theme === "light" ? "Dark" : "Light"}
-        </button>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
 
         <section className="auth-hero">
           <div className="auth-hero__brand">
@@ -3642,14 +3663,7 @@ export default function App() {
   if (!accountToken && !adminToken) {
     return (
       <div className="auth-shell">
-        <button
-          type="button"
-          className="theme-fab"
-          onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-        >
-          {theme === "light" ? "Dark" : "Light"}
-        </button>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
 
         <section className="auth-hero">
           <div className="auth-hero__copy reveal reveal--up">
@@ -3973,21 +3987,8 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <button
-        type="button"
-        className="theme-fab"
-        onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-        aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-      >
-        {theme === "light" ? "Dark" : "Light"}
-      </button>
-
-      <header className="topbar">
+      <header className={isCompactHeader ? "topbar is-compact" : "topbar"}>
         <div className="topbar__identity">
-          <div className="topbar__welcome">
-            <span>WELCOME</span>
-            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
-          </div>
           <button
             type="button"
             className="brand"
@@ -4001,6 +4002,10 @@ export default function App() {
               <small>{businessSettings.businessName}</small>
             </span>
           </button>
+          <div className="topbar__welcome">
+            <span>WELCOME</span>
+            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
+          </div>
         </div>
 
         <nav className="topbar__nav">
@@ -4013,13 +4018,7 @@ export default function App() {
         </nav>
 
         <div className="topbar__actions">
-          <button
-            type="button"
-            className={activePage === "account" ? "button button--ghost button--small topbar__account-button is-active" : "button button--ghost button--small topbar__account-button"}
-            onClick={() => navigateToPage("account")}
-          >
-            Account
-          </button>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
             <strong>{totalItems}</strong>
@@ -4129,7 +4128,8 @@ export default function App() {
           </section>
         ) : null}
 
-        <section className={activePage === "account" ? "account-section" : "account-section is-hidden"} id="account">
+        {activePage === "account" ? (
+        <section className="account-section" id="account">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Customer Account</p>
             <h2>Create a PEM account for faster repeat ordering.</h2>
@@ -4514,8 +4514,10 @@ export default function App() {
             </div>
           )}
         </section>
+        ) : null}
 
-        <section className={activePage === "track" ? "tracking-section" : "tracking-section is-hidden"} id="track">
+        {activePage === "track" ? (
+        <section className="tracking-section" id="track">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Order Tracking</p>
             <h2>Check the status of your PEM order with your reference.</h2>
@@ -4690,8 +4692,9 @@ export default function App() {
             </div>
           </div>
         </section>
+        ) : null}
 
-        {recentlyViewed.length > 0 ? (
+        {activePage === "account" && recentlyViewed.length > 0 ? (
           <section className="recently-viewed-section">
             <div className="section-heading section-heading--compact reveal reveal--up">
               <p className="eyebrow">Recently Viewed</p>
@@ -4739,6 +4742,7 @@ export default function App() {
           </section>
         ) : null}
 
+        {activePage === "account" ? (
         <section className="combo-section">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Quick Combos</p>
@@ -4762,8 +4766,10 @@ export default function App() {
             ))}
           </div>
         </section>
+        ) : null}
 
-        <section className={activePage === "menu" ? "menu-section" : "menu-section is-hidden"} id="menu">
+        {activePage === "menu" ? (
+        <section className="menu-section" id="menu">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Menu</p>
           </div>
@@ -5062,9 +5068,12 @@ export default function App() {
             })}
           </div>
         </section>
+        ) : null}
 
+        {activePage === "contact" ? (
+        <>
         {publicReviews.length > 0 ? (
-          <section className={activePage === "contact" ? "reviews-section" : "reviews-section is-hidden"}>
+          <section className="reviews-section">
             <div className="section-heading section-heading--compact reveal reveal--up">
               <p className="eyebrow">Customer Reviews</p>
               <h2>Trusted by customers across PEM branches.</h2>
@@ -5089,7 +5098,7 @@ export default function App() {
           </section>
         ) : null}
 
-        <section className={activePage === "contact" ? "trust-section" : "trust-section is-hidden"}>
+        <section className="trust-section">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Why Customers Trust PEM</p>
             <h2>Clear ordering, local taste, and branch-based support.</h2>
@@ -5104,8 +5113,11 @@ export default function App() {
             ))}
           </div>
         </section>
+        </>
+        ) : null}
 
-        <section className={activePage === "catering" ? "catering-section" : "catering-section is-hidden"} id="catering">
+        {activePage === "catering" ? (
+        <section className="catering-section" id="catering">
           <div className="section-heading section-heading--light reveal reveal--up">
             <p className="eyebrow">Catering Service</p>
             <h2>PEM also serves events, celebrations, and business gatherings.</h2>
@@ -5213,8 +5225,11 @@ export default function App() {
             </button>
           </form>
         </section>
+        ) : null}
 
-        <section className={activePage === "contact" ? "contact-section" : "contact-section is-hidden"}>
+        {activePage === "contact" ? (
+        <>
+        <section className="contact-section">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Reservations</p>
             <h2>Book a table or tasting slot with PEM.</h2>
@@ -5285,7 +5300,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className={activePage === "contact" ? "contact-section" : "contact-section is-hidden"} id="contact">
+        <section className="contact-section" id="contact">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Contact</p>
             <h2>Make ordering easy for customers and inquiries easy for event clients.</h2>
@@ -5382,8 +5397,11 @@ export default function App() {
             </button>
           </form>
         </section>
+        </>
+        ) : null}
 
-        <section className={activePage === "admin" ? "admin-section" : "admin-section is-hidden"} id="admin">
+        {activePage === "admin" ? (
+        <section className="admin-section" id="admin">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Admin</p>
             <h2>Track orders, messages, and catering requests in one place.</h2>
@@ -6421,6 +6439,7 @@ export default function App() {
             </>
           )}
         </section>
+        ) : null}
       </main>
 
       <div className="mobile-quickbar">
@@ -6435,6 +6454,9 @@ export default function App() {
         </button>
         <button type="button" className={activePage === "contact" ? "is-active" : ""} onClick={() => navigateToPage("contact")}>
           Contact
+        </button>
+        <button type="button" className={activePage === "account" ? "is-active" : ""} onClick={() => navigateToPage("account")}>
+          Account
         </button>
       </div>
 
