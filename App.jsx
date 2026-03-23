@@ -952,6 +952,7 @@ export default function App() {
   const [cart, setCart] = useState({});
   const [notes, setNotes] = useState({});
   const [favorites, setFavorites] = useState([]);
+  const [recentlyViewed, setRecentlyViewed] = useState([]);
   const [savedReferences, setSavedReferences] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState("");
   const [branchCarts, setBranchCarts] = useState({});
@@ -971,6 +972,7 @@ export default function App() {
   const [orderPlaced, setOrderPlaced] = useState("");
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
   const [checkoutState, setCheckoutState] = useState({ loading: false, error: "" });
+  const [checkoutFieldErrors, setCheckoutFieldErrors] = useState({});
   const [contactForm, setContactForm] = useState(initialContact);
   const [contactState, setContactState] = useState({ loading: false, success: "", error: "" });
   const [cateringForm, setCateringForm] = useState(initialCatering);
@@ -1021,6 +1023,27 @@ export default function App() {
     (item) => item.category === "Soup" || item.category === "Local Special",
   ).length;
 
+  function validateCheckoutField(field, value) {
+    let error = "";
+    if (field === "customerName" && String(value || "").trim().length < 2) {
+      error = "Enter your full name";
+    }
+    if (field === "phone" && String(value || "").replace(/\D/g, "").length < 10) {
+      error = "Phone must be at least 10 digits";
+    }
+    if (field === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))) {
+      error = "Enter a valid email";
+    }
+    if (field === "address" && checkoutForm.fulfillmentMethod !== "pickup" && String(value || "").trim().length < 5) {
+      error = "Enter a delivery address";
+    }
+    setCheckoutFieldErrors((previous) => ({ ...previous, [field]: error }));
+  }
+
+  function trackView(itemId) {
+    setRecentlyViewed((previous) => [itemId, ...previous.filter((id) => id !== itemId)].slice(0, 6));
+  }
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("pem-theme");
     if (savedTheme === "dark" || savedTheme === "light") {
@@ -1058,10 +1081,30 @@ export default function App() {
 
   useEffect(() => {
     try {
+      const savedCheckout = JSON.parse(window.localStorage.getItem("pem-checkout-draft") || "null");
+      if (savedCheckout && typeof savedCheckout === "object") {
+        setCheckoutForm((previous) => ({
+          ...previous,
+          customerName: savedCheckout.customerName || previous.customerName,
+          phone: savedCheckout.phone || previous.phone,
+          address: savedCheckout.address || previous.address,
+          deliveryZone: savedCheckout.deliveryZone || previous.deliveryZone,
+          fulfillmentMethod: savedCheckout.fulfillmentMethod || previous.fulfillmentMethod,
+          landmark: savedCheckout.landmark || previous.landmark,
+        }));
+      }
+    } catch {
+      // Ignore corrupted draft.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
       const storedFavorites = JSON.parse(window.localStorage.getItem("pem-favorites") || "[]");
       const storedReferences = JSON.parse(window.localStorage.getItem("pem-order-history") || "[]");
       const storedBranchId = window.localStorage.getItem("pem-selected-branch") || "";
       const storedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
+      const storedRecentlyViewed = JSON.parse(window.localStorage.getItem("pem-recently-viewed") || "[]");
       if (Array.isArray(storedFavorites)) {
         setFavorites(storedFavorites);
       }
@@ -1074,10 +1117,14 @@ export default function App() {
       if (storedBranchCarts && typeof storedBranchCarts === "object") {
         setBranchCarts(storedBranchCarts);
       }
+      if (Array.isArray(storedRecentlyViewed)) {
+        setRecentlyViewed(storedRecentlyViewed);
+      }
     } catch {
       setFavorites([]);
       setSavedReferences([]);
       setBranchCarts({});
+      setRecentlyViewed([]);
     }
     setBranchCartHydrated(true);
   }, []);
@@ -1092,8 +1139,37 @@ export default function App() {
   }, [favorites]);
 
   useEffect(() => {
+    window.localStorage.setItem("pem-recently-viewed", JSON.stringify(recentlyViewed));
+  }, [recentlyViewed]);
+
+  useEffect(() => {
     window.localStorage.setItem("pem-order-history", JSON.stringify(savedReferences));
   }, [savedReferences]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "pem-checkout-draft",
+        JSON.stringify({
+          customerName: checkoutForm.customerName,
+          phone: checkoutForm.phone,
+          address: checkoutForm.address,
+          deliveryZone: checkoutForm.deliveryZone,
+          fulfillmentMethod: checkoutForm.fulfillmentMethod,
+          landmark: checkoutForm.landmark,
+        }),
+      );
+    } catch {
+      // Ignore local storage write issues.
+    }
+  }, [
+    checkoutForm.address,
+    checkoutForm.customerName,
+    checkoutForm.deliveryZone,
+    checkoutForm.fulfillmentMethod,
+    checkoutForm.landmark,
+    checkoutForm.phone,
+  ]);
 
   useEffect(() => {
     const savedAccountToken = window.localStorage.getItem("pem-account-token");
@@ -1571,6 +1647,9 @@ export default function App() {
     if (item?.soldOut && delta > 0) {
       return;
     }
+    if (delta > 0) {
+      trackView(itemId);
+    }
     setCart((previous) => {
       const nextValue = Math.max(0, (previous[itemId] || 0) + delta);
       return {
@@ -1584,6 +1663,9 @@ export default function App() {
     const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
     if (item?.soldOut && quantity > 0) {
       return;
+    }
+    if (quantity > 0) {
+      trackView(itemId);
     }
     setCart((previous) => ({
       ...previous,
@@ -1613,6 +1695,7 @@ export default function App() {
         const item = menuCatalog.find((menuItem) => menuItem.id === itemId);
         if (!item?.soldOut && !item?.hidden) {
           nextCart[itemId] = (nextCart[itemId] || 0) + 1;
+          trackView(itemId);
         }
       });
       return nextCart;
@@ -1628,6 +1711,7 @@ export default function App() {
       const liveItem = menuCatalog.find((menuItem) => menuItem.id === item.id);
       if (!liveItem?.soldOut && !liveItem?.hidden) {
         nextCart[item.id] = (nextCart[item.id] || 0) + item.quantity;
+        trackView(item.id);
         if (item.note) {
           nextNotes[item.id] = item.note;
         }
@@ -4095,6 +4179,54 @@ export default function App() {
           </div>
         </section>
 
+        {recentlyViewed.length > 0 ? (
+          <section className="recently-viewed-section">
+            <div className="section-heading section-heading--compact reveal reveal--up">
+              <p className="eyebrow">Recently Viewed</p>
+              <h2>Pick up where you left off.</h2>
+            </div>
+            <div className="combo-grid">
+              {recentlyViewed
+                .map((itemId) => menuCatalog.find((item) => item.id === itemId && !item.hidden))
+                .filter(Boolean)
+                .map((item) => {
+                  const quantity = cart[item.id] || 0;
+                  return (
+                    <article key={item.id} className="combo-card reveal reveal--up">
+                      <img
+                        src={item.imageUrl || item.image}
+                        alt={item.name}
+                        loading="lazy"
+                        decoding="async"
+                        style={{
+                          width: "100%",
+                          height: "120px",
+                          objectFit: "cover",
+                          borderRadius: "16px",
+                          marginBottom: "0.9rem",
+                        }}
+                      />
+                      <p className="eyebrow">{item.category}</p>
+                      <h3>{item.name}</h3>
+                      <p>{formatPrice(item.price)}</p>
+                      <button
+                        type="button"
+                        className="button button--ghost"
+                        disabled={item.soldOut}
+                        onClick={() => {
+                          updateQuantity(item.id, 1);
+                          setShowCart(true);
+                        }}
+                      >
+                        {item.soldOut ? "Unavailable" : quantity > 0 ? `Add again (${quantity} in cart)` : "Add to cart"}
+                      </button>
+                    </article>
+                  );
+                })}
+            </div>
+          </section>
+        ) : null}
+
         <section className="combo-section">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Quick Combos</p>
@@ -5692,8 +5824,10 @@ export default function App() {
                           customerName: event.target.value,
                         }))
                       }
+                      onBlur={(event) => validateCheckoutField("customerName", event.target.value)}
                       placeholder="Your full name"
                     />
+                    {checkoutFieldErrors.customerName ? <small className="field__error">{checkoutFieldErrors.customerName}</small> : null}
                   </label>
 
                   <label className="field">
@@ -5707,8 +5841,10 @@ export default function App() {
                           phone: event.target.value,
                         }))
                       }
+                      onBlur={(event) => validateCheckoutField("phone", event.target.value)}
                       placeholder="0803 334 5161"
                     />
+                    {checkoutFieldErrors.phone ? <small className="field__error">{checkoutFieldErrors.phone}</small> : null}
                   </label>
 
                   <label className="field">
@@ -5722,8 +5858,10 @@ export default function App() {
                           email: event.target.value,
                         }))
                       }
+                      onBlur={(event) => validateCheckoutField("email", event.target.value)}
                       placeholder="you@example.com"
                     />
+                    {checkoutFieldErrors.email ? <small className="field__error">{checkoutFieldErrors.email}</small> : null}
                   </label>
 
                   <label className="field">
@@ -5798,8 +5936,10 @@ export default function App() {
                           address: event.target.value,
                         }))
                       }
+                      onBlur={(event) => validateCheckoutField("address", event.target.value)}
                       placeholder="Street, area, city"
                     />
+                    {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
                   </label>
 
                   <label className="field">

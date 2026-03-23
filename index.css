@@ -979,6 +979,7 @@ button:disabled {
 .search-field input,
 .field input,
 .field select,
+.field textarea,
 .note-field textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -991,6 +992,7 @@ button:disabled {
 
 .service-form--light .field input,
 .service-form--light .field select,
+.service-form--light .field textarea,
 .service-form--light .note-field textarea {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.14);
@@ -1000,6 +1002,7 @@ button:disabled {
 .search-field input:focus,
 .field input:focus,
 .field select:focus,
+.field textarea:focus,
 .note-field textarea:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--brand) 60%, white);
@@ -1008,9 +1011,21 @@ button:disabled {
 
 .service-form--light .field input:focus,
 .service-form--light .field select:focus,
+.service-form--light .field textarea:focus,
 .service-form--light .note-field textarea:focus {
   border-color: rgba(255, 255, 255, 0.35);
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
+}
+
+.field__error {
+  margin: -0.1rem 0 0;
+  color: #d64848;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.recently-viewed-section {
+  margin-bottom: 1.5rem;
 }
 
 .category-row {
