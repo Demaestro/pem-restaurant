@@ -56,6 +56,9 @@ const defaultSettings = {
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
   minimumOrder: 1500,
   promoCodesText: "WELCOME10|percent|10|5000\nPARTY500|flat|500|7000",
+  staffAdminsText: "manager|PemStaff2026|Floor Manager",
+  branchLocationsText:
+    "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
   receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
 };
 const defaultMenuItems = [
@@ -134,6 +137,13 @@ function requireAdmin(request, response, next) {
   }
 
   request.adminSession = adminSessions.get(token);
+  next();
+}
+
+function requireOwnerAdmin(request, response, next) {
+  if (request.adminSession?.username !== "owner") {
+    return response.status(403).json({ error: "Only the PEM owner account can change global business settings." });
+  }
   next();
 }
 
@@ -244,6 +254,101 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
     type: promo.type,
     minimumOrder: promo.minimumOrder,
   };
+}
+
+function parseStaffAdmins(rawValue) {
+  return String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [username, password, label = "PEM Staff", branchId = ""] = line.split("|").map((part) => String(part || "").trim());
+      if (!username || !password) {
+        return null;
+      }
+      return {
+        username: username.toLowerCase(),
+        password,
+        label,
+        branchId: branchId.toLowerCase(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function parseBranchLocations(rawValue, settings = defaultSettings) {
+  const parsed = String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [id, label, address, phone, hours, note] = line.split("|").map((part) => String(part || "").trim());
+      if (!id || !label) {
+        return null;
+      }
+      return {
+        id: id.toLowerCase(),
+        label,
+        address: address || settings.address,
+        phone: phone || settings.phone,
+        hours: hours || settings.businessHoursText,
+        note: note || `${label} branch support.`,
+      };
+    })
+    .filter(Boolean);
+
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  return [
+    {
+      id: "main-branch",
+      label: `${settings.appName} Main Branch`,
+      address: settings.address,
+      phone: settings.phone,
+      hours: settings.businessHoursText,
+      note: `${settings.businessName} main branch.`,
+    },
+  ];
+}
+
+function resolveBranchSelection(inputBranchId, settings = defaultSettings) {
+  const branches = parseBranchLocations(settings.branchLocationsText, settings);
+  const normalizedBranchId = String(inputBranchId || "").trim().toLowerCase();
+  return branches.find((branch) => branch.id === normalizedBranchId) || branches[0];
+}
+
+function getRecordBranchId(record) {
+  return String(record?.branchId || record?.customer?.branchId || "").trim().toLowerCase();
+}
+
+function filterSummaryByBranch(summary, branchId) {
+  const normalizedBranchId = String(branchId || "").trim().toLowerCase();
+  if (!normalizedBranchId) {
+    return summary;
+  }
+
+  const matchesBranch = (entry) => getRecordBranchId(entry) === normalizedBranchId;
+  return {
+    orders: (summary.orders || []).filter(matchesBranch),
+    contacts: (summary.contacts || []).filter(matchesBranch),
+    catering: (summary.catering || []).filter(matchesBranch),
+    reservations: (summary.reservations || []).filter(matchesBranch),
+    reviews: (summary.reviews || []).filter(matchesBranch),
+  };
+}
+
+function canAccessBranchRecord(session, record) {
+  return !session?.branchId || getRecordBranchId(record) === session.branchId;
+}
+
+function createReferralCode(fullName) {
+  const prefix = String(fullName || "pem")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 6) || "pem";
+  return `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
 function normalizeDietaryText(value) {
@@ -541,7 +646,7 @@ app.get("/api/settings", asyncHandler(async (_request, response) => {
 }));
 
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
-  const { fullName, email, password, phone } = request.body || {};
+  const { fullName, email, password, phone, referralCode } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
 
   if (!fullName || !normalizedEmail || !password) {
@@ -556,6 +661,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   if (existingUser) {
     return response.status(409).json({ error: "An account with that email already exists." });
   }
+  const normalizedReferralCode = String(referralCode || "").trim().toLowerCase();
 
   const user = await storage.createUser({
     email: normalizedEmail,
@@ -566,8 +672,11 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     savedAddresses: [],
     orderReferences: [],
     notifications: [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")],
-    loyaltyPoints: 0,
+    loyaltyPoints: normalizedReferralCode ? 5 : 0,
     loyaltyTier: "bronze",
+    referralCode: createReferralCode(fullName),
+    referredBy: normalizedReferralCode,
+    referralCredits: 0,
     createdAt: new Date().toISOString(),
   });
 
@@ -715,28 +824,41 @@ app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   response.json({ deliveryZones });
 }));
 
-app.post("/api/admin/login", (request, response) => {
-  const { password } = request.body || {};
+app.post("/api/admin/login", asyncHandler(async (request, response) => {
+  const { username, password } = request.body || {};
 
   if (!password) {
     return response.status(400).json({ error: "Password is required." });
   }
 
-  if (password !== adminPassword) {
-    return response.status(401).json({ error: "Incorrect admin password." });
+  const settings = await storage.getSettings();
+  const staffAdmins = parseStaffAdmins(settings.staffAdminsText);
+  const matchedStaffAdmin = username
+    ? staffAdmins.find(
+        (item) => item.username === String(username || "").trim().toLowerCase() && item.password === password,
+      )
+    : null;
+
+  if (!matchedStaffAdmin && password !== adminPassword) {
+    return response.status(401).json({ error: "Incorrect admin credentials." });
   }
 
   const token = createAdminToken();
   const session = {
     createdAt: new Date().toISOString(),
+    username: matchedStaffAdmin?.username || "owner",
+    label: matchedStaffAdmin?.label || "Owner",
+    branchId: matchedStaffAdmin?.branchId || "",
+    isOwner: !matchedStaffAdmin,
   };
 
   adminSessions.set(token, session);
 
   return response.json({
     token,
+    admin: session,
   });
-});
+}));
 
 app.post("/api/admin/logout", requireAdmin, (request, response) => {
   const token = getBearerToken(request);
@@ -744,7 +866,7 @@ app.post("/api/admin/logout", requireAdmin, (request, response) => {
   response.json({ ok: true });
 });
 
-app.post("/api/admin/change-password", requireAdmin, asyncHandler(async (request, response) => {
+app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const { currentPassword, newPassword, confirmPassword } = request.body || {};
 
   if (!currentPassword || !newPassword || !confirmPassword) {
@@ -775,12 +897,18 @@ app.post("/api/admin/change-password", requireAdmin, asyncHandler(async (request
   });
 }));
 
-app.get("/api/admin/summary", requireAdmin, asyncHandler(async (_request, response) => {
+app.get("/api/admin/summary", requireAdmin, asyncHandler(async (request, response) => {
   const summary = await storage.getSummary();
-  response.json(summary);
+  const filteredSummary = request.adminSession?.branchId
+    ? filterSummaryByBranch(summary, request.adminSession.branchId)
+    : summary;
+  response.json({
+    ...filteredSummary,
+    admin: request.adminSession,
+  });
 }));
 
-app.put("/api/admin/settings", requireAdmin, asyncHandler(async (request, response) => {
+app.put("/api/admin/settings", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const payload = request.body?.settings || {};
   const settings = {
     ...defaultSettings,
@@ -801,6 +929,8 @@ app.put("/api/admin/settings", requireAdmin, asyncHandler(async (request, respon
     bankInstructions: String(payload.bankInstructions || "").trim(),
     minimumOrder: Math.max(0, Number(payload.minimumOrder) || 0),
     promoCodesText: String(payload.promoCodesText || defaultSettings.promoCodesText).trim(),
+    staffAdminsText: String(payload.staffAdminsText || defaultSettings.staffAdminsText).trim(),
+    branchLocationsText: String(payload.branchLocationsText || defaultSettings.branchLocationsText).trim(),
     receiptFooter: String(payload.receiptFooter || defaultSettings.receiptFooter).trim(),
   };
 
@@ -815,7 +945,7 @@ app.put("/api/admin/settings", requireAdmin, asyncHandler(async (request, respon
   });
 }));
 
-app.put("/api/admin/delivery-zones", requireAdmin, asyncHandler(async (request, response) => {
+app.put("/api/admin/delivery-zones", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const zones = Array.isArray(request.body?.deliveryZones) ? request.body.deliveryZones : [];
 
   if (zones.length === 0) {
@@ -848,7 +978,7 @@ app.put("/api/admin/delivery-zones", requireAdmin, asyncHandler(async (request, 
   });
 }));
 
-app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) => {
+app.put("/api/admin/menu", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const menuItems = Array.isArray(request.body?.menuItems) ? request.body.menuItems : [];
 
   if (menuItems.length === 0) {
@@ -870,6 +1000,7 @@ app.put("/api/admin/menu", requireAdmin, asyncHandler(async (request, response) 
     dietaryProfile: String(item.dietaryProfile || "").trim(),
     soldOut: Boolean(item.soldOut),
     hidden: Boolean(item.hidden),
+    stockQuantity: Math.max(0, Number(item.stockQuantity) || 0),
   }));
 
   if (normalized.some((item) => !item.id || !item.name || !item.category || item.price < 0)) {
@@ -887,9 +1018,14 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
   const settings = await storage.getSettings();
   const promoCodes = parsePromoCodes(settings.promoCodesText);
+  const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
 
-  if (!customer?.customerName || !customer?.phone || !customer?.address) {
-    return response.status(400).json({ error: "Customer name, phone, and address are required." });
+  if (!customer?.customerName || !customer?.phone) {
+    return response.status(400).json({ error: "Customer name and phone are required." });
+  }
+
+  if ((customer.fulfillmentMethod || "delivery") !== "pickup" && !customer?.address) {
+    return response.status(400).json({ error: "Delivery address is required unless this is a pickup order." });
   }
 
   if (String(customer.phone || "").replace(/\D/g, "").length < 10) {
@@ -906,6 +1042,10 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
 
   if (!Array.isArray(items) || items.length === 0) {
     return response.status(400).json({ error: "At least one order item is required." });
+  }
+
+  if (customer.scheduledFor && Number.isNaN(new Date(customer.scheduledFor).getTime())) {
+    return response.status(400).json({ error: "Scheduled order time is invalid." });
   }
 
   if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
@@ -940,9 +1080,26 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     });
   }
 
+  const unavailableStockItem = items.find((item) => {
+    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
+    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
+  });
+
+  if (unavailableStockItem) {
+    return response.status(400).json({
+      error: `${unavailableStockItem.name} only has limited stock left right now.`,
+    });
+  }
+
   const order = {
     reference: makeReference("PEM-ORD"),
-    customer,
+    customer: {
+      ...customer,
+      branchId: selectedBranch.id,
+      branchName: selectedBranch.label,
+      branchAddress: selectedBranch.address,
+      branchPhone: selectedBranch.phone,
+    },
     items,
     pricing: {
       subtotal,
@@ -961,6 +1118,20 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   };
   const savedOrder = await storage.createOrder(order);
 
+  const nextMenuItems = menuItems.map((menuItem) => {
+    const orderedItem = items.find((item) => Number(item.id) === Number(menuItem.id));
+    if (!orderedItem || Number(menuItem.stockQuantity || 0) <= 0) {
+      return menuItem;
+    }
+    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - Number(orderedItem.quantity || 0));
+    return {
+      ...menuItem,
+      stockQuantity: remainingStock,
+      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
+    };
+  });
+  await storage.updateMenuItems(nextMenuItems);
+
   const optionalSession = getOptionalUserSession(request);
   const candidateEmail = String(optionalSession?.email || customer?.email || "").trim().toLowerCase();
   const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
@@ -971,7 +1142,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       ...(linkedUser.orderReferences || []).filter((reference) => reference !== savedOrder.reference),
     ].slice(0, 20);
     const notifications = [
-      createNotification(`Order ${savedOrder.reference} has been received by PEM.`, "order"),
+      createNotification(`Order ${savedOrder.reference} has been received by ${selectedBranch.label}.`, "order"),
       ...(linkedUser.notifications || []),
     ].slice(0, 15);
     const nextSavedAddresses = customer?.address
@@ -1100,10 +1271,14 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(asyn
     return response.status(400).json({ error: "Invalid order status." });
   }
 
-  const order = await storage.updateOrderStatus(reference, status);
-  if (!order) {
+  const existingOrder = await storage.getOrderByReference(reference);
+  if (!existingOrder) {
     return response.status(404).json({ error: "Order not found." });
   }
+  if (!canAccessBranchRecord(request.adminSession, existingOrder)) {
+    return response.status(403).json({ error: "You can only update orders assigned to your branch." });
+  }
+  const order = await storage.updateOrderStatus(reference, status);
 
   return response.json({
     message: "Order status updated.",
@@ -1112,7 +1287,9 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(asyn
 }));
 
 app.post("/api/contact", asyncHandler(async (request, response) => {
-  const { name, phone, message } = request.body || {};
+  const { name, phone, message, branchId, branchName } = request.body || {};
+  const settings = await storage.getSettings();
+  const selectedBranch = resolveBranchSelection(branchId, settings);
 
   if (!name || !phone || !message) {
     return response.status(400).json({ error: "Name, phone, and message are required." });
@@ -1123,6 +1300,8 @@ app.post("/api/contact", asyncHandler(async (request, response) => {
     name,
     phone,
     message,
+    branchId: selectedBranch.id,
+    branchName: branchName || selectedBranch.label,
     createdAt: new Date().toISOString(),
     status: "new",
   };
@@ -1134,7 +1313,9 @@ app.post("/api/contact", asyncHandler(async (request, response) => {
 }));
 
 app.post("/api/catering", asyncHandler(async (request, response) => {
-  const { name, phone, eventDate, guestCount, eventType, details } = request.body || {};
+  const { name, phone, eventDate, guestCount, eventType, details, branchId, branchName } = request.body || {};
+  const settings = await storage.getSettings();
+  const selectedBranch = resolveBranchSelection(branchId, settings);
 
   if (!name || !phone || !eventDate || !guestCount || !details) {
     return response.status(400).json({
@@ -1150,6 +1331,8 @@ app.post("/api/catering", asyncHandler(async (request, response) => {
     guestCount,
     eventType,
     details,
+    branchId: selectedBranch.id,
+    branchName: branchName || selectedBranch.label,
     createdAt: new Date().toISOString(),
     status: "new",
   };
@@ -1158,6 +1341,63 @@ app.post("/api/catering", asyncHandler(async (request, response) => {
   return response.status(201).json({
     request: savedEntry,
   });
+}));
+
+app.post("/api/reservations", asyncHandler(async (request, response) => {
+  const { name, phone, date, time, guests, notes, branchId, branchName } = request.body || {};
+  const settings = await storage.getSettings();
+  const selectedBranch = resolveBranchSelection(branchId, settings);
+
+  if (!name || !phone || !date || !time || !guests) {
+    return response.status(400).json({ error: "Name, phone, date, time, and guest count are required." });
+  }
+
+  const reservation = await storage.createReservation({
+    reference: makeReference("PEM-RES"),
+    name: String(name).trim(),
+    phone: String(phone).trim(),
+    date,
+    time,
+    guests: String(guests).trim(),
+    notes: String(notes || "").trim(),
+    branchId: selectedBranch.id,
+    branchName: branchName || selectedBranch.label,
+    status: "new",
+    createdAt: new Date().toISOString(),
+  });
+
+  response.status(201).json({ reservation });
+}));
+
+app.post("/api/reviews", asyncHandler(async (request, response) => {
+  const { orderReference, rating, comment, branchId, branchName } = request.body || {};
+  const order = await storage.getOrderByReference(String(orderReference || "").trim());
+
+  if (!order) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  if (order.status !== "delivered") {
+    return response.status(400).json({ error: "Reviews can only be submitted after delivery." });
+  }
+
+  const normalizedRating = Math.max(1, Math.min(5, Number(rating) || 0));
+  if (!normalizedRating) {
+    return response.status(400).json({ error: "A rating is required." });
+  }
+
+  const review = await storage.createReview({
+    reference: makeReference("PEM-REV"),
+    orderReference: order.reference,
+    customerName: order.customer.customerName,
+    branchId: order.customer.branchId || String(branchId || "").trim().toLowerCase(),
+    branchName: order.customer.branchName || branchName || "PEM Branch",
+    rating: normalizedRating,
+    comment: String(comment || "").trim(),
+    createdAt: new Date().toISOString(),
+  });
+
+  response.status(201).json({ review });
 }));
 
 app.post("/api/ai/dietary-match", asyncHandler(async (request, response) => {
@@ -1201,10 +1441,15 @@ app.patch("/api/admin/contacts/:reference/status", requireAdmin, asyncHandler(as
     return response.status(400).json({ error: "Invalid contact status." });
   }
 
-  const entry = await storage.updateContactStatus(reference, status);
-  if (!entry) {
+  const summary = await storage.getSummary();
+  const existingEntry = (summary.contacts || []).find((item) => item.reference === reference);
+  if (!existingEntry) {
     return response.status(404).json({ error: "Contact message not found." });
   }
+  if (!canAccessBranchRecord(request.adminSession, existingEntry)) {
+    return response.status(403).json({ error: "You can only update messages assigned to your branch." });
+  }
+  const entry = await storage.updateContactStatus(reference, status);
 
   return response.json({
     message: "Contact status updated.",
@@ -1221,14 +1466,44 @@ app.patch("/api/admin/catering/:reference/status", requireAdmin, asyncHandler(as
     return response.status(400).json({ error: "Invalid catering status." });
   }
 
-  const entry = await storage.updateCateringStatus(reference, status);
-  if (!entry) {
+  const summary = await storage.getSummary();
+  const existingEntry = (summary.catering || []).find((item) => item.reference === reference);
+  if (!existingEntry) {
     return response.status(404).json({ error: "Catering request not found." });
   }
+  if (!canAccessBranchRecord(request.adminSession, existingEntry)) {
+    return response.status(403).json({ error: "You can only update catering assigned to your branch." });
+  }
+  const entry = await storage.updateCateringStatus(reference, status);
 
   return response.json({
     message: "Catering status updated.",
     request: entry,
+  });
+}));
+
+app.patch("/api/admin/reservations/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
+  const { reference } = request.params;
+  const { status } = request.body || {};
+  const allowedStatuses = ["new", "confirmed", "seated", "completed", "cancelled"];
+
+  if (!allowedStatuses.includes(status)) {
+    return response.status(400).json({ error: "Invalid reservation status." });
+  }
+
+  const summary = await storage.getSummary();
+  const existingEntry = (summary.reservations || []).find((item) => item.reference === reference);
+  if (!existingEntry) {
+    return response.status(404).json({ error: "Reservation not found." });
+  }
+  if (!canAccessBranchRecord(request.adminSession, existingEntry)) {
+    return response.status(403).json({ error: "You can only update reservations assigned to your branch." });
+  }
+  const entry = await storage.updateReservationStatus(reference, status);
+
+  return response.json({
+    message: "Reservation status updated.",
+    reservation: entry,
   });
 }));
 

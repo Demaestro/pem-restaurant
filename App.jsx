@@ -424,6 +424,8 @@ const initialCheckout = {
   email: "",
   address: "",
   landmark: "",
+  fulfillmentMethod: "delivery",
+  scheduledFor: "",
   deliveryZone: "gwarinpa",
   paymentMethod: "Pay on delivery",
   paymentReference: "",
@@ -448,7 +450,7 @@ const initialMenuAdminState = {
   saving: false,
   error: "",
   success: "",
-  items: menuItems.map((item) => ({ ...item, soldOut: false, hidden: false })),
+  items: menuItems.map((item) => ({ ...item, soldOut: false, hidden: false, stockQuantity: 12 })),
 };
 const menuVisibilityOptions = [
   { value: "available", label: "Available" },
@@ -471,6 +473,20 @@ const initialCatering = {
   details: "",
 };
 
+const initialReservation = {
+  name: "",
+  phone: "",
+  date: "",
+  time: "",
+  guests: "",
+  notes: "",
+};
+
+const initialReviewForm = {
+  rating: "5",
+  comment: "",
+};
+
 const initialAdminState = {
   loading: false,
   error: "",
@@ -478,6 +494,8 @@ const initialAdminState = {
     orders: [],
     contacts: [],
     catering: [],
+    reservations: [],
+    reviews: [],
   },
 };
 
@@ -510,6 +528,9 @@ const initialBusinessSettings = {
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
   minimumOrder: 1500,
   promoCodesText: "WELCOME10|percent|10|5000\nPARTY500|flat|500|7000",
+  staffAdminsText: "manager|PemStaff2026|Floor Manager",
+  branchLocationsText:
+    "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
   receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
 };
 
@@ -531,7 +552,17 @@ const initialAccountUser = {
   notifications: [],
   loyaltyPoints: 0,
   loyaltyTier: "bronze",
+  referralCode: "",
+  referredBy: "",
+  referralCredits: 0,
   createdAt: "",
+};
+
+const initialAdminSession = {
+  username: "",
+  label: "",
+  branchId: "",
+  isOwner: false,
 };
 
 const initialAccountForm = {
@@ -539,6 +570,7 @@ const initialAccountForm = {
   email: "",
   password: "",
   phone: "",
+  referralCode: "",
 };
 
 const initialLoginForm = {
@@ -613,6 +645,7 @@ function mergeMenuCatalog(baseItems, remoteItems) {
     ...item,
     ...(remoteById.get(item.id) || {}),
     imageUrl: remoteById.get(item.id)?.imageUrl || item.imageUrl || "",
+    stockQuantity: Number(remoteById.get(item.id)?.stockQuantity ?? item.stockQuantity ?? 12) || 0,
     soldOut: Boolean(remoteById.get(item.id)?.soldOut),
     hidden: Boolean(remoteById.get(item.id)?.hidden),
   }));
@@ -663,6 +696,58 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
     code: normalizedCode,
     minimumOrder: promo.minimumOrder,
   };
+}
+
+function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
+  const parsed = String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const [id, label, address, phone, hours, note] = line.split("|").map((part) => String(part || "").trim());
+      if (!id || !label) {
+        return null;
+      }
+      return {
+        id: id.toLowerCase(),
+        label,
+        address: address || settings.address,
+        phone: phone || settings.phone,
+        hours: hours || settings.businessHoursText,
+        note: note || `Service support from ${label}.`,
+        rank: index,
+      };
+    })
+    .filter(Boolean);
+
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  return [
+    {
+      id: "main-branch",
+      label: `${settings.appName} Main Branch`,
+      address: settings.address,
+      phone: settings.phone,
+      hours: settings.businessHoursText,
+      note: `${settings.businessName} main branch.`,
+      rank: 0,
+    },
+  ];
+}
+
+function getRecordBranchId(record) {
+  return String(record?.branchId || record?.customer?.branchId || "").trim().toLowerCase();
+}
+
+function getRecordBranchName(record) {
+  return (
+    record?.branchName ||
+    record?.customer?.branchName ||
+    record?.customer?.branchLabel ||
+    "Main branch"
+  );
 }
 
 function getOrderTimeline(order) {
@@ -781,22 +866,39 @@ async function postJson(url, payload, headers = {}) {
 }
 
 async function requestJson(url, { method = "GET", payload, headers = {} } = {}) {
-  const response = await fetch(apiUrl(url), {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || "Something went wrong. Please try again.");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new Error("You're offline right now. Reconnect and try again.");
   }
 
-  return data;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(apiUrl(url), {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "Something went wrong. Please try again.");
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("PEM is taking too long to respond. Please try again.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function RatingStars({ rating }) {
@@ -838,7 +940,9 @@ export default function App() {
   const [theme, setTheme] = useState("light");
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -849,6 +953,9 @@ export default function App() {
   const [notes, setNotes] = useState({});
   const [favorites, setFavorites] = useState([]);
   const [savedReferences, setSavedReferences] = useState([]);
+  const [selectedBranchId, setSelectedBranchId] = useState("");
+  const [branchCarts, setBranchCarts] = useState({});
+  const [branchCartHydrated, setBranchCartHydrated] = useState(false);
   const [accountToken, setAccountToken] = useState("");
   const [accountUser, setAccountUser] = useState(initialAccountUser);
   const [accountOrders, setAccountOrders] = useState([]);
@@ -868,6 +975,8 @@ export default function App() {
   const [contactState, setContactState] = useState({ loading: false, success: "", error: "" });
   const [cateringForm, setCateringForm] = useState(initialCatering);
   const [cateringState, setCateringState] = useState({ loading: false, success: "", error: "" });
+  const [reservationForm, setReservationForm] = useState(initialReservation);
+  const [reservationState, setReservationState] = useState({ loading: false, success: "", error: "" });
   const [trackingReference, setTrackingReference] = useState("");
   const [trackingState, setTrackingState] = useState(initialTrackingState);
   const [deliveryZoneAdminState, setDeliveryZoneAdminState] = useState(initialDeliveryZoneAdminState);
@@ -880,11 +989,14 @@ export default function App() {
   const [showDietaryMatchesOnly, setShowDietaryMatchesOnly] = useState(false);
   const [adminState, setAdminState] = useState(initialAdminState);
   const [adminPassword, setAdminPassword] = useState("");
+  const [adminUsername, setAdminUsername] = useState("");
   const [adminToken, setAdminToken] = useState("");
+  const [adminSession, setAdminSession] = useState(initialAdminSession);
   const [adminLoginState, setAdminLoginState] = useState({ loading: false, error: "" });
   const [adminQuery, setAdminQuery] = useState("");
   const [menuAdminQuery, setMenuAdminQuery] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [adminBranchFilter, setAdminBranchFilter] = useState("all");
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",
@@ -893,6 +1005,14 @@ export default function App() {
   const [passwordState, setPasswordState] = useState({ loading: false, error: "", success: "" });
   const [orderActionState, setOrderActionState] = useState({ loadingRef: "", error: "", success: "" });
   const [receiptOrder, setReceiptOrder] = useState(null);
+  const [reviewForm, setReviewForm] = useState(initialReviewForm);
+  const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
+  const branchLocations = useMemo(
+    () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
+    [businessSettings],
+  );
+  const selectedBranch =
+    branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden);
   const visibleMenuCount = visibleMenuItems.length;
@@ -940,16 +1060,26 @@ export default function App() {
     try {
       const storedFavorites = JSON.parse(window.localStorage.getItem("pem-favorites") || "[]");
       const storedReferences = JSON.parse(window.localStorage.getItem("pem-order-history") || "[]");
+      const storedBranchId = window.localStorage.getItem("pem-selected-branch") || "";
+      const storedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
       if (Array.isArray(storedFavorites)) {
         setFavorites(storedFavorites);
       }
       if (Array.isArray(storedReferences)) {
         setSavedReferences(storedReferences);
       }
+      if (storedBranchId) {
+        setSelectedBranchId(storedBranchId);
+      }
+      if (storedBranchCarts && typeof storedBranchCarts === "object") {
+        setBranchCarts(storedBranchCarts);
+      }
     } catch {
       setFavorites([]);
       setSavedReferences([]);
+      setBranchCarts({});
     }
+    setBranchCartHydrated(true);
   }, []);
 
   useEffect(() => {
@@ -976,8 +1106,17 @@ export default function App() {
 
   useEffect(() => {
     const savedAdminToken = window.localStorage.getItem("pem-admin-token");
+    let savedAdminProfile = null;
+    try {
+      savedAdminProfile = JSON.parse(window.localStorage.getItem("pem-admin-profile") || "null");
+    } catch {
+      savedAdminProfile = null;
+    }
     if (savedAdminToken) {
       setAdminToken(savedAdminToken);
+    }
+    if (savedAdminProfile) {
+      setAdminSession({ ...initialAdminSession, ...savedAdminProfile });
     }
   }, []);
 
@@ -990,9 +1129,18 @@ export default function App() {
       loadPublicSettings(adminToken);
     } else {
       window.localStorage.removeItem("pem-admin-token");
+      window.localStorage.removeItem("pem-admin-profile");
+      setAdminSession(initialAdminSession);
       setAdminState(initialAdminState);
     }
   }, [adminToken]);
+
+  useEffect(() => {
+    if (!adminToken) {
+      return;
+    }
+    window.localStorage.setItem("pem-admin-profile", JSON.stringify(adminSession));
+  }, [adminSession, adminToken]);
 
   useEffect(() => {
     if (accountToken) {
@@ -1014,6 +1162,76 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function handleOnlineChange() {
+      setIsOnline(window.navigator.onLine);
+    }
+
+    window.addEventListener("online", handleOnlineChange);
+    window.addEventListener("offline", handleOnlineChange);
+    return () => {
+      window.removeEventListener("online", handleOnlineChange);
+      window.removeEventListener("offline", handleOnlineChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedBranchId && branchLocations.length > 0) {
+      setSelectedBranchId(branchLocations[0].id);
+      return;
+    }
+
+    if (selectedBranchId && !branchLocations.some((branch) => branch.id === selectedBranchId)) {
+      setSelectedBranchId(branchLocations[0]?.id || "");
+    }
+  }, [branchLocations, selectedBranchId]);
+
+  useEffect(() => {
+    if (!selectedBranchId) {
+      return;
+    }
+    window.localStorage.setItem("pem-selected-branch", selectedBranchId);
+  }, [selectedBranchId]);
+
+  useEffect(() => {
+    if (!selectedBranchId || !branchCartHydrated) {
+      return;
+    }
+
+    const scopedState = branchCarts[selectedBranchId] || { cart: {}, notes: {} };
+    setCart(scopedState.cart || {});
+    setNotes(scopedState.notes || {});
+  }, [branchCartHydrated, branchCarts, selectedBranchId]);
+
+  useEffect(() => {
+    if (!selectedBranchId || !branchCartHydrated) {
+      return;
+    }
+
+    setBranchCarts((previous) => {
+      const nextEntry = { cart, notes };
+      const existingEntry = previous[selectedBranchId];
+      if (
+        existingEntry &&
+        JSON.stringify(existingEntry.cart || {}) === JSON.stringify(cart) &&
+        JSON.stringify(existingEntry.notes || {}) === JSON.stringify(notes)
+      ) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [selectedBranchId]: nextEntry,
+      };
+    });
+  }, [branchCartHydrated, cart, notes, selectedBranchId]);
+
+  useEffect(() => {
+    if (!branchCartHydrated) {
+      return;
+    }
+    window.localStorage.setItem("pem-branch-carts", JSON.stringify(branchCarts));
+  }, [branchCartHydrated, branchCarts]);
+
+  useEffect(() => {
     if (!accountToken || !accountHydrated) {
       return;
     }
@@ -1029,8 +1247,15 @@ export default function App() {
   }, [accountHydrated, accountToken, accountUser.favoriteItemIds, favorites]);
 
   useEffect(() => {
+    if (adminSession.branchId) {
+      setAdminBranchFilter(adminSession.branchId);
+    }
+  }, [adminSession.branchId]);
+
+  useEffect(() => {
     function handleScroll() {
       setMobileMenuOpen(false);
+      setBranchMenuOpen(false);
     }
 
     window.addEventListener("scroll", handleScroll, { passive: true });
@@ -1162,28 +1387,59 @@ export default function App() {
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const selectedDeliveryZone =
     deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || deliveryZones[0] || getDeliveryZone();
-  const delivery = subtotal > 0 ? selectedDeliveryZone.fee : 0;
+  const delivery = subtotal > 0 && checkoutForm.fulfillmentMethod !== "pickup" ? selectedDeliveryZone.fee : 0;
   const promoCodes = useMemo(() => parsePromoCodes(businessSettings.promoCodesText), [businessSettings.promoCodesText]);
   const promoDiscount = getPromoDiscount(checkoutForm.promoCode, subtotal, promoCodes);
   const discount = promoDiscount.valid ? promoDiscount.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden);
+  const overStockCartItem = cartItems.find((item) => Number(item.stockQuantity || 0) > 0 && item.quantity > Number(item.stockQuantity || 0));
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
   const normalizedMenuAdminQuery = menuAdminQuery.trim().toLowerCase();
-  const totalRevenue = adminState.data.orders.reduce((sum, order) => sum + (Number(order.pricing?.total) || 0), 0);
-  const paidRevenue = adminState.data.orders.reduce(
-    (sum, order) => sum + ((order.payment?.status === "paid" ? Number(order.pricing?.total) || 0 : 0)),
+  const effectiveAdminBranchId = adminSession.branchId || adminBranchFilter;
+  const branchOptions = branchLocations.map((branch) => ({
+    value: branch.id,
+    label: branch.label,
+  }));
+  const branchScopedOrders = adminState.data.orders.filter((order) => {
+    return effectiveAdminBranchId === "all" || !effectiveAdminBranchId
+      ? true
+      : getRecordBranchId(order) === effectiveAdminBranchId;
+  });
+  const branchScopedContacts = adminState.data.contacts.filter((message) => {
+    return effectiveAdminBranchId === "all" || !effectiveAdminBranchId
+      ? true
+      : getRecordBranchId(message) === effectiveAdminBranchId;
+  });
+  const branchScopedCatering = adminState.data.catering.filter((request) => {
+    return effectiveAdminBranchId === "all" || !effectiveAdminBranchId
+      ? true
+      : getRecordBranchId(request) === effectiveAdminBranchId;
+  });
+  const branchScopedReservations = adminState.data.reservations.filter((reservation) => {
+    return effectiveAdminBranchId === "all" || !effectiveAdminBranchId
+      ? true
+      : getRecordBranchId(reservation) === effectiveAdminBranchId;
+  });
+  const branchScopedReviews = adminState.data.reviews.filter((review) => {
+    return effectiveAdminBranchId === "all" || !effectiveAdminBranchId
+      ? true
+      : getRecordBranchId(review) === effectiveAdminBranchId;
+  });
+  const totalRevenue = branchScopedOrders.reduce((sum, order) => sum + (Number(order.pricing?.total) || 0), 0);
+  const paidRevenue = branchScopedOrders.reduce(
+    (sum, order) => sum + (order.payment?.status === "paid" ? Number(order.pricing?.total) || 0 : 0),
     0,
   );
-  const todayOrders = adminState.data.orders.filter((order) => {
+  const todayOrders = branchScopedOrders.filter((order) => {
     if (!order.createdAt) {
       return false;
     }
     return new Date(order.createdAt).toDateString() === new Date().toDateString();
   }).length;
   const topMeals = Object.values(
-    adminState.data.orders.reduce((accumulator, order) => {
+    branchScopedOrders.reduce((accumulator, order) => {
       order.items.forEach((item) => {
         if (!accumulator[item.id]) {
           accumulator[item.id] = { id: item.id, name: item.name, quantity: 0 };
@@ -1215,13 +1471,15 @@ export default function App() {
       order.items.some((item) => item.name.toLowerCase().includes(normalizedAdminQuery));
 
     const matchesStatus = orderStatusFilter === "all" || order.status === orderStatusFilter;
-    return matchesQuery && matchesStatus;
+    const matchesBranch =
+      effectiveAdminBranchId === "all" || !effectiveAdminBranchId || getRecordBranchId(order) === effectiveAdminBranchId;
+    return matchesQuery && matchesStatus && matchesBranch;
   });
-  const adminUnreadOrders = adminState.data.orders.filter((order) => ["awaiting_payment", "received", "confirmed"].includes(order.status)).length;
-  const adminUnreadContacts = adminState.data.contacts.filter((message) => message.status === "new").length;
-  const adminUnreadCatering = adminState.data.catering.filter((request) => request.status === "new").length;
+  const adminUnreadOrders = branchScopedOrders.filter((order) => ["awaiting_payment", "received", "confirmed"].includes(order.status)).length;
+  const adminUnreadContacts = branchScopedContacts.filter((message) => message.status === "new").length;
+  const adminUnreadCatering = branchScopedCatering.filter((request) => request.status === "new").length;
   const topDeliveryZones = Object.entries(
-    adminState.data.orders.reduce((accumulator, order) => {
+    branchScopedOrders.reduce((accumulator, order) => {
       const zone = order.customer.deliveryZone || "Unspecified";
       accumulator[zone] = (accumulator[zone] || 0) + 1;
       return accumulator;
@@ -1231,7 +1489,9 @@ export default function App() {
     .slice(0, 4);
 
   const filteredAdminContacts = adminState.data.contacts.filter((message) => {
-    return (
+    const matchesBranch =
+      effectiveAdminBranchId === "all" || !effectiveAdminBranchId || getRecordBranchId(message) === effectiveAdminBranchId;
+    return matchesBranch && (
       normalizedAdminQuery === "" ||
       message.reference.toLowerCase().includes(normalizedAdminQuery) ||
       message.name.toLowerCase().includes(normalizedAdminQuery) ||
@@ -1241,7 +1501,9 @@ export default function App() {
   });
 
   const filteredAdminCatering = adminState.data.catering.filter((request) => {
-    return (
+    const matchesBranch =
+      effectiveAdminBranchId === "all" || !effectiveAdminBranchId || getRecordBranchId(request) === effectiveAdminBranchId;
+    return matchesBranch && (
       normalizedAdminQuery === "" ||
       request.reference.toLowerCase().includes(normalizedAdminQuery) ||
       request.name.toLowerCase().includes(normalizedAdminQuery) ||
@@ -1250,6 +1512,17 @@ export default function App() {
       request.details.toLowerCase().includes(normalizedAdminQuery)
     );
   });
+  const filteredAdminReservations = adminState.data.reservations.filter((reservation) => {
+    const matchesBranch =
+      effectiveAdminBranchId === "all" || !effectiveAdminBranchId || getRecordBranchId(reservation) === effectiveAdminBranchId;
+    return matchesBranch && (
+      normalizedAdminQuery === "" ||
+      reservation.reference.toLowerCase().includes(normalizedAdminQuery) ||
+      reservation.name.toLowerCase().includes(normalizedAdminQuery) ||
+      reservation.phone.toLowerCase().includes(normalizedAdminQuery)
+    );
+  });
+  const recentReviews = branchScopedReviews.slice(0, 6);
 
   const filteredMenuAdminItems = menuAdminState.items.filter((item) => {
     return (
@@ -1408,6 +1681,14 @@ export default function App() {
 
   function handleQuickNav() {
     setMobileMenuOpen(false);
+    setBranchMenuOpen(false);
+  }
+
+  function handleBranchSelect(branchId) {
+    setSelectedBranchId(branchId);
+    setBranchMenuOpen(false);
+    setMobileMenuOpen(false);
+    setShowCart(false);
   }
 
   function getUserAuthHeaders(tokenOverride = accountToken) {
@@ -1628,10 +1909,17 @@ export default function App() {
         throw new Error(data.error || "Unable to load admin records right now.");
       }
 
+      setAdminSession({ ...initialAdminSession, ...(data.admin || {}) });
       setAdminState({
         loading: false,
         error: "",
-        data,
+        data: {
+          orders: Array.isArray(data.orders) ? data.orders : [],
+          contacts: Array.isArray(data.contacts) ? data.contacts : [],
+          catering: Array.isArray(data.catering) ? data.catering : [],
+          reservations: Array.isArray(data.reservations) ? data.reservations : [],
+          reviews: Array.isArray(data.reviews) ? data.reviews : [],
+        },
       });
     } catch (error) {
       if (error.message === "Admin login required.") {
@@ -1651,10 +1939,13 @@ export default function App() {
     try {
       setAdminLoginState({ loading: true, error: "" });
       const result = await postJson("/api/admin/login", {
+        username: adminUsername,
         password: adminPassword,
       });
+      setAdminUsername("");
       setAdminPassword("");
       setAdminLoginState({ loading: false, error: "" });
+      setAdminSession({ ...initialAdminSession, ...(result.admin || {}) });
       setAdminToken(result.token);
     } catch (error) {
       setAdminLoginState({
@@ -1675,6 +1966,7 @@ export default function App() {
         });
       }
     } finally {
+      setAdminSession(initialAdminSession);
       setAdminToken("");
       setAdminPassword("");
       setAdminLoginState({ loading: false, error: "" });
@@ -2028,6 +2320,8 @@ export default function App() {
             <p><strong>Phone:</strong> ${order.customer.phone}</p>
             <p><strong>Address:</strong> ${order.customer.address}</p>
             <p><strong>Landmark:</strong> ${order.customer.landmark || "-"}</p>
+            <p><strong>Fulfillment:</strong> ${order.customer.fulfillmentMethod || "delivery"}</p>
+            <p><strong>Scheduled For:</strong> ${order.customer.scheduledFor ? formatDateTime(order.customer.scheduledFor) : "-"}</p>
             <p><strong>Payment:</strong> ${order.customer.paymentMethod}</p>
             <p><strong>Payment Status:</strong> ${order.payment?.status || "unpaid"}</p>
             <p><strong>Payment Reference:</strong> ${order.payment?.reference || "-"}</p>
@@ -2080,6 +2374,7 @@ export default function App() {
           <p>${order.reference}</p>
           <div class="block">
             <h2>Customer</h2>
+            <p>Branch: ${order.customer.branchName || selectedBranch?.label || "PEM Branch"}</p>
             <p>${order.customer.customerName}</p>
             <p>${order.customer.phone}</p>
             <p>${order.customer.address}</p>
@@ -2137,9 +2432,10 @@ export default function App() {
     downloadCsv(
       "pem-orders.csv",
       [
-        ["Reference", "Customer", "Phone", "Address", "Landmark", "Promo Code", "Items", "Status", "Payment Method", "Payment Status", "Payment Reference", "Discount", "Total", "Created At"],
+        ["Reference", "Branch", "Customer", "Phone", "Address", "Landmark", "Promo Code", "Items", "Status", "Payment Method", "Payment Status", "Payment Reference", "Discount", "Total", "Created At"],
         ...filteredAdminOrders.map((order) => [
           order.reference,
+          getRecordBranchName(order),
           order.customer.customerName,
           order.customer.phone,
           order.customer.address,
@@ -2162,9 +2458,10 @@ export default function App() {
     downloadCsv(
       "pem-contact-messages.csv",
       [
-        ["Reference", "Name", "Phone", "Message", "Created At"],
+        ["Reference", "Branch", "Name", "Phone", "Message", "Created At"],
         ...filteredAdminContacts.map((message) => [
           message.reference,
+          getRecordBranchName(message),
           message.name,
           message.phone,
           message.message,
@@ -2178,9 +2475,10 @@ export default function App() {
     downloadCsv(
       "pem-catering-requests.csv",
       [
-        ["Reference", "Name", "Phone", "Event Date", "Guest Count", "Event Type", "Details", "Created At"],
+        ["Reference", "Branch", "Name", "Phone", "Event Date", "Guest Count", "Event Type", "Details", "Created At"],
         ...filteredAdminCatering.map((request) => [
           request.reference,
+          getRecordBranchName(request),
           request.name,
           request.phone,
           request.eventDate,
@@ -2384,6 +2682,14 @@ export default function App() {
       return;
     }
 
+    if (overStockCartItem) {
+      setCheckoutState({
+        loading: false,
+        error: `${overStockCartItem.name} does not have enough remaining stock for that quantity.`,
+      });
+      return;
+    }
+
     if (total < Number(businessSettings.minimumOrder || 0)) {
       setCheckoutState({
         loading: false,
@@ -2392,10 +2698,10 @@ export default function App() {
       return;
     }
 
-    if (!checkoutForm.customerName || !checkoutForm.phone || !checkoutForm.address) {
+    if (!checkoutForm.customerName || !checkoutForm.phone || (checkoutForm.fulfillmentMethod !== "pickup" && !checkoutForm.address)) {
       setCheckoutState({
         loading: false,
-        error: "Please enter your name, phone number, and delivery address.",
+        error: "Please enter your name, phone number, and delivery details.",
       });
       return;
     }
@@ -2440,9 +2746,13 @@ export default function App() {
       const result = await postJson("/api/orders", {
         customer: {
           ...checkoutForm,
+          branchId: selectedBranch?.id || "",
+          branchName: selectedBranch?.label || "",
+          branchAddress: selectedBranch?.address || businessSettings.address,
+          branchPhone: selectedBranch?.phone || businessSettings.phone,
           email: checkoutForm.email || accountUser.email || "",
-          deliveryZone: selectedDeliveryZone.label,
-          deliveryEta: selectedDeliveryZone.eta,
+          deliveryZone: checkoutForm.fulfillmentMethod === "pickup" ? "Pickup at PEM" : selectedDeliveryZone.label,
+          deliveryEta: checkoutForm.fulfillmentMethod === "pickup" ? "Pickup time confirmed by PEM" : selectedDeliveryZone.eta,
           paymentReference: checkoutForm.paymentReference,
         },
         items: cartItems,
@@ -2527,6 +2837,7 @@ export default function App() {
       `Hello ${businessSettings.appName}, I want to place an order.`,
       "",
       `Name: ${checkoutForm.customerName}`,
+      `Branch: ${selectedBranch?.label || businessSettings.appName}`,
       `Phone: ${checkoutForm.phone}`,
       `Address: ${checkoutForm.address || "Will confirm on WhatsApp"}`,
       `Landmark: ${checkoutForm.landmark || "Will confirm on WhatsApp"}`,
@@ -2553,7 +2864,11 @@ export default function App() {
 
     try {
       setContactState({ loading: true, success: "", error: "" });
-      const result = await postJson("/api/contact", contactForm);
+      const result = await postJson("/api/contact", {
+        ...contactForm,
+        branchId: selectedBranch?.id || "",
+        branchName: selectedBranch?.label || "",
+      });
       setContactForm(initialContact);
       setContactState({
         loading: false,
@@ -2575,7 +2890,11 @@ export default function App() {
 
     try {
       setCateringState({ loading: true, success: "", error: "" });
-      const result = await postJson("/api/catering", cateringForm);
+      const result = await postJson("/api/catering", {
+        ...cateringForm,
+        branchId: selectedBranch?.id || "",
+        branchName: selectedBranch?.label || "",
+      });
       setCateringForm(initialCatering);
       setCateringState({
         loading: false,
@@ -2585,6 +2904,65 @@ export default function App() {
       loadAdminData();
     } catch (error) {
       setCateringState({
+        loading: false,
+        success: "",
+        error: error.message,
+      });
+    }
+  }
+
+  async function handleReservationSubmit(event) {
+    event.preventDefault();
+
+    try {
+      setReservationState({ loading: true, success: "", error: "" });
+      const result = await postJson("/api/reservations", {
+        ...reservationForm,
+        branchId: selectedBranch?.id || "",
+        branchName: selectedBranch?.label || "",
+      });
+      setReservationForm(initialReservation);
+      setReservationState({
+        loading: false,
+        success: `Reservation received. Reference: ${result.reservation.reference}`,
+        error: "",
+      });
+      loadAdminData();
+    } catch (error) {
+      setReservationState({
+        loading: false,
+        success: "",
+        error: error.message,
+      });
+    }
+  }
+
+  async function handleReviewSubmit(event) {
+    event.preventDefault();
+
+    if (!trackingState.order?.reference) {
+      setReviewState({ loading: false, success: "", error: "Track a delivered order first." });
+      return;
+    }
+
+    try {
+      setReviewState({ loading: true, success: "", error: "" });
+      await postJson("/api/reviews", {
+        orderReference: trackingState.order.reference,
+        rating: Number(reviewForm.rating),
+        comment: reviewForm.comment,
+        branchId: trackingState.order.customer?.branchId || selectedBranch?.id || "",
+        branchName: trackingState.order.customer?.branchName || selectedBranch?.label || "",
+      });
+      setReviewForm(initialReviewForm);
+      setReviewState({
+        loading: false,
+        success: "Thank you. Your review has been saved.",
+        error: "",
+      });
+      loadAdminData();
+    } catch (error) {
+      setReviewState({
         loading: false,
         success: "",
         error: error.message,
@@ -2679,6 +3057,9 @@ export default function App() {
         error: "",
         order: data.order,
       });
+      if (data.order?.customer?.branchId) {
+        setSelectedBranchId(data.order.customer.branchId);
+      }
       setTrackingReference(normalizedReference);
       setSavedReferences((previous) => [
         normalizedReference,
@@ -2756,6 +3137,24 @@ export default function App() {
               notifications, and order history in one calm, professional experience.
             </p>
 
+            <div className="branch-selector-card">
+              <div>
+                <p className="eyebrow">Current branch</p>
+                <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
+                <span>{selectedBranch?.address || businessSettings.address}</span>
+              </div>
+              <label className="field">
+                <span>Choose branch</span>
+                <select value={selectedBranch?.id || ""} onChange={(event) => handleBranchSelect(event.target.value)}>
+                  {branchLocations.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             <div className="hero__stats auth-hero__stats">
               <div>
                 <strong>{visibleMenuCount}</strong>
@@ -2828,6 +3227,18 @@ export default function App() {
                       setSignupForm((previous) => ({ ...previous, password: event.target.value }))
                     }
                     placeholder="At least 6 characters"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Referral code</span>
+                  <input
+                    type="text"
+                    value={signupForm.referralCode}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, referralCode: event.target.value }))
+                    }
+                    placeholder="Optional referral code"
                   />
                 </label>
               </div>
@@ -3010,7 +3421,50 @@ export default function App() {
         </div>
       ) : null}
 
+      {!isOnline ? (
+        <div className="toast toast--warning" role="status">
+          You are offline. PEM browsing still works, but orders and updates need internet access.
+        </div>
+      ) : null}
+
       <main>
+        <section className="branch-bar">
+          <button
+            type="button"
+            className={branchMenuOpen ? "branch-bar__toggle is-open" : "branch-bar__toggle"}
+            onClick={() => setBranchMenuOpen((current) => !current)}
+          >
+            <div>
+              <span className="branch-bar__eyebrow">Serving from</span>
+              <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
+              <small>{selectedBranch?.address || businessSettings.address}</small>
+            </div>
+            <span>{branchMenuOpen ? "Close" : "Switch"}</span>
+          </button>
+
+          <div className="branch-bar__summary">
+            <span>{selectedBranch?.hours || businessSettings.businessHoursText}</span>
+            <strong>{selectedBranch?.phone || businessSettings.phone}</strong>
+          </div>
+        </section>
+
+        {branchMenuOpen ? (
+          <section className="branch-menu">
+            {branchLocations.map((branch) => (
+              <button
+                key={branch.id}
+                type="button"
+                className={branch.id === selectedBranch?.id ? "branch-menu__item is-active" : "branch-menu__item"}
+                onClick={() => handleBranchSelect(branch.id)}
+              >
+                <strong>{branch.label}</strong>
+                <span>{branch.address}</span>
+                <small>{branch.note}</small>
+              </button>
+            ))}
+          </section>
+        ) : null}
+
         {businessSettings.promoBanner ? (
           <section className="promo-banner">
             <p>{businessSettings.promoBanner}</p>
@@ -3022,6 +3476,13 @@ export default function App() {
             <p className="eyebrow">Local dishes. Premium experience.</p>
             <h1>{businessSettings.heroHeadline}</h1>
             <p className="hero__copy">{businessSettings.heroCopy}</p>
+            <div className="hero__branch">
+              <span className="status-pill status-pill--received">{selectedBranch?.label || "Main branch"}</span>
+              <p>
+                <strong>{selectedBranch?.address || businessSettings.address}</strong>
+                <span>{selectedBranch?.note || businessSettings.contactPromise}</span>
+              </p>
+            </div>
             <p className="hero__status">
               <span className={businessStatus.isOpen ? "status-pill status-pill--delivered" : "status-pill status-pill--new"}>
                 {businessStatus.isOpen ? "Open now" : "Closed now"}
@@ -3096,6 +3557,7 @@ export default function App() {
                 PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
                 You can track it below, download the receipt, or continue browsing the menu.
               </p>
+              <p className="cart-help">Branch: <strong>{receiptOrder.customer?.branchName || selectedBranch?.label || "PEM Branch"}</strong></p>
               <div className="account-list__actions">
                 <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
                   Download Receipt
@@ -3258,6 +3720,9 @@ export default function App() {
                     <span>Saved addresses</span>
                   </div>
                 </div>
+                <p className="account-helper">
+                  Your referral code: <strong>{accountUser.referralCode || "Will appear after signup"}</strong>
+                </p>
 
                 <form className="service-form account-card__panel" onSubmit={handleProfileSave}>
                   <div className="service-form__grid">
@@ -3518,6 +3983,15 @@ export default function App() {
                     Ordered by <strong>{trackingState.order.customer.customerName}</strong> on{" "}
                     {formatDateTime(trackingState.order.updatedAt || trackingState.order.createdAt)}.
                   </p>
+                  <p>
+                    Branch: <strong>{trackingState.order.customer.branchName || "PEM Branch"}</strong>
+                  </p>
+                  <p>
+                    Fulfillment: <strong>{trackingState.order.customer.fulfillmentMethod || "delivery"}</strong>
+                    {trackingState.order.customer.scheduledFor ? (
+                      <> • Scheduled for <strong>{formatDateTime(trackingState.order.customer.scheduledFor)}</strong></>
+                    ) : null}
+                  </p>
                   <div className="tracking-card__meta">
                     <div>
                       <span>Total</span>
@@ -3574,6 +4048,39 @@ export default function App() {
                   >
                     Add These Items To Cart
                   </button>
+                  {trackingState.order.status === "delivered" ? (
+                    <form className="service-form account-card__panel" onSubmit={handleReviewSubmit}>
+                      <div className="service-form__grid">
+                        <label className="field">
+                          <span>Rate this order</span>
+                          <select
+                            value={reviewForm.rating}
+                            onChange={(event) => setReviewForm((previous) => ({ ...previous, rating: event.target.value }))}
+                          >
+                            <option value="5">5 stars</option>
+                            <option value="4">4 stars</option>
+                            <option value="3">3 stars</option>
+                            <option value="2">2 stars</option>
+                            <option value="1">1 star</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label className="note-field">
+                        <span>Comment</span>
+                        <textarea
+                          rows="3"
+                          value={reviewForm.comment}
+                          onChange={(event) => setReviewForm((previous) => ({ ...previous, comment: event.target.value }))}
+                          placeholder="Tell PEM how the meal and delivery went."
+                        />
+                      </label>
+                      {reviewState.error ? <p className="form-message form-message--error">{reviewState.error}</p> : null}
+                      {reviewState.success ? <p className="form-message form-message--success">{reviewState.success}</p> : null}
+                      <button type="submit" className="button button--ghost" disabled={reviewState.loading}>
+                        {reviewState.loading ? "Sending review..." : "Send Review"}
+                      </button>
+                    </form>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -3655,7 +4162,7 @@ export default function App() {
                 <button
                   type="submit"
                   className="button button--primary"
-                  disabled={dietaryState.loading}
+                  disabled={dietaryState.loading || !isOnline}
                 >
                   {dietaryState.loading ? "Finding matches..." : "Suggest meals"}
                 </button>
@@ -3833,6 +4340,7 @@ export default function App() {
                       {item.spicy ? <small>Spicy</small> : null}
                       {recommendedItemIds.includes(item.id) ? <small>Dietary match</small> : null}
                       {item.soldOut ? <small>Sold out</small> : null}
+                      {item.stockQuantity > 0 && !item.soldOut ? <small>{item.stockQuantity} left</small> : null}
                     </div>
                   </div>
 
@@ -3920,6 +4428,7 @@ export default function App() {
           </div>
 
           <form className="service-form service-form--light reveal reveal--up reveal--delay-2" onSubmit={handleCateringSubmit}>
+            <p className="cart-help">Branch handling this request: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
             <div className="service-form__grid">
               <label className="field">
                 <span>Full name</span>
@@ -4004,9 +4513,80 @@ export default function App() {
             <button
               type="submit"
               className="button button--ghost service-form__button"
-              disabled={cateringState.loading}
+              disabled={cateringState.loading || !isOnline}
             >
               {cateringState.loading ? "Sending..." : "Request Catering"}
+            </button>
+          </form>
+        </section>
+
+        <section className="contact-section">
+          <div className="section-heading reveal reveal--up">
+            <p className="eyebrow">Reservations</p>
+            <h2>Book a table or tasting slot with PEM.</h2>
+          </div>
+
+          <form className="service-form reveal reveal--up" onSubmit={handleReservationSubmit}>
+            <p className="cart-help">Reservation branch: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
+            <div className="service-form__grid">
+              <label className="field">
+                <span>Full name</span>
+                <input
+                  type="text"
+                  value={reservationForm.name}
+                  onChange={(event) => setReservationForm((previous) => ({ ...previous, name: event.target.value }))}
+                  placeholder="Your full name"
+                />
+              </label>
+              <label className="field">
+                <span>Phone number</span>
+                <input
+                  type="tel"
+                  value={reservationForm.phone}
+                  onChange={(event) => setReservationForm((previous) => ({ ...previous, phone: event.target.value }))}
+                  placeholder="0803 334 5161"
+                />
+              </label>
+              <label className="field">
+                <span>Date</span>
+                <input
+                  type="date"
+                  value={reservationForm.date}
+                  onChange={(event) => setReservationForm((previous) => ({ ...previous, date: event.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Time</span>
+                <input
+                  type="time"
+                  value={reservationForm.time}
+                  onChange={(event) => setReservationForm((previous) => ({ ...previous, time: event.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Number of guests</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={reservationForm.guests}
+                  onChange={(event) => setReservationForm((previous) => ({ ...previous, guests: event.target.value }))}
+                  placeholder="4"
+                />
+              </label>
+            </div>
+            <label className="note-field">
+              <span>Notes</span>
+              <textarea
+                rows="3"
+                value={reservationForm.notes}
+                onChange={(event) => setReservationForm((previous) => ({ ...previous, notes: event.target.value }))}
+                placeholder="Birthday dinner, tasting session, or special seating request."
+              />
+            </label>
+            {reservationState.error ? <p className="form-message form-message--error">{reservationState.error}</p> : null}
+            {reservationState.success ? <p className="form-message form-message--success">{reservationState.success}</p> : null}
+            <button type="submit" className="button button--primary" disabled={reservationState.loading || !isOnline}>
+              {reservationState.loading ? "Booking..." : "Book Reservation"}
             </button>
           </form>
         </section>
@@ -4046,9 +4626,14 @@ export default function App() {
               <h3>Business Address</h3>
               <p>{businessSettings.address}</p>
             </div>
+            <div className="contact-card">
+              <h3>Current Branch</h3>
+              <p>{selectedBranch?.label || `${businessSettings.appName} Branch`}</p>
+            </div>
           </div>
 
           <form className="service-form reveal reveal--up reveal--delay-2" onSubmit={handleContactSubmit}>
+            <p className="cart-help">Message will go to: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
             <div className="service-form__grid service-form__grid--three">
               <label className="field">
                 <span>Full name</span>
@@ -4097,7 +4682,7 @@ export default function App() {
             <button
               type="submit"
               className="button button--primary service-form__button"
-              disabled={contactState.loading}
+              disabled={contactState.loading || !isOnline}
             >
               {contactState.loading ? "Sending..." : "Send Message"}
             </button>
@@ -4120,6 +4705,16 @@ export default function App() {
                   <code> ADMIN_PASSWORD</code> value, then restart the app.
                 </p>
               </div>
+
+              <label className="field">
+                <span>Admin username</span>
+                <input
+                  type="text"
+                  value={adminUsername}
+                  onChange={(event) => setAdminUsername(event.target.value)}
+                  placeholder="Leave blank for owner login"
+                />
+              </label>
 
               <label className="field">
                 <span>Admin password</span>
@@ -4163,9 +4758,16 @@ export default function App() {
                     <strong>{adminUnreadCatering}</strong>
                     <span>New catering requests</span>
                   </div>
+                  <div>
+                    <strong>{filteredAdminReservations.length}</strong>
+                    <span>Reservations</span>
+                  </div>
                 </div>
 
                 <div className="admin-toolbar__actions">
+                  <span className="status-pill status-pill--received">
+                    {adminSession.branchId ? `${adminSession.label} · ${branchLocations.find((branch) => branch.id === adminSession.branchId)?.label || "Assigned branch"}` : `${adminSession.label || "Owner"} · All branches`}
+                  </span>
                   <a href="#menu" className="button button--ghost">
                     Back to Menu
                   </a>
@@ -4205,6 +4807,22 @@ export default function App() {
                     {orderStatuses.map((status) => (
                       <option key={status} value={status}>
                         {status === "all" ? "All statuses" : status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Branch view</span>
+                  <select
+                    value={adminSession.branchId || adminBranchFilter}
+                    onChange={(event) => setAdminBranchFilter(event.target.value)}
+                    disabled={Boolean(adminSession.branchId)}
+                  >
+                    <option value="all">All branches</option>
+                    {branchOptions.map((branch) => (
+                      <option key={branch.value} value={branch.value}>
+                        {branch.label}
                       </option>
                     ))}
                   </select>
@@ -4282,7 +4900,8 @@ export default function App() {
                   </div>
                 </article>
 
-                <article className="admin-card reveal reveal--up">
+                {adminSession.isOwner ? (
+                  <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
                     <h3>Business Settings</h3>
                     <span>{settingsAdminState.settings.appName}</span>
@@ -4432,6 +5051,24 @@ export default function App() {
                       />
                     </label>
                     <label className="note-field">
+                      <span>Staff admin logins</span>
+                      <textarea
+                        rows="3"
+                        value={settingsAdminState.settings.staffAdminsText}
+                        onChange={(event) => updateSettingsField("staffAdminsText", event.target.value)}
+                        placeholder={"manager|PemStaff2026|Floor Manager|owerri-central"}
+                      />
+                    </label>
+                    <label className="note-field">
+                      <span>Branch locations</span>
+                      <textarea
+                        rows="5"
+                        value={settingsAdminState.settings.branchLocationsText}
+                        onChange={(event) => updateSettingsField("branchLocationsText", event.target.value)}
+                        placeholder={"owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center dispatch"}
+                      />
+                    </label>
+                    <label className="note-field">
                       <span>Receipt footer</span>
                       <textarea
                         rows="2"
@@ -4453,9 +5090,11 @@ export default function App() {
                       {settingsAdminState.saving ? "Saving settings..." : "Save Business Settings"}
                     </button>
                   </form>
-                </article>
+                  </article>
+                ) : null}
 
-                <article className="admin-card reveal reveal--up">
+                {adminSession.isOwner ? (
+                  <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
                     <h3>Delivery Zones</h3>
                     <span>{deliveryZoneAdminState.zones.length}</span>
@@ -4543,9 +5182,11 @@ export default function App() {
                       {deliveryZoneAdminState.saving ? "Saving zones..." : "Save Delivery Zones"}
                     </button>
                   </form>
-                </article>
+                  </article>
+                ) : null}
 
-                <article className="admin-card reveal reveal--up reveal--delay-1">
+                {adminSession.isOwner ? (
+                  <article className="admin-card reveal reveal--up reveal--delay-1">
                   <div className="admin-card__header">
                     <h3>Menu Manager</h3>
                     <span>{filteredMenuAdminItems.length}</span>
@@ -4598,6 +5239,18 @@ export default function App() {
                                   </option>
                                 ))}
                               </select>
+                            </label>
+
+                            <label className="field">
+                              <span>Stock quantity</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.stockQuantity || 0}
+                                onChange={(event) =>
+                                  updateMenuAdminItem(item.id, { stockQuantity: Number(event.target.value) || 0 })
+                                }
+                              />
                             </label>
                           </div>
 
@@ -4653,7 +5306,18 @@ export default function App() {
                       {menuAdminState.saving ? "Saving menu..." : "Save Menu Changes"}
                     </button>
                   </form>
-                </article>
+                  </article>
+                ) : (
+                  <article className="admin-card reveal reveal--up reveal--delay-1">
+                    <div className="admin-card__header">
+                      <h3>Branch Staff Access</h3>
+                      <span>{adminSession.label || "Staff"}</span>
+                    </div>
+                    <p className="admin-empty">
+                      Branch staff can manage live orders, messages, catering, reservations, and reviews. Global business settings stay with the owner account.
+                    </p>
+                  </article>
+                )}
 
                 <article className="admin-card reveal reveal--up">
                   <div className="admin-card__header">
@@ -4671,8 +5335,13 @@ export default function App() {
                             <strong>{order.customer.customerName}</strong>
                             <span>{order.reference}</span>
                           </div>
+                          <p className="admin-item__subtle">{getRecordBranchName(order)}</p>
                           <p>
                             {order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")}
+                          </p>
+                          <p>
+                            {order.customer.fulfillmentMethod || "delivery"}
+                            {order.customer.scheduledFor ? ` • ${formatDateTime(order.customer.scheduledFor)}` : ""}
                           </p>
                           <div className="admin-item__row">
                             <span>{order.customer.phone}</span>
@@ -4743,6 +5412,7 @@ export default function App() {
                             <strong>{message.name}</strong>
                             <span>{message.reference}</span>
                           </div>
+                          <p className="admin-item__subtle">{getRecordBranchName(message)}</p>
                           <p>{message.phone}</p>
                           <div className="admin-status-row">
                             <span className={`status-pill status-pill--${message.status || "new"}`}>
@@ -4786,6 +5456,7 @@ export default function App() {
                             <strong>{request.name}</strong>
                             <span>{request.reference}</span>
                           </div>
+                          <p className="admin-item__subtle">{getRecordBranchName(request)}</p>
                           <p>
                             {request.eventType || "Event"} on {request.eventDate} for {request.guestCount} guests
                           </p>
@@ -4815,9 +5486,62 @@ export default function App() {
                     </div>
                   )}
                 </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Reservations</h3>
+                    <span>{filteredAdminReservations.length}</span>
+                  </div>
+
+                  {filteredAdminReservations.length === 0 ? (
+                    <p className="admin-empty">No reservations yet.</p>
+                  ) : (
+                    <div className="admin-list">
+                      {filteredAdminReservations.map((reservation) => (
+                        <div key={reservation.reference} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{reservation.name}</strong>
+                            <span>{reservation.reference}</span>
+                          </div>
+                          <p className="admin-item__subtle">{getRecordBranchName(reservation)}</p>
+                          <p>{reservation.date} at {reservation.time} for {reservation.guests} guest(s)</p>
+                          <p>{reservation.phone}</p>
+                          <span className={`status-pill status-pill--${reservation.status || "new"}`}>{reservation.status || "new"}</span>
+                          <p>{reservation.notes}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Recent Reviews</h3>
+                    <span>{recentReviews.length}</span>
+                  </div>
+
+                  {recentReviews.length === 0 ? (
+                    <p className="admin-empty">No reviews yet.</p>
+                  ) : (
+                    <div className="admin-list">
+                      {recentReviews.map((review) => (
+                        <div key={review.reference} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{review.customerName}</strong>
+                            <span>{review.rating}/5</span>
+                          </div>
+                          <p className="admin-item__subtle">{getRecordBranchName(review)}</p>
+                          <p>{review.comment || "No written comment."}</p>
+                          <p>{formatDateTime(review.createdAt)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
               </div>
 
-              <form className="admin-password-card service-form reveal reveal--up reveal--delay-2" onSubmit={handleAdminPasswordChange}>
+              {adminSession.isOwner ? (
+                <form className="admin-password-card service-form reveal reveal--up reveal--delay-2" onSubmit={handleAdminPasswordChange}>
                 <div className="admin-login__copy">
                   <h3>Change admin password</h3>
                   <p>
@@ -4887,11 +5611,23 @@ export default function App() {
                 >
                   {passwordState.loading ? "Saving..." : "Update Password"}
                 </button>
-              </form>
+                </form>
+              ) : null}
             </>
           )}
         </section>
       </main>
+
+      <div className="mobile-quickbar">
+        <a href="#menu" onClick={handleQuickNav}>Menu</a>
+        <a href="#track" onClick={handleQuickNav}>Track</a>
+        <button type="button" onClick={() => setBranchMenuOpen((current) => !current)}>
+          Branch
+        </button>
+        <button type="button" onClick={() => setShowCart(true)}>
+          Order {totalItems > 0 ? `(${totalItems})` : ""}
+        </button>
+      </div>
 
       <aside className={showCart ? "cart-drawer is-open" : "cart-drawer"} aria-hidden={!showCart}>
         <div className="cart-drawer__backdrop" onClick={() => setShowCart(false)} />
@@ -4939,6 +5675,12 @@ export default function App() {
                 <div className="checkout-fields">
                   <p className="checkout-fields__title">Delivery details</p>
                   <p className="cart-help">Minimum order: {formatPrice(Number(businessSettings.minimumOrder || 0))}</p>
+                  <div className="delivery-zone-card">
+                    <p className="delivery-zone-card__title">Chosen branch</p>
+                    <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
+                    <span>{selectedBranch?.address || businessSettings.address}</span>
+                    <small>{selectedBranch?.note || businessSettings.contactPromise}</small>
+                  </div>
                   <label className="field">
                     <span>Customer name</span>
                     <input
@@ -4985,8 +5727,39 @@ export default function App() {
                   </label>
 
                   <label className="field">
+                    <span>Fulfillment</span>
+                    <select
+                      value={checkoutForm.fulfillmentMethod}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          fulfillmentMethod: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="delivery">Delivery</option>
+                      <option value="pickup">Pickup</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Schedule for later</span>
+                    <input
+                      type="datetime-local"
+                      value={checkoutForm.scheduledFor}
+                      onChange={(event) =>
+                        setCheckoutForm((previous) => ({
+                          ...previous,
+                          scheduledFor: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <label className="field">
                     <span>Delivery area</span>
                     <select
+                      disabled={checkoutForm.fulfillmentMethod === "pickup"}
                       value={checkoutForm.deliveryZone}
                       onChange={(event) =>
                         setCheckoutForm((previous) => ({
@@ -5004,10 +5777,12 @@ export default function App() {
                   </label>
 
                   <div className="delivery-zone-card">
-                    <p className="delivery-zone-card__title">Area delivery estimate</p>
-                    <strong>{formatPrice(selectedDeliveryZone.fee)}</strong>
-                    <span>{selectedDeliveryZone.eta}</span>
-                    {selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom" ? (
+                    <p className="delivery-zone-card__title">
+                      {checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : "Area delivery estimate"}
+                    </p>
+                    <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "No delivery fee" : formatPrice(selectedDeliveryZone.fee)}</strong>
+                    <span>{checkoutForm.fulfillmentMethod === "pickup" ? "PEM will confirm your pickup time." : selectedDeliveryZone.eta}</span>
+                    {checkoutForm.fulfillmentMethod !== "pickup" && (selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom") ? (
                       <small>PEM will confirm final timing with you after the order is received.</small>
                     ) : null}
                   </div>
@@ -5133,6 +5908,10 @@ export default function App() {
               </div>
             ) : null}
             <div className="cart-total">
+              <span>Branch</span>
+              <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
+            </div>
+            <div className="cart-total">
               <span>Area</span>
               <strong>{selectedDeliveryZone.label}</strong>
             </div>
@@ -5145,6 +5924,7 @@ export default function App() {
               type="button"
               className="button button--ghost button--full"
               onClick={handleWhatsAppOrder}
+              disabled={!isOnline}
             >
               Send Order To WhatsApp
             </button>
@@ -5152,7 +5932,7 @@ export default function App() {
               type="button"
               className="button button--primary button--full"
               onClick={handlePlaceOrder}
-              disabled={checkoutState.loading}
+              disabled={checkoutState.loading || !isOnline}
             >
               {checkoutState.loading
                 ? "Submitting order..."

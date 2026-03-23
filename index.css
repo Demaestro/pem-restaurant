@@ -171,6 +171,29 @@ button:disabled {
   background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 
+.branch-selector-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(13rem, 18rem);
+  gap: 1rem;
+  padding: 1.05rem 1.15rem;
+  margin-top: 1.4rem;
+  border-radius: 1.35rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.branch-selector-card strong,
+.branch-bar__toggle strong {
+  display: block;
+  font-size: 1.02rem;
+}
+
+.branch-selector-card span,
+.branch-bar__toggle small,
+.branch-bar__summary span {
+  color: var(--muted);
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -355,6 +378,12 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.toast--warning {
+  top: 9rem;
+  background: #5e4a13;
+  color: #fff4cf;
+}
+
 .promo-banner {
   padding: 1rem 4.5rem 0;
 }
@@ -381,6 +410,96 @@ button:disabled {
   background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
+}
+
+.branch-bar {
+  position: sticky;
+  top: 5.4rem;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 4.5rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.branch-bar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(38rem, 100%);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 1.2rem;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.branch-bar__toggle.is-open {
+  border-color: color-mix(in srgb, var(--brand) 24%, var(--line));
+}
+
+.branch-bar__eyebrow {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.branch-bar__summary {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+  text-align: right;
+}
+
+.branch-menu {
+  position: sticky;
+  top: 10.9rem;
+  z-index: 37;
+  margin: 0 4.5rem;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.8rem;
+  border-bottom-left-radius: 1.4rem;
+  border-bottom-right-radius: 1.4rem;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: color-mix(in srgb, var(--surface-strong) 96%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.branch-menu__item {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.branch-menu__item span,
+.branch-menu__item small {
+  color: var(--muted);
+}
+
+.branch-menu__item.is-active {
+  border-color: color-mix(in srgb, var(--brand) 24%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 62%, var(--surface));
 }
 
 .mobile-nav a {
@@ -431,6 +550,24 @@ button:disabled {
   grid-template-columns: 1.05fr 0.95fr;
   gap: 2rem;
   align-items: center;
+}
+
+.hero__branch {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.hero__branch p {
+  margin: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.hero__branch span:last-child,
+.hero__branch p span {
+  color: var(--muted);
 }
 
 .eyebrow {
@@ -1433,6 +1570,10 @@ button:disabled {
   color: var(--muted);
 }
 
+.mobile-quickbar {
+  display: none;
+}
+
 .admin-status-row {
   display: flex;
   align-items: center;
@@ -1492,6 +1633,12 @@ button:disabled {
 .status-pill--out_for_delivery {
   background: rgba(24, 122, 102, 0.14);
   color: #146f60;
+}
+
+.status-pill--seated,
+.status-pill--completed {
+  background: rgba(41, 155, 90, 0.14);
+  color: #1f8c50;
 }
 
 .status-pill--delivered {
@@ -1562,6 +1709,11 @@ button:disabled {
 
 :root[data-theme="dark"] .status-pill--out_for_delivery {
   color: #8be3d1;
+}
+
+:root[data-theme="dark"] .status-pill--seated,
+:root[data-theme="dark"] .status-pill--completed {
+  color: #8ee5ad;
 }
 
 :root[data-theme="dark"] .status-pill--contacted {
@@ -2081,6 +2233,12 @@ button:disabled {
     padding-right: 1rem;
   }
 
+  .branch-bar,
+  .branch-menu {
+    margin-left: 1rem;
+    margin-right: 1rem;
+  }
+
   .topbar__actions,
   .account-grid,
   .controls,
@@ -2114,6 +2272,28 @@ button:disabled {
     display: block;
   }
 
+  .branch-bar {
+    top: 4.95rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .branch-bar__toggle,
+  .branch-bar__summary {
+    width: 100%;
+  }
+
+  .branch-bar__summary {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .branch-menu {
+    top: 10.6rem;
+  }
+
   .cart-toggle {
     width: auto;
     min-width: 8.5rem;
@@ -2143,6 +2323,10 @@ button:disabled {
   .auth-loading-card {
     padding: 1.2rem;
     border-radius: 1.5rem;
+  }
+
+  .branch-selector-card {
+    grid-template-columns: 1fr;
   }
 
   .auth-hero__copy h1,
@@ -2220,7 +2404,7 @@ button:disabled {
 
   .theme-fab {
     top: auto;
-    bottom: 1rem;
+    bottom: 5.2rem;
     right: 1rem;
   }
 
@@ -2229,6 +2413,45 @@ button:disabled {
   .account-list__actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .mobile-quickbar {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 1rem;
+    z-index: 58;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding: 0.55rem;
+    border: 1px solid var(--line);
+    border-radius: 1.2rem;
+    background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-quickbar a,
+  .mobile-quickbar button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.85rem;
+    border: 0;
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .mobile-quickbar button:last-child {
+    background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+    color: #fff;
+  }
+
+  .cart-drawer__panel {
+    padding-bottom: 6rem;
   }
 }
 
