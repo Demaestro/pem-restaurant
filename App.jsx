@@ -1080,6 +1080,7 @@ export default function App() {
   const [addressDraft, setAddressDraft] = useState("");
   const [search, setSearch] = useState("");
   const [showCart, setShowCart] = useState(false);
+  const [showPreMenuTools, setShowPreMenuTools] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
   const [checkoutState, setCheckoutState] = useState({ loading: false, error: "" });
@@ -1905,7 +1906,11 @@ export default function App() {
     setInstallPromptEvent(null);
   }
 
-  function handleQuickNav() {
+  function handleQuickNav(event) {
+    const href = event?.currentTarget?.getAttribute?.("href") || "";
+    if (["#account", "#track"].includes(href)) {
+      setShowPreMenuTools(true);
+    }
     setMobileMenuOpen(false);
     setBranchMenuOpen(false);
   }
@@ -3865,6 +3870,64 @@ export default function App() {
           </section>
         ) : null}
 
+        {receiptOrder ? (
+          <section className="receipt-section">
+            <div className="receipt-card reveal reveal--up">
+              <div className="account-card__header">
+                <div>
+                  <p className="eyebrow">Checkout complete</p>
+                  <h2>{receiptOrder.reference}</h2>
+                </div>
+                <span>{receiptOrder.status.replaceAll("_", " ")}</span>
+              </div>
+              <p>
+                PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
+                You can track it below, download the receipt, or continue browsing the menu.
+              </p>
+              <p className="cart-help">Branch: <strong>{receiptOrder.customer?.branchName || selectedBranch?.label || "PEM Branch"}</strong></p>
+              <div className="account-list__actions">
+                <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
+                  Download Receipt
+                </button>
+                <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="pre-menu-tools reveal reveal--up">
+          <div>
+            <p className="eyebrow">Quick Start</p>
+            <h2>Go straight to the food menu.</h2>
+            <p>
+              PEM now keeps the ordering flow simpler. Open the extra sections only when you need account,
+              tracking, or combo tools.
+            </p>
+          </div>
+          <div className="pre-menu-tools__actions">
+            <a href="#menu" className="button button--primary">
+              Browse Menu
+            </a>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => setShowPreMenuTools((current) => !current)}
+            >
+              {showPreMenuTools ? "Hide Extra Sections" : "Show Extra Sections"}
+            </button>
+          </div>
+          <div className="pre-menu-tools__links">
+            <a href="#track" onClick={handleQuickNav}>Track Order</a>
+            <a href="#catering" onClick={handleQuickNav}>Catering</a>
+            <a href="#contact" onClick={handleQuickNav}>Contact</a>
+            <a href="#account" onClick={handleQuickNav}>Account</a>
+          </div>
+        </section>
+
+        {showPreMenuTools ? (
+          <>
         <section className="hero">
           <div className="hero__content reveal reveal--up">
             <p className="eyebrow">Local dishes. Premium experience.</p>
@@ -3936,33 +3999,6 @@ export default function App() {
             </div>
           </div>
         </section>
-
-        {receiptOrder ? (
-          <section className="receipt-section">
-            <div className="receipt-card reveal reveal--up">
-              <div className="account-card__header">
-                <div>
-                  <p className="eyebrow">Checkout complete</p>
-                  <h2>{receiptOrder.reference}</h2>
-                </div>
-                <span>{receiptOrder.status.replaceAll("_", " ")}</span>
-              </div>
-              <p>
-                PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
-                You can track it below, download the receipt, or continue browsing the menu.
-              </p>
-              <p className="cart-help">Branch: <strong>{receiptOrder.customer?.branchName || selectedBranch?.label || "PEM Branch"}</strong></p>
-              <div className="account-list__actions">
-                <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
-                  Download Receipt
-                </button>
-                <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </section>
-        ) : null}
 
         <section className="account-section" id="account">
           <div className="section-heading reveal reveal--up">
@@ -4594,6 +4630,8 @@ export default function App() {
             ))}
           </div>
         </section>
+          </>
+        ) : null}
 
         <section className="menu-section" id="menu">
           <div className="section-heading section-heading--compact reveal reveal--up">

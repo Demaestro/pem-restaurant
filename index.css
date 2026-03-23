@@ -531,6 +531,47 @@ button:disabled {
   text-align: right;
 }
 
+.pre-menu-tools {
+  margin: 1rem 4.5rem 0;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 1rem;
+}
+
+.pre-menu-tools h2 {
+  margin: 0.25rem 0 0.45rem;
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+}
+
+.pre-menu-tools p:last-child,
+.pre-menu-tools > div > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.pre-menu-tools__actions,
+.pre-menu-tools__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.pre-menu-tools__links a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.pre-menu-tools__links a:hover {
+  color: var(--brand);
+}
+
 .branch-menu {
   position: sticky;
   top: 10.9rem;
@@ -2291,6 +2332,7 @@ button:disabled {
 
 @media (max-width: 1120px) {
   .hero,
+  .pre-menu-tools,
   .promo-banner,
   .receipt-section,
   .account-section,
@@ -2343,6 +2385,7 @@ button:disabled {
   .hero,
   .receipt-section,
   .auth-shell,
+  .pre-menu-tools,
   .account-section,
   .menu-section,
   .combo-section,
@@ -2356,6 +2399,7 @@ button:disabled {
   }
 
   .branch-bar,
+  .pre-menu-tools,
   .branch-menu {
     margin-left: 1rem;
     margin-right: 1rem;
