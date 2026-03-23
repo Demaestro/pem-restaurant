@@ -1405,6 +1405,17 @@ app.post("/api/reviews", asyncHandler(async (request, response) => {
   response.status(201).json({ review });
 }));
 
+app.get("/api/reviews", asyncHandler(async (request, response) => {
+  const summary = await storage.getSummary();
+  const branchId = String(request.query?.branchId || "").trim().toLowerCase();
+  const reviews = (summary.reviews || [])
+    .filter((review) => !branchId || String(review.branchId || "").trim().toLowerCase() === branchId)
+    .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
+    .slice(0, 6);
+
+  response.json({ reviews });
+}));
+
 app.post("/api/ai/dietary-match", asyncHandler(async (request, response) => {
   const needs = String(request.body?.needs || "").trim();
   const menuItems = sanitizeMenuItems(request.body?.menuItems);

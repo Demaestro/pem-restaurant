@@ -1031,6 +1031,28 @@ function RatingStars({ rating }) {
   );
 }
 
+function StarRatingInput({ value, onChange }) {
+  const numericValue = Number(value) || 0;
+
+  return (
+    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
+          aria-checked={star === numericValue}
+          role="radio"
+          onClick={() => onChange(String(star))}
+        >
+          ★
+        </button>
+      ))}
+      <span className="star-input__label">{numericValue}/5</span>
+    </div>
+  );
+}
+
 function QuantityControl({ value, onDecrease, onIncrease, disabled = false }) {
   return (
     <div className="qty-control">
@@ -1121,6 +1143,7 @@ export default function App() {
   const [receiptOrder, setReceiptOrder] = useState(null);
   const [reviewForm, setReviewForm] = useState(initialReviewForm);
   const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
+  const [publicReviews, setPublicReviews] = useState([]);
   const branchLocations = useMemo(
     () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
     [businessSettings],
@@ -1348,6 +1371,10 @@ export default function App() {
     loadMenuCatalog();
     loadPublicSettings();
   }, []);
+
+  useEffect(() => {
+    loadPublicReviews(selectedBranch?.id || "");
+  }, [selectedBranch?.id]);
 
   useEffect(() => {
     function handleOnlineChange() {
@@ -2141,6 +2168,20 @@ export default function App() {
         loading: false,
         error: error.message,
       }));
+    }
+  }
+
+  async function loadPublicReviews(branchId = selectedBranch?.id || "") {
+    try {
+      const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+      const response = await fetch(apiUrl(`/api/reviews${query}`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to load PEM reviews.");
+      }
+      setPublicReviews(Array.isArray(data.reviews) ? data.reviews : []);
+    } catch {
+      setPublicReviews([]);
     }
   }
 
@@ -3236,6 +3277,7 @@ export default function App() {
         success: "Thank you. Your review has been saved.",
         error: "",
       });
+      loadPublicReviews(trackingState.order.customer?.branchId || selectedBranch?.id || "");
       loadAdminData();
     } catch (error) {
       setReviewState({
@@ -3750,19 +3792,25 @@ export default function App() {
       </button>
 
       <header className="topbar">
-        <button
-          type="button"
-          className="brand"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        >
-          <span className="brand__mark">
-            <img src={logo} alt="Precious Events Makers logo" />
-          </span>
-          <span className="brand__text">
-            <strong>{businessSettings.appName}</strong>
-            <small>{businessSettings.businessName}</small>
-          </span>
-        </button>
+        <div className="topbar__identity">
+          <div className="topbar__welcome">
+            <span>WELCOME</span>
+            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
+          </div>
+          <button
+            type="button"
+            className="brand"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          >
+            <span className="brand__mark">
+              <img src={logo} alt="Precious Events Makers logo" />
+            </span>
+            <span className="brand__text">
+              <strong>{businessSettings.appName}</strong>
+              <small>{businessSettings.businessName}</small>
+            </span>
+          </button>
+        </div>
 
         <button
           type="button"
@@ -3783,10 +3831,6 @@ export default function App() {
         </nav>
 
         <div className="topbar__actions">
-          <div className="topbar__welcome">
-            <span>WELCOME</span>
-            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
-          </div>
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
             <strong>{totalItems}</strong>
@@ -3899,16 +3943,18 @@ export default function App() {
 
         <section className="pre-menu-tools reveal reveal--up">
           <div>
-            <p className="eyebrow">Quick Start</p>
-            <h2>Go straight to the food menu.</h2>
+            <p className="eyebrow">Today's Menu</p>
+            <h2>Good food should be the first thing you reach in PEM.</h2>
             <p>
-              PEM now keeps the ordering flow simpler. Open the extra sections only when you need account,
-              tracking, or combo tools.
+              Browse local dishes fast, then open extra tools only when you need tracking, account, or catering.
             </p>
           </div>
           <div className="pre-menu-tools__actions">
             <a href="#menu" className="button button--primary">
               Browse Menu
+            </a>
+            <a href="#track" className="button button--ghost" onClick={handleQuickNav}>
+              Track Order
             </a>
             <button
               type="button"
@@ -3919,10 +3965,10 @@ export default function App() {
             </button>
           </div>
           <div className="pre-menu-tools__links">
-            <a href="#track" onClick={handleQuickNav}>Track Order</a>
             <a href="#catering" onClick={handleQuickNav}>Catering</a>
             <a href="#contact" onClick={handleQuickNav}>Contact</a>
             <a href="#account" onClick={handleQuickNav}>Account</a>
+            <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
           </div>
         </section>
 
@@ -4514,21 +4560,15 @@ export default function App() {
                   </button>
                   {trackingState.order.status === "delivered" ? (
                     <form className="service-form account-card__panel" onSubmit={handleReviewSubmit}>
-                      <div className="service-form__grid">
-                        <label className="field">
-                          <span>Rate this order</span>
-                          <select
-                            value={reviewForm.rating}
-                            onChange={(event) => setReviewForm((previous) => ({ ...previous, rating: event.target.value }))}
-                          >
-                            <option value="5">5 stars</option>
-                            <option value="4">4 stars</option>
-                            <option value="3">3 stars</option>
-                            <option value="2">2 stars</option>
-                            <option value="1">1 star</option>
-                          </select>
-                        </label>
-                      </div>
+                      <label className="field">
+                        <span>Tap the stars to rate this order</span>
+                        <StarRatingInput
+                          value={reviewForm.rating}
+                          onChange={(nextRating) =>
+                            setReviewForm((previous) => ({ ...previous, rating: nextRating }))
+                          }
+                        />
+                      </label>
                       <label className="note-field">
                         <span>Comment</span>
                         <textarea
@@ -4925,6 +4965,31 @@ export default function App() {
             })}
           </div>
         </section>
+
+        {publicReviews.length > 0 ? (
+          <section className="reviews-section">
+            <div className="section-heading section-heading--compact reveal reveal--up">
+              <p className="eyebrow">Customer Reviews</p>
+              <h2>What people are saying about PEM.</h2>
+            </div>
+            <div className="combo-grid">
+              {publicReviews.map((review) => (
+                <article key={review.reference} className="combo-card reveal reveal--up">
+                  <div className="testimonial-card__header">
+                    <div>
+                      <strong>{review.customerName}</strong>
+                      <p>{review.branchName || selectedBranch?.label || "PEM Branch"}</p>
+                    </div>
+                    <RatingStars rating={Number(review.rating) || 0} />
+                  </div>
+                  <p className="testimonial-card__comment">
+                    {review.comment || "Loved the PEM experience."}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="catering-section" id="catering">
           <div className="section-heading section-heading--light reveal reveal--up">
