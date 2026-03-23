@@ -962,6 +962,7 @@ export default function App() {
   const [accountOrders, setAccountOrders] = useState([]);
   const [accountState, setAccountState] = useState({ loading: false, error: "", success: "" });
   const [accountHydrated, setAccountHydrated] = useState(false);
+  const [authView, setAuthView] = useState("login");
   const [signupForm, setSignupForm] = useState(initialAccountForm);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
@@ -2632,6 +2633,7 @@ export default function App() {
         error: "",
         success: data.message || "Password updated successfully.",
       });
+      setAuthView("login");
     } catch (error) {
       setAccountState({
         loading: false,
@@ -2653,6 +2655,7 @@ export default function App() {
       // Ignore logout request failures and clear local state anyway.
     } finally {
       setAccountToken("");
+      setAuthView("login");
       setAccountState({ loading: false, error: "", success: "You have signed out." });
     }
   }
@@ -3215,10 +3218,13 @@ export default function App() {
             </div>
 
             <p className="eyebrow">Welcome to PEM</p>
-            <h1>Sign up or log in before entering the app.</h1>
+            <h1>{authView === "login" ? "Log in to continue your PEM experience." : authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
             <p>
-              Create your PEM account once, then keep your saved meals, delivery addresses,
-              notifications, and order history in one calm, professional experience.
+              {authView === "login"
+                ? "Order local dishes, track meals, manage catering, and keep everything in one calm, professional mobile experience."
+                : authView === "signup"
+                  ? "Create your PEM account once, then keep your saved meals, delivery addresses, notifications, and order history in one place."
+                  : "Use your email and phone number to reset your password and get back into PEM quickly."}
             </p>
 
             <div className="branch-selector-card">
@@ -3256,180 +3262,222 @@ export default function App() {
           </div>
 
           <div className="auth-hero__forms">
-            <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleSignup}>
-              <div className="account-card__header">
-                <div>
-                  <p className="eyebrow">New customer</p>
-                  <h3>Create your PEM account</h3>
+            {authView === "login" ? (
+              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleLogin}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Welcome to PEM</p>
+                    <h3>Log in to your account</h3>
+                  </div>
+                  <span>Login</span>
                 </div>
-                <span>Signup</span>
-              </div>
 
-              <div className="service-form__grid">
-                <label className="field">
-                  <span>Full name</span>
-                  <input
-                    type="text"
-                    value={signupForm.fullName}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
-                    }
-                    placeholder="Your full name"
-                  />
-                </label>
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={loginForm.email}
+                      onChange={(event) =>
+                        setLoginForm((previous) => ({ ...previous, email: event.target.value }))
+                      }
+                      placeholder="you@example.com"
+                    />
+                  </label>
 
-                <label className="field">
-                  <span>Phone number</span>
-                  <input
-                    type="tel"
-                    value={signupForm.phone}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
-                    }
-                    placeholder="0803 334 5161"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Email</span>
-                  <input
-                    type="email"
-                    value={signupForm.email}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, email: event.target.value }))
-                    }
-                    placeholder="you@example.com"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={signupForm.password}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, password: event.target.value }))
-                    }
-                    placeholder="At least 6 characters"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Referral code</span>
-                  <input
-                    type="text"
-                    value={signupForm.referralCode}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, referralCode: event.target.value }))
-                    }
-                    placeholder="Optional referral code"
-                  />
-                </label>
-              </div>
-
-              {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
-              {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
-
-              <button type="submit" className="button button--primary" disabled={accountState.loading}>
-                {accountState.loading ? "Creating account..." : "Create Account"}
-              </button>
-            </form>
-
-            <form className="service-form auth-card reveal reveal--up reveal--delay-2" onSubmit={handleLogin}>
-              <div className="account-card__header">
-                <div>
-                  <p className="eyebrow">Returning customer</p>
-                  <h3>Log in to PEM</h3>
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={loginForm.password}
+                      onChange={(event) =>
+                        setLoginForm((previous) => ({ ...previous, password: event.target.value }))
+                      }
+                      placeholder="Your PEM password"
+                    />
+                  </label>
                 </div>
-                <span>Login</span>
-              </div>
 
-              <div className="service-form__grid">
-                <label className="field">
-                  <span>Email</span>
-                  <input
-                    type="email"
-                    value={loginForm.email}
-                    onChange={(event) =>
-                      setLoginForm((previous) => ({ ...previous, email: event.target.value }))
-                    }
-                    placeholder="you@example.com"
-                  />
-                </label>
+                {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+                {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
 
-                <label className="field">
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={loginForm.password}
-                    onChange={(event) =>
-                      setLoginForm((previous) => ({ ...previous, password: event.target.value }))
-                    }
-                    placeholder="Your PEM password"
-                  />
-                </label>
-              </div>
+                <p className="account-helper">
+                  Once you sign in, PEM unlocks the full menu, tracking, catering, and account experience.
+                </p>
 
-              <p className="account-helper">
-                Once you sign in, PEM unlocks the full menu, tracking, catering, and account experience.
-              </p>
+                <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                  {accountState.loading ? "Signing in..." : "Log In"}
+                </button>
 
-              <button type="submit" className="button button--ghost" disabled={accountState.loading}>
-                {accountState.loading ? "Signing in..." : "Log In"}
-              </button>
-            </form>
-
-            <form className="service-form auth-card reveal reveal--up reveal--delay-2" onSubmit={handleForgotPassword}>
-              <div className="account-card__header">
-                <div>
-                  <p className="eyebrow">Forgot password?</p>
-                  <h3>Recover your account</h3>
+                <div className="auth-links">
+                  <button type="button" className="auth-link" onClick={() => setAuthView("forgot")}>
+                    Forgot password?
+                  </button>
+                  <p className="auth-links__row">
+                    <span>Do not have an account?</span>
+                    <button type="button" className="auth-link" onClick={() => setAuthView("signup")}>
+                      Sign up
+                    </button>
+                  </p>
                 </div>
-                <span>Recovery</span>
-              </div>
+              </form>
+            ) : null}
 
-              <div className="service-form__grid">
-                <label className="field">
-                  <span>Email</span>
-                  <input
-                    type="email"
-                    value={forgotPasswordForm.email}
-                    onChange={(event) =>
-                      setForgotPasswordForm((previous) => ({ ...previous, email: event.target.value }))
-                    }
-                    placeholder="you@example.com"
-                  />
-                </label>
+            {authView === "signup" ? (
+              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleSignup}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">New customer</p>
+                    <h3>Create your PEM account</h3>
+                  </div>
+                  <span>Signup</span>
+                </div>
 
-                <label className="field">
-                  <span>Phone number</span>
-                  <input
-                    type="tel"
-                    value={forgotPasswordForm.phone}
-                    onChange={(event) =>
-                      setForgotPasswordForm((previous) => ({ ...previous, phone: event.target.value }))
-                    }
-                    placeholder="The number on your account"
-                  />
-                </label>
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Full name</span>
+                    <input
+                      type="text"
+                      value={signupForm.fullName}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
+                      }
+                      placeholder="Your full name"
+                    />
+                  </label>
 
-                <label className="field">
-                  <span>New password</span>
-                  <input
-                    type="password"
-                    value={forgotPasswordForm.newPassword}
-                    onChange={(event) =>
-                      setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
-                    }
-                    placeholder="Choose a new password"
-                  />
-                </label>
-              </div>
+                  <label className="field">
+                    <span>Phone number</span>
+                    <input
+                      type="tel"
+                      value={signupForm.phone}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
+                      }
+                      placeholder="0803 334 5161"
+                    />
+                  </label>
 
-              <button type="submit" className="button button--ghost" disabled={accountState.loading}>
-                {accountState.loading ? "Updating..." : "Reset Password"}
-              </button>
-            </form>
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={signupForm.email}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, email: event.target.value }))
+                      }
+                      placeholder="you@example.com"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={signupForm.password}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, password: event.target.value }))
+                      }
+                      placeholder="At least 6 characters"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Referral code</span>
+                    <input
+                      type="text"
+                      value={signupForm.referralCode}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, referralCode: event.target.value }))
+                      }
+                      placeholder="Optional referral code"
+                    />
+                  </label>
+                </div>
+
+                {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+                {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
+
+                <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                  {accountState.loading ? "Creating account..." : "Create Account"}
+                </button>
+
+                <div className="auth-links">
+                  <p className="auth-links__row">
+                    <span>Already have an account?</span>
+                    <button type="button" className="auth-link" onClick={() => setAuthView("login")}>
+                      Log in
+                    </button>
+                  </p>
+                </div>
+              </form>
+            ) : null}
+
+            {authView === "forgot" ? (
+              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleForgotPassword}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Forgot password?</p>
+                    <h3>Recover your account</h3>
+                  </div>
+                  <span>Recovery</span>
+                </div>
+
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={forgotPasswordForm.email}
+                      onChange={(event) =>
+                        setForgotPasswordForm((previous) => ({ ...previous, email: event.target.value }))
+                      }
+                      placeholder="you@example.com"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Phone number</span>
+                    <input
+                      type="tel"
+                      value={forgotPasswordForm.phone}
+                      onChange={(event) =>
+                        setForgotPasswordForm((previous) => ({ ...previous, phone: event.target.value }))
+                      }
+                      placeholder="The number on your account"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>New password</span>
+                    <input
+                      type="password"
+                      value={forgotPasswordForm.newPassword}
+                      onChange={(event) =>
+                        setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
+                      }
+                      placeholder="Choose a new password"
+                    />
+                  </label>
+                </div>
+
+                {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
+                {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
+
+                <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                  {accountState.loading ? "Updating..." : "Reset Password"}
+                </button>
+
+                <div className="auth-links">
+                  <p className="auth-links__row">
+                    <span>Remembered your password?</span>
+                    <button type="button" className="auth-link" onClick={() => setAuthView("login")}>
+                      Back to login
+                    </button>
+                  </p>
+                </div>
+              </form>
+            ) : null}
           </div>
         </section>
       </div>
@@ -3481,6 +3529,10 @@ export default function App() {
         </nav>
 
         <div className="topbar__actions">
+          <div className="topbar__welcome">
+            <span>WELCOME</span>
+            <strong>{accountUser.fullName || "Customer"}</strong>
+          </div>
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
             <strong>{totalItems}</strong>
