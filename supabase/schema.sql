@@ -79,6 +79,15 @@ add column if not exists image_url text;
 alter table public.menu_items
 add column if not exists stock_quantity integer not null default 0;
 
+alter table public.menu_items
+add column if not exists available_from text;
+
+alter table public.menu_items
+add column if not exists available_until text;
+
+alter table public.menu_items
+add column if not exists available_days jsonb not null default '[]'::jsonb;
+
 alter table public.orders
 add column if not exists branch_id text;
 

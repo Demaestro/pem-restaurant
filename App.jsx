@@ -353,6 +353,11 @@ const cateringPackages = [
 ];
 
 const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
+const defaultMenuSchedule = {
+  availableFrom: "",
+  availableUntil: "",
+  availableDays: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"],
+};
 const menuSections = [
   { id: "all", label: "Everything", categories },
   { id: "mains", label: "Main Meals", categories: ["All", "Rice", "Pasta", "Grills", "Local Special"] },
@@ -450,7 +455,13 @@ const initialMenuAdminState = {
   saving: false,
   error: "",
   success: "",
-  items: menuItems.map((item) => ({ ...item, soldOut: false, hidden: false, stockQuantity: 12 })),
+  items: menuItems.map((item) => ({
+    ...defaultMenuSchedule,
+    ...item,
+    soldOut: false,
+    hidden: false,
+    stockQuantity: 12,
+  })),
 };
 const menuVisibilityOptions = [
   { value: "available", label: "Available" },
@@ -593,6 +604,29 @@ function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
 }
 
+function readCachedJson(key, fallback = null) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const rawValue = window.localStorage.getItem(key);
+    return rawValue ? JSON.parse(rawValue) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCachedJson(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore cache write failures.
+  }
+}
+
 function formatPrice(value) {
   return currency.format(value);
 }
@@ -616,6 +650,75 @@ function formatHour(hour) {
   const suffix = hour >= 12 ? "PM" : "AM";
   const normalized = hour % 12 === 0 ? 12 : hour % 12;
   return `${normalized}:00 ${suffix}`;
+}
+
+function normalizeScheduleDays(days) {
+  const normalized = Array.isArray(days)
+    ? days.map((day) => String(day || "").trim().slice(0, 3).toLowerCase()).filter(Boolean)
+    : [];
+  return normalized.length > 0 ? [...new Set(normalized)] : [...defaultMenuSchedule.availableDays];
+}
+
+function parseTimeToMinutes(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+
+function getLagosNowParts() {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Africa/Lagos",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    day: String(values.weekday || "").slice(0, 3).toLowerCase(),
+    minutes: (Number(values.hour) || 0) * 60 + (Number(values.minute) || 0),
+  };
+}
+
+function isMenuItemScheduledNow(item) {
+  const days = normalizeScheduleDays(item.availableDays);
+  const startsAt = parseTimeToMinutes(item.availableFrom);
+  const endsAt = parseTimeToMinutes(item.availableUntil);
+  const now = getLagosNowParts();
+
+  if (!days.includes(now.day)) {
+    return false;
+  }
+
+  if (startsAt === null || endsAt === null || startsAt === endsAt) {
+    return true;
+  }
+
+  if (startsAt < endsAt) {
+    return now.minutes >= startsAt && now.minutes <= endsAt;
+  }
+
+  return now.minutes >= startsAt || now.minutes <= endsAt;
+}
+
+function formatScheduleLabel(item) {
+  const days = normalizeScheduleDays(item.availableDays);
+  const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
+  const hasTimeWindow = item.availableFrom && item.availableUntil;
+  if (!hasCustomDays && !hasTimeWindow) {
+    return "";
+  }
+  const dayLabel = hasCustomDays ? days.map((day) => day.toUpperCase()).join(", ") : "Daily";
+  const timeLabel = hasTimeWindow ? `${item.availableFrom} - ${item.availableUntil}` : "All day";
+  return `${dayLabel} · ${timeLabel}`;
 }
 
 function getBusinessStatus() {
@@ -646,6 +749,13 @@ function mergeMenuCatalog(baseItems, remoteItems) {
     ...(remoteById.get(item.id) || {}),
     imageUrl: remoteById.get(item.id)?.imageUrl || item.imageUrl || "",
     stockQuantity: Number(remoteById.get(item.id)?.stockQuantity ?? item.stockQuantity ?? 12) || 0,
+    availableFrom: String(remoteById.get(item.id)?.availableFrom ?? item.availableFrom ?? defaultMenuSchedule.availableFrom),
+    availableUntil: String(remoteById.get(item.id)?.availableUntil ?? item.availableUntil ?? defaultMenuSchedule.availableUntil),
+    availableDays: Array.isArray(remoteById.get(item.id)?.availableDays)
+      ? remoteById.get(item.id).availableDays
+      : Array.isArray(item.availableDays)
+        ? item.availableDays
+        : defaultMenuSchedule.availableDays,
     soldOut: Boolean(remoteById.get(item.id)?.soldOut),
     hidden: Boolean(remoteById.get(item.id)?.hidden),
   }));
@@ -1017,7 +1127,7 @@ export default function App() {
   const selectedBranch =
     branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
-  const visibleMenuItems = menuCatalog.filter((item) => !item.hidden);
+  const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item));
   const visibleMenuCount = visibleMenuItems.length;
   const visibleDrinkCount = visibleMenuItems.filter((item) => item.category.includes("Drink")).length;
   const visibleLocalDishCount = visibleMenuItems.filter(
@@ -1388,7 +1498,7 @@ export default function App() {
   }, [accountToken]);
 
   const visibleCategories = useMemo(() => {
-    const availableCategories = ["All", ...new Set(menuCatalog.filter((item) => !item.hidden).map((item) => item.category))];
+    const availableCategories = ["All", ...new Set(menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item)).map((item) => item.category))];
     const section = menuSections.find((item) => item.id === activeMenuSection);
     if (!section) {
       return availableCategories;
@@ -1414,7 +1524,7 @@ export default function App() {
       const matchesCategory = activeCategory === "All" || item.category === activeCategory;
       const matchesRating = item.rating >= minimumRating;
       const matchesFavorites = !showFavoritesOnly || favorites.includes(item.id);
-      const matchesAvailability = !item.hidden;
+      const matchesAvailability = !item.hidden && isMenuItemScheduledNow(item);
       const matchesDietarySelection =
         !showDietaryMatchesOnly || recommendedIdSet.size === 0 || recommendedIdSet.has(item.id);
       const matchesSearch =
@@ -1470,7 +1580,7 @@ export default function App() {
   const discount = promoDiscount.valid ? promoDiscount.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-  const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden);
+  const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item));
   const overStockCartItem = cartItems.find((item) => Number(item.stockQuantity || 0) > 0 && item.quantity > Number(item.stockQuantity || 0));
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
   const normalizedMenuAdminQuery = menuAdminQuery.trim().toLowerCase();
@@ -1528,6 +1638,37 @@ export default function App() {
   )
     .sort((left, right) => right.quantity - left.quantity)
     .slice(0, 5);
+  const kitchenBoardOrders = branchScopedOrders.filter((order) =>
+    ["received", "confirmed", "preparing", "ready"].includes(order.status),
+  );
+  const riderBoardOrders = branchScopedOrders.filter((order) =>
+    ["ready", "out_for_delivery"].includes(order.status),
+  );
+  const statusChart = orderStatuses
+    .filter((status) => status !== "all")
+    .map((status) => ({
+      status,
+      count: branchScopedOrders.filter((order) => order.status === status).length,
+    }))
+    .filter((entry) => entry.count > 0);
+  const branchSalesChart = Object.entries(
+    adminState.data.orders.reduce((accumulator, order) => {
+      const branchName = getRecordBranchName(order);
+      accumulator[branchName] = (accumulator[branchName] || 0) + (Number(order.pricing?.total) || 0);
+      return accumulator;
+    }, {}),
+  )
+    .map(([label, totalAmount]) => ({
+      label,
+      totalAmount,
+    }))
+    .sort((left, right) => right.totalAmount - left.totalAmount)
+    .slice(0, 5);
+  const chartMaxCount = Math.max(1, ...statusChart.map((entry) => entry.count));
+  const chartMaxRevenue = Math.max(1, ...branchSalesChart.map((entry) => entry.totalAmount));
+  const supportWhatsAppUrl = `https://wa.me/${businessSettings.whatsappPhone || whatsappPhone}?text=${encodeURIComponent(
+    `Hello ${businessSettings.appName}, I need help with my order.`,
+  )}`;
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
   const loyaltyProgress = Math.min(
     100,
@@ -1614,7 +1755,7 @@ export default function App() {
     const unavailableItems = Object.entries(cart)
       .filter(([, quantity]) => quantity > 0)
       .map(([id]) => menuCatalog.find((item) => item.id === Number(id)))
-      .filter((item) => item && (item.soldOut || item.hidden));
+      .filter((item) => item && (item.soldOut || item.hidden || !isMenuItemScheduledNow(item)));
 
     if (unavailableItems.length === 0) {
       return;
@@ -1799,6 +1940,10 @@ export default function App() {
       });
       setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
       setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
+      writeCachedJson("pem-account-cache", {
+        user: nextUser,
+        orders: Array.isArray(data.orders) ? data.orders : [],
+      });
       setCheckoutForm((previous) => ({
         ...previous,
         customerName: previous.customerName || nextUser.fullName || "",
@@ -1812,12 +1957,26 @@ export default function App() {
         error: "",
       }));
     } catch (error) {
+      const cachedAccount = readCachedJson("pem-account-cache");
+      if (cachedAccount?.user) {
+        const nextUser = { ...initialAccountUser, ...(cachedAccount.user || {}) };
+        setAccountUser(nextUser);
+        setAccountOrders(Array.isArray(cachedAccount.orders) ? cachedAccount.orders : []);
+        setProfileForm({
+          fullName: nextUser.fullName || "",
+          phone: nextUser.phone || "",
+        });
+        setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
+        setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
+      }
       setAccountState((previous) => ({
         ...previous,
         loading: false,
-        error: error.message,
+        error: cachedAccount?.user ? "You are offline. Showing your last synced account data." : error.message,
       }));
-      setAccountToken("");
+      if (!cachedAccount?.user) {
+        setAccountToken("");
+      }
     } finally {
       setAccountHydrated(true);
     }
@@ -1849,13 +2008,15 @@ export default function App() {
       }
       if (Array.isArray(data.deliveryZones) && data.deliveryZones.length > 0) {
         setDeliveryZones(data.deliveryZones);
+        writeCachedJson("pem-delivery-zones-cache", data.deliveryZones);
         setDeliveryZoneAdminState((previous) => ({
           ...previous,
           zones: data.deliveryZones,
         }));
       }
     } catch {
-      setDeliveryZones(defaultDeliveryZones);
+      const cachedZones = readCachedJson("pem-delivery-zones-cache", defaultDeliveryZones);
+      setDeliveryZones(Array.isArray(cachedZones) && cachedZones.length > 0 ? cachedZones : defaultDeliveryZones);
     }
   }
 
@@ -1877,6 +2038,7 @@ export default function App() {
       }
       const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
       setMenuCatalog(mergedItems);
+      writeCachedJson("pem-menu-cache", mergedItems);
       setMenuAdminState({
         loading: false,
         saving: false,
@@ -1885,11 +2047,12 @@ export default function App() {
         items: mergedItems,
       });
     } catch (error) {
-      setMenuCatalog(mergeMenuCatalog(menuItems, []));
+      const cachedMenu = readCachedJson("pem-menu-cache");
+      setMenuCatalog(Array.isArray(cachedMenu) && cachedMenu.length > 0 ? mergeMenuCatalog(menuItems, cachedMenu) : mergeMenuCatalog(menuItems, []));
       setMenuAdminState((previous) => ({
         ...previous,
         loading: false,
-        error: error.message,
+        error: Array.isArray(cachedMenu) && cachedMenu.length > 0 ? "You are offline. Showing the last synced menu." : error.message,
       }));
     }
   }
@@ -1914,6 +2077,7 @@ export default function App() {
       }
       const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
       setBusinessSettings(nextSettings);
+      writeCachedJson("pem-settings-cache", nextSettings);
       setSettingsAdminState({
         loading: false,
         saving: false,
@@ -1922,10 +2086,14 @@ export default function App() {
         settings: nextSettings,
       });
     } catch (error) {
+      const cachedSettings = readCachedJson("pem-settings-cache");
+      if (cachedSettings) {
+        setBusinessSettings({ ...initialBusinessSettings, ...cachedSettings });
+      }
       setSettingsAdminState((previous) => ({
         ...previous,
         loading: false,
-        error: error.message,
+        error: cachedSettings ? "You are offline. Showing your last synced business settings." : error.message,
       }));
     }
   }
@@ -1995,6 +2163,7 @@ export default function App() {
       }
 
       setAdminSession({ ...initialAdminSession, ...(data.admin || {}) });
+      writeCachedJson("pem-admin-summary-cache", data);
       setAdminState({
         loading: false,
         error: "",
@@ -2009,6 +2178,21 @@ export default function App() {
     } catch (error) {
       if (error.message === "Admin login required.") {
         setAdminToken("");
+      }
+      const cachedAdmin = readCachedJson("pem-admin-summary-cache");
+      if (cachedAdmin && error.message !== "Admin login required.") {
+        setAdminState({
+          loading: false,
+          error: "You are offline. Showing the last synced admin data.",
+          data: {
+            orders: Array.isArray(cachedAdmin.orders) ? cachedAdmin.orders : [],
+            contacts: Array.isArray(cachedAdmin.contacts) ? cachedAdmin.contacts : [],
+            catering: Array.isArray(cachedAdmin.catering) ? cachedAdmin.catering : [],
+            reservations: Array.isArray(cachedAdmin.reservations) ? cachedAdmin.reservations : [],
+            reviews: Array.isArray(cachedAdmin.reviews) ? cachedAdmin.reviews : [],
+          },
+        });
+        return;
       }
       setAdminState((previous) => ({
         ...previous,
@@ -3144,6 +3328,7 @@ export default function App() {
         error: "",
         order: data.order,
       });
+      writeCachedJson(`pem-track-${normalizedReference}`, data.order);
       if (data.order?.customer?.branchId) {
         setSelectedBranchId(data.order.customer.branchId);
       }
@@ -3153,6 +3338,15 @@ export default function App() {
         ...previous.filter((reference) => reference !== normalizedReference),
       ].slice(0, 5));
     } catch (error) {
+      const cachedOrder = readCachedJson(`pem-track-${normalizedReference}`);
+      if (cachedOrder) {
+        setTrackingState({
+          loading: false,
+          error: "You are offline. Showing the last synced tracking details.",
+          order: cachedOrder,
+        });
+        return;
+      }
       setTrackingState({
         loading: false,
         error: error.message,
@@ -3193,7 +3387,7 @@ export default function App() {
     );
   }
 
-  if (!accountToken) {
+  if (!accountToken && !adminToken) {
     return (
       <div className="auth-shell">
         <button
@@ -3310,6 +3504,12 @@ export default function App() {
                 </button>
 
                 <div className="auth-links">
+                  <p className="auth-links__row">
+                    <span>Are you a staff member?</span>
+                    <button type="button" className="auth-link" onClick={() => setAuthView("admin")}>
+                      Admin login
+                    </button>
+                  </p>
                   <button type="button" className="auth-link" onClick={() => setAuthView("forgot")}>
                     Forgot password?
                   </button>
@@ -3478,6 +3678,55 @@ export default function App() {
                 </div>
               </form>
             ) : null}
+
+            {authView === "admin" ? (
+              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleAdminLogin}>
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Admin Access</p>
+                    <h3>Log in as PEM staff</h3>
+                  </div>
+                  <span>Admin</span>
+                </div>
+
+                <div className="service-form__grid">
+                  <label className="field">
+                    <span>Username</span>
+                    <input
+                      type="text"
+                      value={adminUsername}
+                      onChange={(event) => setAdminUsername(event.target.value)}
+                      placeholder="owner or manager"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={adminPassword}
+                      onChange={(event) => setAdminPassword(event.target.value)}
+                      placeholder="Your admin password"
+                    />
+                  </label>
+                </div>
+
+                {adminLoginState.error ? <p className="form-message form-message--error">{adminLoginState.error}</p> : null}
+
+                <button type="submit" className="button button--primary" disabled={adminLoginState.loading}>
+                  {adminLoginState.loading ? "Signing in..." : "Enter Admin"}
+                </button>
+
+                <div className="auth-links">
+                  <p className="auth-links__row">
+                    <span>Back to customer access?</span>
+                    <button type="button" className="auth-link" onClick={() => setAuthView("login")}>
+                      Customer login
+                    </button>
+                  </p>
+                </div>
+              </form>
+            ) : null}
           </div>
         </section>
       </div>
@@ -3531,7 +3780,7 @@ export default function App() {
         <div className="topbar__actions">
           <div className="topbar__welcome">
             <span>WELCOME</span>
-            <strong>{accountUser.fullName || "Customer"}</strong>
+            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
           </div>
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
@@ -3559,9 +3808,18 @@ export default function App() {
 
       {!isOnline ? (
         <div className="toast toast--warning" role="status">
-          You are offline. PEM browsing still works, but orders and updates need internet access.
+          You are offline. PEM is showing cached menu and account data where available, but new orders and updates still need internet access.
         </div>
       ) : null}
+
+      <a
+        className="support-fab"
+        href={supportWhatsAppUrl}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Need Help?
+      </a>
 
       <main>
         <section className="branch-bar">
@@ -3716,7 +3974,7 @@ export default function App() {
             </p>
           </div>
 
-          {!accountToken ? (
+          {!accountToken && !adminToken ? (
             <div className="account-grid">
               <form className="service-form reveal reveal--up" onSubmit={handleSignup}>
                 <div className="account-card__header">
@@ -3829,7 +4087,7 @@ export default function App() {
                 </button>
               </form>
             </div>
-          ) : (
+          ) : accountToken ? (
             <div className="account-grid">
               <article className="account-card reveal reveal--up">
                 <div className="account-card__header">
@@ -4052,6 +4310,40 @@ export default function App() {
                   ) : (
                     <p className="account-helper">Your placed orders will appear here once you checkout with your PEM account.</p>
                   )}
+                </div>
+              </article>
+            </div>
+          ) : (
+            <div className="account-grid">
+              <article className="account-card reveal reveal--up">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Admin session</p>
+                    <h3>{adminSession.label || "PEM Admin"}</h3>
+                  </div>
+                  <button type="button" className="button button--ghost button--small" onClick={handleAdminLogout}>
+                    Sign Out
+                  </button>
+                </div>
+
+                <p className="account-helper">
+                  You are signed in as <strong>{adminSession.username || "owner"}</strong>.
+                  Use the Admin section to manage orders, branches, menu items, and business settings.
+                </p>
+
+                <div className="account-kpis">
+                  <div>
+                    <strong>{adminSession.isOwner ? "Owner" : "Staff"}</strong>
+                    <span>Access level</span>
+                  </div>
+                  <div>
+                    <strong>{adminSession.branchId || "All"}</strong>
+                    <span>Branch scope</span>
+                  </div>
+                  <div>
+                    <strong>{adminToken ? "Active" : "Signed out"}</strong>
+                    <span>Session</span>
+                  </div>
                 </div>
               </article>
             </div>
@@ -4548,6 +4840,7 @@ export default function App() {
                     </div>
 
                     <p className="meal-card__description">{item.description}</p>
+                    {formatScheduleLabel(item) ? <p className="meal-card__schedule">{formatScheduleLabel(item)}</p> : null}
 
                     <div className="meal-card__tags">
                       {item.dietaryTags.map((tag) => (
@@ -5082,6 +5375,84 @@ export default function App() {
                       ))
                     )}
                   </div>
+                  {statusChart.length > 0 ? (
+                    <div className="admin-chart">
+                      <p className="field-label">Order flow</p>
+                      {statusChart.map((entry) => (
+                        <div key={entry.status} className="admin-chart__row">
+                          <span>{entry.status.replaceAll("_", " ")}</span>
+                          <div className="admin-chart__bar">
+                            <span style={{ width: `${(entry.count / chartMaxCount) * 100}%` }} />
+                          </div>
+                          <strong>{entry.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {branchSalesChart.length > 0 ? (
+                    <div className="admin-chart">
+                      <p className="field-label">Branch sales</p>
+                      {branchSalesChart.map((entry) => (
+                        <div key={entry.label} className="admin-chart__row">
+                          <span>{entry.label}</span>
+                          <div className="admin-chart__bar">
+                            <span style={{ width: `${(entry.totalAmount / chartMaxRevenue) * 100}%` }} />
+                          </div>
+                          <strong>{formatPrice(entry.totalAmount)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Kitchen Board</h3>
+                    <span>{kitchenBoardOrders.length}</span>
+                  </div>
+                  {kitchenBoardOrders.length === 0 ? (
+                    <p className="admin-empty">No active kitchen orders right now.</p>
+                  ) : (
+                    <div className="admin-list">
+                      {kitchenBoardOrders.slice(0, 8).map((order) => (
+                        <div key={order.reference} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{order.reference}</strong>
+                            <span className={`status-pill status-pill--${order.status}`}>{order.status.replaceAll("_", " ")}</span>
+                          </div>
+                          <p>{order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")}</p>
+                          <p className="admin-item__subtle">{getRecordBranchName(order)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Rider Dispatch</h3>
+                    <span>{riderBoardOrders.length}</span>
+                  </div>
+                  {riderBoardOrders.length === 0 ? (
+                    <p className="admin-empty">No ready or in-transit deliveries yet.</p>
+                  ) : (
+                    <div className="admin-list">
+                      {riderBoardOrders.slice(0, 8).map((order) => (
+                        <div key={order.reference} className="admin-item">
+                          <div className="admin-item__row">
+                            <strong>{order.customer.customerName}</strong>
+                            <span className={`status-pill status-pill--${order.status}`}>{order.status.replaceAll("_", " ")}</span>
+                          </div>
+                          <p>{order.customer.address}</p>
+                          {order.customer.landmark ? <p>Landmark: {order.customer.landmark}</p> : null}
+                          <div className="admin-item__row">
+                            <span>{order.customer.phone}</span>
+                            <strong>{order.reference}</strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </article>
 
                 {adminSession.isOwner ? (
@@ -5436,6 +5807,22 @@ export default function App() {
                                 }
                               />
                             </label>
+                            <label className="field">
+                              <span>Available from</span>
+                              <input
+                                type="time"
+                                value={item.availableFrom || ""}
+                                onChange={(event) => updateMenuAdminItem(item.id, { availableFrom: event.target.value })}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Available until</span>
+                              <input
+                                type="time"
+                                value={item.availableUntil || ""}
+                                onChange={(event) => updateMenuAdminItem(item.id, { availableUntil: event.target.value })}
+                              />
+                            </label>
                           </div>
 
                           <label className="field">
@@ -5465,6 +5852,23 @@ export default function App() {
                               value={item.imageUrl || ""}
                               onChange={(event) => updateMenuAdminItem(item.id, { imageUrl: event.target.value })}
                               placeholder="https://..."
+                            />
+                          </label>
+
+                          <label className="field">
+                            <span>Available days</span>
+                            <input
+                              type="text"
+                              value={normalizeScheduleDays(item.availableDays).join(", ")}
+                              onChange={(event) =>
+                                updateMenuAdminItem(item.id, {
+                                  availableDays: event.target.value
+                                    .split(",")
+                                    .map((day) => day.trim().slice(0, 3).toLowerCase())
+                                    .filter(Boolean),
+                                })
+                              }
+                              placeholder="mon, tue, wed, thu, fri"
                             />
                           </label>
                         </div>

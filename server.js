@@ -996,6 +996,11 @@ app.put("/api/admin/menu", requireAdmin, requireOwnerAdmin, asyncHandler(async (
     badge: String(item.badge || "").trim(),
     description: String(item.description || "").trim(),
     imageUrl: String(item.imageUrl || "").trim(),
+    availableFrom: String(item.availableFrom || "").trim(),
+    availableUntil: String(item.availableUntil || "").trim(),
+    availableDays: Array.isArray(item.availableDays)
+      ? item.availableDays.map((day) => String(day || "").trim().slice(0, 3).toLowerCase()).filter(Boolean)
+      : [],
     dietaryTags: Array.isArray(item.dietaryTags) ? item.dietaryTags : [],
     dietaryProfile: String(item.dietaryProfile || "").trim(),
     soldOut: Boolean(item.soldOut),
