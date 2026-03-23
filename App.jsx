@@ -879,6 +879,168 @@ function getOrderTimeline(order) {
   }));
 }
 
+function getTrackingStatusSummary(order, selectedZoneLabel = "") {
+  const status = String(order?.status || "").toLowerCase();
+  const zone = order?.customer?.deliveryZone || selectedZoneLabel || "your area";
+  const branch = order?.customer?.branchName || "PEM branch";
+
+  if (status === "awaiting_payment") {
+    return `PEM is waiting for payment confirmation before ${branch} starts this order.`;
+  }
+  if (status === "received") {
+    return `${branch} has received your order and will confirm the kitchen slot shortly.`;
+  }
+  if (status === "confirmed") {
+    return `${branch} has confirmed your order and queued it for preparation.`;
+  }
+  if (status === "preparing") {
+    return `Your meal is currently being prepared by ${branch}.`;
+  }
+  if (status === "ready") {
+    return order?.customer?.fulfillmentMethod === "pickup"
+      ? `Your meal is almost ready for pickup at ${branch}.`
+      : `Your meal is packed and being handed over for delivery to ${zone}.`;
+  }
+  if (status === "out_for_delivery") {
+    return `Your rider is on the way to ${zone}. Keep your phone nearby for quick coordination.`;
+  }
+  if (status === "delivered") {
+    return "This order has been delivered. You can now leave a review and reorder it any time.";
+  }
+  if (status === "cancelled") {
+    return "This order was cancelled. If you still need the meal, you can reorder it from the menu.";
+  }
+
+  return "Track this reference again in a few minutes if the status does not update immediately.";
+}
+
+function menuItemMatchesSearch(item, rawSearch, branch) {
+  const normalizedSearch = String(rawSearch || "").trim().toLowerCase();
+  if (!normalizedSearch) {
+    return true;
+  }
+
+  const normalizedBranch = `${branch?.label || ""} ${branch?.address || ""} ${branch?.note || ""}`.toLowerCase();
+  const haystack = [
+    item.name,
+    item.description,
+    item.badge,
+    item.category,
+    item.dietaryProfile,
+    ...(item.dietaryTags || []),
+    normalizedBranch,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  const tokens = normalizedSearch.split(/\s+/).filter(Boolean);
+
+  return tokens.every((token) => {
+    if (haystack.includes(token)) {
+      return true;
+    }
+    if (["cheap", "budget", "affordable", "value"].includes(token)) {
+      return item.price <= 4500;
+    }
+    if (["premium", "special", "signature"].includes(token)) {
+      return item.price >= 5000 || /signature|premium|special/.test(haystack);
+    }
+    if (["drink", "drinks", "juice", "beverage", "water", "smoothie"].includes(token)) {
+      return item.category.toLowerCase().includes("drink") || item.dietaryTags.some((tag) => /drink|cold|fresh|hydration/i.test(tag));
+    }
+    if (["soup", "swallow", "native", "local"].includes(token)) {
+      return /soup|native|local|traditional/.test(haystack);
+    }
+    if (["rice", "jollof", "fried"].includes(token)) {
+      return /rice|jollof|fried/.test(haystack);
+    }
+    if (["protein", "meat", "chicken", "beef", "goat"].includes(token)) {
+      return /protein|meat|chicken|beef|goat/.test(haystack);
+    }
+    if (["spicy", "hot", "pepper"].includes(token)) {
+      return Boolean(item.spicy) || /spicy|pepper/.test(haystack);
+    }
+    if (["mild", "soft", "gentle"].includes(token)) {
+      return !item.spicy || /mild|soft|gentle/.test(haystack);
+    }
+    if (["available", "today", "now"].includes(token)) {
+      return isMenuItemScheduledNow(item) && !item.soldOut && !item.hidden;
+    }
+    return false;
+  });
+}
+
+function getBranchAvailabilityMeta(item, branch) {
+  const branchLabel = branch?.label || "PEM Branch";
+
+  if (item.hidden) {
+    return { label: "Hidden", tone: "muted" };
+  }
+  if (item.soldOut) {
+    return { label: `Unavailable at ${branchLabel}`, tone: "warn" };
+  }
+  if (!isMenuItemScheduledNow(item)) {
+    return { label: `Next serving window from ${branchLabel}`, tone: "soft" };
+  }
+  if (Number(item.stockQuantity || 0) > 0 && Number(item.stockQuantity || 0) <= 4) {
+    return { label: `${branchLabel} has limited portions`, tone: "warn" };
+  }
+
+  return { label: `Available from ${branchLabel} today`, tone: "ok" };
+}
+
+function getSuggestedAddOns(cartItems, menuCatalog) {
+  if (!Array.isArray(cartItems) || cartItems.length === 0) {
+    return [];
+  }
+
+  const cartIds = new Set(cartItems.map((item) => item.id));
+  const hasDrink = cartItems.some((item) => item.category.toLowerCase().includes("drink"));
+  const hasSide = cartItems.some((item) => /side|dessert/i.test(item.category));
+  const hasSoup = cartItems.some((item) => /soup/i.test(item.category));
+  const hasRice = cartItems.some((item) => /rice|pasta/i.test(item.name + " " + item.category));
+
+  return menuCatalog
+    .filter((item) => !item.hidden && !item.soldOut && isMenuItemScheduledNow(item) && !cartIds.has(item.id))
+    .filter((item) => {
+      if (!hasDrink && item.category.toLowerCase().includes("drink")) {
+        return true;
+      }
+      if (!hasSide && /side|dessert/i.test(item.category)) {
+        return true;
+      }
+      if (hasSoup && /swallow|side/i.test(item.category) && !hasSide) {
+        return true;
+      }
+      if (hasRice && item.category.toLowerCase().includes("drink")) {
+        return true;
+      }
+      return false;
+    })
+    .sort((left, right) => left.price - right.price)
+    .slice(0, 3);
+}
+
+function buildWhatsAppConfirmationUrl(order, settings, fallbackNumber) {
+  if (!order?.reference) {
+    return "";
+  }
+
+  const branchName = order.customer?.branchName || settings.appName || "PEM";
+  const lines = [
+    `Hello ${branchName}, I am confirming my PEM order.`,
+    "",
+    `Reference: ${order.reference}`,
+    `Name: ${order.customer?.customerName || "Customer"}`,
+    `Branch: ${branchName}`,
+    `Total: ${formatPrice(order.pricing?.total || 0)}`,
+    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
+    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
+  ];
+
+  return `https://wa.me/${settings.whatsappPhone || fallbackNumber}?text=${encodeURIComponent(lines.join("\n"))}`;
+}
+
 function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   const normalizedNeeds = needs.trim().toLowerCase();
   const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
@@ -1543,7 +1705,6 @@ export default function App() {
   }, [activeCategory, visibleCategories]);
 
   const filteredItems = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
     const recommendedIdSet = new Set(recommendedItemIds);
 
     let items = menuCatalog.filter((item) => {
@@ -1555,12 +1716,7 @@ export default function App() {
       const matchesAvailability = !item.hidden && isMenuItemScheduledNow(item);
       const matchesDietarySelection =
         !showDietaryMatchesOnly || recommendedIdSet.size === 0 || recommendedIdSet.has(item.id);
-      const matchesSearch =
-        normalizedSearch === "" ||
-        item.name.toLowerCase().includes(normalizedSearch) ||
-        item.description.toLowerCase().includes(normalizedSearch) ||
-        item.badge.toLowerCase().includes(normalizedSearch) ||
-        item.dietaryTags.some((tag) => tag.toLowerCase().includes(normalizedSearch));
+      const matchesSearch = menuItemMatchesSearch(item, search, selectedBranch);
 
       return (
         matchesSection &&
@@ -1582,7 +1738,7 @@ export default function App() {
     }
 
     return items;
-  }, [activeCategory, activeMenuSection, favorites, menuCatalog, minimumRating, recommendedItemIds, search, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
+  }, [activeCategory, activeMenuSection, favorites, menuCatalog, minimumRating, recommendedItemIds, search, selectedBranch, showDietaryMatchesOnly, showFavoritesOnly, sortBy]);
 
   const cartItems = Object.entries(cart)
     .filter(([, quantity]) => quantity > 0)
@@ -1608,6 +1764,27 @@ export default function App() {
   const discount = promoDiscount.valid ? promoDiscount.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const deliveryEtaLabel = checkoutForm.fulfillmentMethod === "pickup"
+    ? `Pickup from ${selectedBranch?.label || `${businessSettings.appName} Branch`} will be confirmed by PEM.`
+    : `${selectedDeliveryZone.eta} from ${selectedBranch?.label || `${businessSettings.appName} Branch`}.`;
+  const smartCartSuggestions = useMemo(() => getSuggestedAddOns(cartItems, menuCatalog), [cartItems, menuCatalog]);
+  const trustHighlights = [
+    {
+      title: "Fresh local dishes",
+      text: "PEM focuses on native meals, reliable portions, and branch-based preparation windows.",
+    },
+    {
+      title: "Clear delivery coordination",
+      text: "Each order carries branch details, delivery area timing, and landmark notes for easier handoff.",
+    },
+    {
+      title: "Fast support",
+      text: "Customers can move from the app to WhatsApp support without losing their order context.",
+    },
+  ];
+  const receiptWhatsAppUrl = receiptOrder
+    ? buildWhatsAppConfirmationUrl(receiptOrder, businessSettings, whatsappPhone)
+    : "";
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item));
   const overStockCartItem = cartItems.find((item) => Number(item.stockQuantity || 0) > 0 && item.quantity > Number(item.stockQuantity || 0));
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
@@ -3163,6 +3340,7 @@ export default function App() {
       `Payment: ${checkoutForm.paymentMethod}`,
       `Payment reference: ${checkoutForm.paymentReference || "Will confirm later"}`,
       `Promo code: ${checkoutForm.promoCode || "None"}`,
+      `Fulfillment: ${checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : "Delivery"}`,
       "",
       "Order items:",
       ...itemLines,
@@ -3173,6 +3351,8 @@ export default function App() {
       `Total: ${formatPrice(total)}`,
     ].join("\n");
 
+    setOrderPlaced("Opening WhatsApp with your PEM order summary.");
+    window.setTimeout(() => setOrderPlaced(""), 3500);
     window.open(`https://wa.me/${businessSettings.whatsappPhone || whatsappPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
@@ -3933,6 +4113,16 @@ export default function App() {
                 <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
                   Download Receipt
                 </button>
+                {receiptWhatsAppUrl ? (
+                  <a
+                    href={receiptWhatsAppUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button button--ghost"
+                  >
+                    Confirm On WhatsApp
+                  </a>
+                ) : null}
                 <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
                   Dismiss
                 </button>
@@ -4493,6 +4683,10 @@ export default function App() {
                     Ordered by <strong>{trackingState.order.customer.customerName}</strong> on{" "}
                     {formatDateTime(trackingState.order.updatedAt || trackingState.order.createdAt)}.
                   </p>
+                  <div className="tracking-status-banner">
+                    <strong>{String(trackingState.order.status || "").replaceAll("_", " ")}</strong>
+                    <p>{getTrackingStatusSummary(trackingState.order, selectedDeliveryZone.label)}</p>
+                  </div>
                   <p>
                     Branch: <strong>{trackingState.order.customer.branchName || "PEM Branch"}</strong>
                   </p>
@@ -4535,6 +4729,11 @@ export default function App() {
                   </p>
                   {trackingState.order.payment?.paidAt ? (
                     <p>Paid at {formatDateTime(trackingState.order.payment.paidAt)}.</p>
+                  ) : null}
+                  {trackingState.order.customer.deliveryEta ? (
+                    <p>
+                      Delivery ETA: <strong>{trackingState.order.customer.deliveryEta}</strong>
+                    </p>
                   ) : null}
                   {trackingState.order.customer.landmark ? (
                     <p>Landmark: <strong>{trackingState.order.customer.landmark}</strong></p>
@@ -4815,7 +5014,7 @@ export default function App() {
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Egusi, jollof, ukwa..."
+                placeholder="Egusi, budget meals, drinks, spicy soups..."
               />
             </label>
 
@@ -4872,10 +5071,14 @@ export default function App() {
               {menuSections.find((section) => section.id === activeMenuSection)?.label || "Everything"}
             </span>
           </div>
+          <p className="menu-search-helper reveal reveal--up reveal--delay-2">
+            Search by dish name, budget, spice level, category, drink, local soup, or what is available today.
+          </p>
 
           <div className="menu-grid">
             {filteredItems.map((item) => {
               const quantity = cart[item.id] || 0;
+              const branchAvailability = getBranchAvailabilityMeta(item, selectedBranch);
 
               return (
                 <article
@@ -4930,6 +5133,9 @@ export default function App() {
                       <RatingStars rating={item.rating} />
                       <span>{item.reviews} reviews</span>
                     </div>
+                    <p className={`meal-card__availability meal-card__availability--${branchAvailability.tone}`}>
+                      {branchAvailability.label}
+                    </p>
 
                     <div className="meal-card__order">
                       <QuantityControl
@@ -4970,7 +5176,8 @@ export default function App() {
           <section className="reviews-section">
             <div className="section-heading section-heading--compact reveal reveal--up">
               <p className="eyebrow">Customer Reviews</p>
-              <h2>What people are saying about PEM.</h2>
+              <h2>Trusted by customers across PEM branches.</h2>
+              <p>Recent feedback from delivered orders helps new customers choose with more confidence.</p>
             </div>
             <div className="combo-grid">
               {publicReviews.map((review) => (
@@ -4990,6 +5197,22 @@ export default function App() {
             </div>
           </section>
         ) : null}
+
+        <section className="trust-section">
+          <div className="section-heading section-heading--compact reveal reveal--up">
+            <p className="eyebrow">Why Customers Trust PEM</p>
+            <h2>Clear ordering, local taste, and branch-based support.</h2>
+          </div>
+          <div className="combo-grid">
+            {trustHighlights.map((item) => (
+              <article key={item.title} className="combo-card reveal reveal--up">
+                <p className="eyebrow">PEM promise</p>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+              </article>
+            ))}
+          </div>
+        </section>
 
         <section className="catering-section" id="catering">
           <div className="section-heading section-heading--light reveal reveal--up">
@@ -6366,6 +6589,15 @@ export default function App() {
                 <div className="checkout-fields">
                   <p className="checkout-fields__title">Delivery details</p>
                   <p className="cart-help">Minimum order: {formatPrice(Number(businessSettings.minimumOrder || 0))}</p>
+                  <div className="delivery-zone-card delivery-zone-card--accent">
+                    <p className="delivery-zone-card__title">Estimated handoff</p>
+                    <strong>{deliveryEtaLabel}</strong>
+                    <span>
+                      {checkoutForm.fulfillmentMethod === "pickup"
+                        ? "PEM will text or call when your meal is ready for collection."
+                        : "Timing depends on your branch, your area, and kitchen volume."}
+                    </span>
+                  </div>
                   <div className="delivery-zone-card">
                     <p className="delivery-zone-card__title">Chosen branch</p>
                     <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
@@ -6579,6 +6811,31 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
+
+                {smartCartSuggestions.length > 0 ? (
+                  <div className="cart-suggestions">
+                    <div className="cart-suggestions__header">
+                      <p className="eyebrow">Suggested Add-ons</p>
+                      <h3>Complete this order with one tap.</h3>
+                    </div>
+                    <div className="cart-suggestions__list">
+                      {smartCartSuggestions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="cart-suggestion"
+                          onClick={() => updateQuantity(item.id, 1)}
+                        >
+                          <div>
+                            <strong>{item.name}</strong>
+                            <span>{item.category}</span>
+                          </div>
+                          <em>{formatPrice(item.price)}</em>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -6591,6 +6848,10 @@ export default function App() {
             <p className="cart-help">
               Prefer chat? Send this cart to PEM on WhatsApp and continue the order there.
             </p>
+            <div className="cart-footer__highlights">
+              <span>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup ready confirmation by PEM" : deliveryEtaLabel}</span>
+              <span>{selectedBranch?.label || `${businessSettings.appName} Branch`}</span>
+            </div>
 
             <div className="cart-total">
               <span>Subtotal</span>
