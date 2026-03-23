@@ -97,10 +97,14 @@ const storage = createStorage({
 
 const allowedOrigins = [...new Set([...frontendUrls, "http://localhost:5173", "http://127.0.0.1:5173"])];
 
+function isLocalDevOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
+}
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin) || isLocalDevOrigin(origin)) {
         callback(null, true);
         return;
       }

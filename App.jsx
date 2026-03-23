@@ -3666,20 +3666,6 @@ export default function App() {
               </label>
             </div>
 
-            <div className="hero__stats auth-hero__stats">
-              <div>
-                <strong>{visibleMenuCount}</strong>
-                <span>Food and drink items</span>
-              </div>
-              <div>
-                <strong>{visibleLocalDishCount}</strong>
-                <span>Local dish choices</span>
-              </div>
-              <div>
-                <strong>4.8</strong>
-                <span>Average customer rating</span>
-              </div>
-            </div>
           </div>
 
           <div className="auth-hero__forms">
