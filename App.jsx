@@ -2297,15 +2297,6 @@ export default function App() {
   }, [adminSession.branchId]);
 
   useEffect(() => {
-    function handleScroll() {
-      setBranchMenuOpen(false);
-    }
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const payment = params.get("payment");
     const reference = params.get("reference");
@@ -2613,6 +2604,13 @@ export default function App() {
     .slice(0, 5);
   const chartMaxCount = Math.max(1, ...statusChart.map((entry) => entry.count));
   const chartMaxRevenue = Math.max(1, ...branchSalesChart.map((entry) => entry.totalAmount));
+  const activeWelcomeName = String(
+    accountUser.fullName ||
+      accountUser.email?.split("@")[0] ||
+      adminSession.username ||
+      adminSession.label ||
+      "Customer",
+  ).trim();
   const supportWhatsAppPhone = getWhatsAppPhone(businessSettings);
   const supportWhatsAppUrl = supportWhatsAppPhone
     ? `https://wa.me/${supportWhatsAppPhone}?text=${encodeURIComponent(
@@ -2903,6 +2901,19 @@ export default function App() {
     setSelectedBranchId(branchId);
     setBranchMenuOpen(false);
     setShowCart(false);
+  }
+
+  function handleBranchMenuScroll(event) {
+    const container = event.currentTarget;
+    const canScroll = container.scrollHeight > container.clientHeight + 8;
+    if (!canScroll) {
+      return;
+    }
+
+    const reachedEnd = container.scrollTop + container.clientHeight >= container.scrollHeight - 12;
+    if (reachedEnd) {
+      setBranchMenuOpen(false);
+    }
   }
 
   function getUserAuthHeaders(tokenOverride = accountToken) {
@@ -4878,7 +4889,7 @@ export default function App() {
           </button>
           <div className="topbar__welcome">
             <span>WELCOME</span>
-            <strong>{accountUser.fullName || adminSession.label || "Customer"}</strong>
+            <strong>{activeWelcomeName}</strong>
           </div>
         </div>
 
@@ -4949,7 +4960,7 @@ export default function App() {
         </section>
 
         {branchMenuOpen ? (
-          <section className="branch-menu">
+          <section className="branch-menu" onScroll={handleBranchMenuScroll}>
             {branchLocations.map((branch) => (
               <button
                 key={branch.id}
@@ -6006,7 +6017,6 @@ export default function App() {
                       <small className={`chip chip--${getBadgeTone(item.badge)}`}>{item.badge}</small>
                       {item.spicy ? <small className="chip chip--hot">Spicy</small> : null}
                       {recommendedItemIds.includes(item.id) ? <small className="chip chip--signature">Dietary match</small> : null}
-                      {item.stockQuantity > 0 && !item.soldOut ? <small className="chip chip--neutral">{item.stockQuantity} left</small> : null}
                     </div>
                   </div>
 
