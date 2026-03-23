@@ -1041,6 +1041,14 @@ function buildWhatsAppConfirmationUrl(order, settings, fallbackNumber) {
   return `https://wa.me/${settings.whatsappPhone || fallbackNumber}?text=${encodeURIComponent(lines.join("\n"))}`;
 }
 
+function resolvePageFromHash(hashValue = "") {
+  const normalized = String(hashValue || "").replace(/^#/, "").trim().toLowerCase();
+  if (["menu", "track", "catering", "contact", "account", "admin"].includes(normalized)) {
+    return normalized;
+  }
+  return "menu";
+}
+
 function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   const normalizedNeeds = needs.trim().toLowerCase();
   const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
@@ -1235,8 +1243,10 @@ export default function App() {
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [activePage, setActivePage] = useState(() =>
+    typeof window === "undefined" ? "menu" : resolvePageFromHash(window.location.hash),
+  );
   const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -1264,7 +1274,6 @@ export default function App() {
   const [addressDraft, setAddressDraft] = useState("");
   const [search, setSearch] = useState("");
   const [showCart, setShowCart] = useState(false);
-  const [showPreMenuTools, setShowPreMenuTools] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
   const [checkoutState, setCheckoutState] = useState({ loading: false, error: "" });
@@ -1346,6 +1355,16 @@ export default function App() {
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
     }
+  }, []);
+
+  useEffect(() => {
+    function handleHashChange() {
+      setActivePage(resolvePageFromHash(window.location.hash));
+      setBranchMenuOpen(false);
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
   useEffect(() => {
@@ -1631,7 +1650,6 @@ export default function App() {
 
   useEffect(() => {
     function handleScroll() {
-      setMobileMenuOpen(false);
       setBranchMenuOpen(false);
     }
 
@@ -2110,19 +2128,26 @@ export default function App() {
     setInstallPromptEvent(null);
   }
 
-  function handleQuickNav(event) {
-    const href = event?.currentTarget?.getAttribute?.("href") || "";
-    if (["#account", "#track"].includes(href)) {
-      setShowPreMenuTools(true);
-    }
-    setMobileMenuOpen(false);
+  function navigateToPage(nextPage) {
+    const resolvedPage = resolvePageFromHash(nextPage);
+    setActivePage(resolvedPage);
     setBranchMenuOpen(false);
+    if (typeof window !== "undefined") {
+      const nextHash = resolvedPage === "menu" ? "#menu" : `#${resolvedPage}`;
+      window.history.replaceState({}, "", nextHash);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function handleQuickNav(event) {
+    event?.preventDefault?.();
+    const href = event?.currentTarget?.getAttribute?.("href") || "#menu";
+    navigateToPage(href);
   }
 
   function handleBranchSelect(branchId) {
     setSelectedBranchId(branchId);
     setBranchMenuOpen(false);
-    setMobileMenuOpen(false);
     setShowCart(false);
   }
 
@@ -3978,42 +4003,29 @@ export default function App() {
           </button>
         </div>
 
-        <button
-          type="button"
-          className={mobileMenuOpen ? "topbar__menu-button is-open" : "topbar__menu-button"}
-          onClick={() => setMobileMenuOpen((current) => !current)}
-        >
-          <span>Explore</span>
-          <strong>{mobileMenuOpen ? "Close" : "Open"}</strong>
-        </button>
-
         <nav className="topbar__nav">
-          <a href="#account" onClick={handleQuickNav}>Account</a>
-          <a href="#menu" onClick={handleQuickNav}>Menu</a>
-          <a href="#track" onClick={handleQuickNav}>Track Order</a>
-          <a href="#catering" onClick={handleQuickNav}>Catering</a>
-          <a href="#contact" onClick={handleQuickNav}>Contact</a>
-          <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
+          <button type="button" className={activePage === "menu" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("menu")}>Menu</button>
+          <button type="button" className={activePage === "track" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("track")}>Track Order</button>
+          <button type="button" className={activePage === "catering" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("catering")}>Catering</button>
+          <button type="button" className={activePage === "contact" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("contact")}>Contact</button>
+          <button type="button" className={activePage === "account" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("account")}>Account</button>
+          <button type="button" className={activePage === "admin" ? "topbar__nav-link is-active" : "topbar__nav-link"} onClick={() => navigateToPage("admin")}>{adminToken ? "Admin" : "Admin Access"}</button>
         </nav>
 
         <div className="topbar__actions">
+          <button
+            type="button"
+            className={activePage === "account" ? "button button--ghost button--small topbar__account-button is-active" : "button button--ghost button--small topbar__account-button"}
+            onClick={() => navigateToPage("account")}
+          >
+            Account
+          </button>
           <button type="button" className="cart-toggle" onClick={() => setShowCart(true)}>
             <span>Order</span>
             <strong>{totalItems}</strong>
           </button>
         </div>
       </header>
-
-      {mobileMenuOpen ? (
-        <div className="mobile-nav">
-          <a href="#account" onClick={handleQuickNav}>Account</a>
-          <a href="#menu" onClick={handleQuickNav}>Menu</a>
-          <a href="#track" onClick={handleQuickNav}>Track Order</a>
-          <a href="#catering" onClick={handleQuickNav}>Catering</a>
-          <a href="#contact" onClick={handleQuickNav}>Contact</a>
-          <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
-        </div>
-      ) : null}
 
       {orderPlaced ? (
         <div className="toast" role="status">
@@ -4117,112 +4129,7 @@ export default function App() {
           </section>
         ) : null}
 
-        <section className="pre-menu-tools reveal reveal--up">
-          <div>
-            <p className="eyebrow">Today's Menu</p>
-            <h2>Good food should be the first thing you reach in PEM.</h2>
-            <p>
-              Browse local dishes fast, then open extra tools only when you need tracking, account, or catering.
-            </p>
-          </div>
-          <div className="pre-menu-tools__actions">
-            <a href="#menu" className="button button--primary">
-              Browse Menu
-            </a>
-            <a href="#track" className="button button--ghost" onClick={handleQuickNav}>
-              Track Order
-            </a>
-            <button
-              type="button"
-              className="button button--ghost"
-              onClick={() => setShowPreMenuTools((current) => !current)}
-            >
-              {showPreMenuTools ? "Hide Extra Sections" : "Show Extra Sections"}
-            </button>
-          </div>
-          <div className="pre-menu-tools__links">
-            <a href="#catering" onClick={handleQuickNav}>Catering</a>
-            <a href="#contact" onClick={handleQuickNav}>Contact</a>
-            <a href="#account" onClick={handleQuickNav}>Account</a>
-            <a href="#admin" onClick={handleQuickNav}>{adminToken ? "Admin" : "Admin Access"}</a>
-          </div>
-        </section>
-
-        {showPreMenuTools ? (
-          <>
-        <section className="hero">
-          <div className="hero__content reveal reveal--up">
-            <p className="eyebrow">Local dishes. Premium experience.</p>
-            <h1>{businessSettings.heroHeadline}</h1>
-            <p className="hero__copy">{businessSettings.heroCopy}</p>
-            <div className="hero__branch">
-              <span className="status-pill status-pill--received">{selectedBranch?.label || "Main branch"}</span>
-              <p>
-                <strong>{selectedBranch?.address || businessSettings.address}</strong>
-                <span>{selectedBranch?.note || businessSettings.contactPromise}</span>
-              </p>
-            </div>
-            <p className="hero__status">
-              <span className={businessStatus.isOpen ? "status-pill status-pill--delivered" : "status-pill status-pill--new"}>
-                {businessStatus.isOpen ? "Open now" : "Closed now"}
-              </span>
-              <strong>{businessStatus.label}</strong>
-            </p>
-
-            <div className="hero__actions">
-              <a href="#menu" className="button button--primary">
-                Start Ordering
-              </a>
-              <a href="#track" className="button button--ghost">
-                Track Order
-              </a>
-              <a href="#catering" className="button button--ghost">
-                Explore Catering
-              </a>
-              {!isInstalled ? (
-                <button type="button" className="button button--ghost" onClick={handleInstallApp}>
-                  {installPromptEvent ? "Install PEM App" : "How To Install"}
-                </button>
-              ) : null}
-            </div>
-
-            <div className="hero__stats">
-              <div>
-                <strong>{visibleMenuCount}</strong>
-                <span>Food and drink items</span>
-              </div>
-              <div>
-                <strong>4.8</strong>
-                <span>Average customer rating</span>
-              </div>
-              <div>
-                <strong>{visibleDrinkCount + visibleLocalDishCount}</strong>
-                <span>Local dishes and drinks</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="hero__panel reveal reveal--float">
-            <div className="hero-card">
-              <div className="hero-card__image">
-                <img src={logo} alt="PEM brand artwork" />
-              </div>
-              <div className="hero-card__body">
-                <div className="hero-card__topline">
-                  <span>PEM Signature Experience</span>
-                  <span>Trusted local taste</span>
-                </div>
-                <h2>Classy ordering for daily meals and memorable events.</h2>
-                <p>
-                  A refined interface built around your brand, with more visual meal browsing and a
-                  cleaner overall feel.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="account-section" id="account">
+        <section className={activePage === "account" ? "account-section" : "account-section is-hidden"} id="account">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Customer Account</p>
             <h2>Create a PEM account for faster repeat ordering.</h2>
@@ -4608,7 +4515,7 @@ export default function App() {
           )}
         </section>
 
-        <section className="tracking-section" id="track">
+        <section className={activePage === "track" ? "tracking-section" : "tracking-section is-hidden"} id="track">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Order Tracking</p>
             <h2>Check the status of your PEM order with your reference.</h2>
@@ -4855,10 +4762,8 @@ export default function App() {
             ))}
           </div>
         </section>
-          </>
-        ) : null}
 
-        <section className="menu-section" id="menu">
+        <section className={activePage === "menu" ? "menu-section" : "menu-section is-hidden"} id="menu">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Menu</p>
           </div>
@@ -5159,7 +5064,7 @@ export default function App() {
         </section>
 
         {publicReviews.length > 0 ? (
-          <section className="reviews-section">
+          <section className={activePage === "contact" ? "reviews-section" : "reviews-section is-hidden"}>
             <div className="section-heading section-heading--compact reveal reveal--up">
               <p className="eyebrow">Customer Reviews</p>
               <h2>Trusted by customers across PEM branches.</h2>
@@ -5184,7 +5089,7 @@ export default function App() {
           </section>
         ) : null}
 
-        <section className="trust-section">
+        <section className={activePage === "contact" ? "trust-section" : "trust-section is-hidden"}>
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Why Customers Trust PEM</p>
             <h2>Clear ordering, local taste, and branch-based support.</h2>
@@ -5200,7 +5105,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="catering-section" id="catering">
+        <section className={activePage === "catering" ? "catering-section" : "catering-section is-hidden"} id="catering">
           <div className="section-heading section-heading--light reveal reveal--up">
             <p className="eyebrow">Catering Service</p>
             <h2>PEM also serves events, celebrations, and business gatherings.</h2>
@@ -5309,7 +5214,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="contact-section">
+        <section className={activePage === "contact" ? "contact-section" : "contact-section is-hidden"}>
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Reservations</p>
             <h2>Book a table or tasting slot with PEM.</h2>
@@ -5380,7 +5285,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="contact-section" id="contact">
+        <section className={activePage === "contact" ? "contact-section" : "contact-section is-hidden"} id="contact">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Contact</p>
             <h2>Make ordering easy for customers and inquiries easy for event clients.</h2>
@@ -5478,7 +5383,7 @@ export default function App() {
           </form>
         </section>
 
-        <section className="admin-section" id="admin">
+        <section className={activePage === "admin" ? "admin-section" : "admin-section is-hidden"} id="admin">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Admin</p>
             <h2>Track orders, messages, and catering requests in one place.</h2>
@@ -5557,9 +5462,9 @@ export default function App() {
                   <span className="status-pill status-pill--received">
                     {adminSession.branchId ? `${adminSession.label} · ${branchLocations.find((branch) => branch.id === adminSession.branchId)?.label || "Assigned branch"}` : `${adminSession.label || "Owner"} · All branches`}
                   </span>
-                  <a href="#menu" className="button button--ghost">
+                  <button type="button" className="button button--ghost" onClick={() => navigateToPage("menu")}>
                     Back to Menu
-                  </a>
+                  </button>
 
                   <button
                     type="button"
@@ -6519,13 +6424,17 @@ export default function App() {
       </main>
 
       <div className="mobile-quickbar">
-        <a href="#menu" onClick={handleQuickNav}>Menu</a>
-        <a href="#track" onClick={handleQuickNav}>Track</a>
-        <button type="button" onClick={() => setBranchMenuOpen((current) => !current)}>
-          Branch
+        <button type="button" className={activePage === "menu" ? "is-active" : ""} onClick={() => navigateToPage("menu")}>
+          Menu
         </button>
-        <button type="button" onClick={() => setShowCart(true)}>
-          Order {totalItems > 0 ? `(${totalItems})` : ""}
+        <button type="button" className={activePage === "track" ? "is-active" : ""} onClick={() => navigateToPage("track")}>
+          Track
+        </button>
+        <button type="button" className={activePage === "catering" ? "is-active" : ""} onClick={() => navigateToPage("catering")}>
+          Catering
+        </button>
+        <button type="button" className={activePage === "contact" ? "is-active" : ""} onClick={() => navigateToPage("contact")}>
+          Contact
         </button>
       </div>
 
