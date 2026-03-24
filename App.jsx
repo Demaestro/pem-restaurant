@@ -5168,6 +5168,11 @@ export default function App() {
                 <button type="submit" className="button button--ghost" disabled={accountState.loading}>
                   {accountState.loading ? "Signing in..." : "Sign In"}
                 </button>
+                {!isInstalled ? (
+                  <button type="button" className="button button--ghost button--small" onClick={handleInstallApp}>
+                    Install PEM App
+                  </button>
+                ) : null}
               </form>
             </div>
           ) : accountToken ? (
@@ -5219,6 +5224,13 @@ export default function App() {
                     Copy Referral Link
                   </button>
                 ) : null}
+                {!isInstalled ? (
+                  <button type="button" className="button button--ghost button--small" onClick={handleInstallApp}>
+                    Install PEM App
+                  </button>
+                ) : (
+                  <p className="account-helper">PEM is already installed on this device.</p>
+                )}
 
                 <form className="service-form account-card__panel" onSubmit={handleProfileSave}>
                   <div className="service-form__grid">
