@@ -146,6 +146,22 @@ button:disabled {
     linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 96%, transparent), color-mix(in srgb, var(--surface) 94%, transparent));
 }
 
+.auth-hero__copy--login {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  text-align: center;
+}
+
+.auth-hero__copy--login h1 {
+  max-width: 11.5ch;
+}
+
+.auth-hero__copy--login .branch-selector-card {
+  width: min(100%, 34rem);
+  text-align: left;
+}
+
 .auth-hero__copy::after {
   content: "";
   position: absolute;
@@ -170,6 +186,10 @@ button:disabled {
   gap: 1rem;
   justify-items: start;
   margin-bottom: 1.6rem;
+}
+
+.auth-hero__copy--login .auth-hero__logo-showcase {
+  justify-items: center;
 }
 
 .auth-hero__logo-mark {

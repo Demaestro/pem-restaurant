@@ -4598,7 +4598,7 @@ export default function App() {
         <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
 
         <section className="auth-hero">
-          <div className="auth-hero__copy reveal reveal--up">
+          <div className={authView === "login" ? "auth-hero__copy auth-hero__copy--login reveal reveal--up" : "auth-hero__copy reveal reveal--up"}>
             {authView === "login" ? (
               <>
                 <h1>Welcome to the PEM experience.</h1>
@@ -4651,16 +4651,6 @@ export default function App() {
                 </select>
               </label>
             </div>
-
-            {authView === "login" ? (
-              <div className="auth-hero__support">
-                <article className="auth-hero__support-card">
-                  <p className="eyebrow">Serving From</p>
-                  <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
-                  <span>{selectedBranch?.hours || businessSettings.businessHoursText}</span>
-                </article>
-              </div>
-            ) : null}
 
           </div>
 
