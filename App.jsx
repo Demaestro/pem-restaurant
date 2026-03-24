@@ -4599,25 +4599,40 @@ export default function App() {
 
         <section className="auth-hero">
           <div className="auth-hero__copy reveal reveal--up">
-            <div className="auth-hero__brand">
-              <span className="brand__mark">
-                <img src={logo} alt="Precious Events Makers logo" />
-              </span>
-              <div className="brand__text">
-                <strong>{businessSettings.appName}</strong>
-                <small>{businessSettings.businessName}</small>
-              </div>
-            </div>
+            {authView === "login" ? (
+              <>
+                <h1>Welcome to the PEM experience.</h1>
+                <div className="auth-hero__logo-showcase">
+                  <span className="auth-hero__logo-mark">
+                    <img src={logo} alt="Precious Events Makers logo" />
+                  </span>
+                  <div className="auth-hero__logo-copy">
+                    <strong>{businessSettings.appName}</strong>
+                    <small>{businessSettings.businessName}</small>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="auth-hero__brand">
+                  <span className="brand__mark">
+                    <img src={logo} alt="Precious Events Makers logo" />
+                  </span>
+                  <div className="brand__text">
+                    <strong>{businessSettings.appName}</strong>
+                    <small>{businessSettings.businessName}</small>
+                  </div>
+                </div>
 
-            <p className="eyebrow">Welcome to PEM</p>
-            <h1>{authView === "login" ? "Welcome back to PEM." : authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
-            <p>
-              {authView === "login"
-                ? "Sign in to order from your branch, keep delivery details saved, and move through PEM with a more polished experience."
-                : authView === "signup"
-                  ? "Create your PEM account once, then keep your saved meals, delivery addresses, notifications, and order history in one place."
-                  : "Use your email and phone number to reset your password and get back into PEM quickly."}
-            </p>
+                <p className="eyebrow">Welcome to PEM</p>
+                <h1>{authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
+                <p>
+                  {authView === "signup"
+                    ? "Create your PEM account once, then keep your saved meals, delivery addresses, notifications, and order history in one place."
+                    : "Use your email and phone number to reset your password and get back into PEM quickly."}
+                </p>
+              </>
+            )}
 
             <div className="branch-selector-card">
               <div>
@@ -4644,11 +4659,6 @@ export default function App() {
                   <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
                   <span>{selectedBranch?.hours || businessSettings.businessHoursText}</span>
                 </article>
-                <article className="auth-hero__support-card">
-                  <p className="eyebrow">Direct Support</p>
-                  <strong>{selectedBranch?.phone || businessSettings.phone}</strong>
-                  <span>{selectedBranch?.note || businessSettings.contactPromise}</span>
-                </article>
               </div>
             ) : null}
 
@@ -4661,9 +4671,7 @@ export default function App() {
                   <div>
                     <p className="eyebrow">Account Access</p>
                     <h3>Log in to your account</h3>
-                    <p className="auth-card__lead">Use the email and password linked to your PEM profile.</p>
                   </div>
-                  <span className="auth-card__badge">Login</span>
                 </div>
 
                 <div className="service-form__grid service-form__grid--single auth-form-stack">
@@ -4695,17 +4703,20 @@ export default function App() {
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
                 {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
 
-                <div className="auth-card__actions">
+                <div className="auth-card__actions auth-card__actions--login">
                   <button type="submit" className="button button--primary" disabled={accountState.loading}>
                     {accountState.loading ? "Signing in..." : "Log In"}
                   </button>
-
-                  {!isInstalled ? (
-                    <button type="button" className="button button--ghost button--small" onClick={handleInstallApp}>
-                      Install PEM App
-                    </button>
-                  ) : null}
+                  <button type="button" className="auth-link auth-link--action" onClick={() => setAuthView("forgot")}>
+                    Forgot password?
+                  </button>
                 </div>
+
+                {!isInstalled ? (
+                  <button type="button" className="button button--ghost button--small auth-install-button" onClick={handleInstallApp}>
+                    Install PEM App
+                  </button>
+                ) : null}
 
                 <div className="auth-card__divider">
                   <span>Other options</span>
@@ -4718,9 +4729,6 @@ export default function App() {
                       Admin login
                     </button>
                   </p>
-                  <button type="button" className="auth-link" onClick={() => setAuthView("forgot")}>
-                    Forgot password?
-                  </button>
                   <p className="auth-links__row">
                     <span>Do not have an account?</span>
                     <button type="button" className="auth-link" onClick={() => setAuthView("signup")}>
