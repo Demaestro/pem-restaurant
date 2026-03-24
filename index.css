@@ -11,9 +11,11 @@
   --muted: #6f5c54;
   --line: rgba(113, 42, 34, 0.14);
   --brand: #8d1d18;
+  --brand-strong: #6f1410;
   --brand-dark: #61100d;
   --brand-soft: rgba(141, 29, 24, 0.08);
   --shadow: 0 24px 60px rgba(86, 31, 24, 0.12);
+  --shadow-soft: 0 14px 30px rgba(86, 31, 24, 0.08);
   --success: #1e6b3b;
   --error: #a12626;
   --overlay: linear-gradient(180deg, transparent 8%, rgba(18, 10, 10, 0.55) 100%);
@@ -30,9 +32,11 @@
   --muted: #ccb9ae;
   --line: rgba(255, 226, 207, 0.12);
   --brand: #f06b56;
+  --brand-strong: #ff8a75;
   --brand-dark: #bb3727;
   --brand-soft: rgba(240, 107, 86, 0.12);
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 16px 34px rgba(0, 0, 0, 0.24);
   --success: #8ee5ad;
   --error: #ffb0b0;
   --overlay: linear-gradient(180deg, transparent 10%, rgba(0, 0, 0, 0.72) 100%);
@@ -134,6 +138,26 @@ button:disabled {
   backdrop-filter: blur(18px);
 }
 
+.auth-hero__copy {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand) 12%, transparent), transparent 32%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 96%, transparent), color-mix(in srgb, var(--surface) 94%, transparent));
+}
+
+.auth-hero__copy::after {
+  content: "";
+  position: absolute;
+  inset: auto -12% -28% auto;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--brand) 18%, transparent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .auth-hero__brand {
   display: inline-flex;
   align-items: center;
@@ -144,10 +168,10 @@ button:disabled {
 .auth-hero__copy h1,
 .auth-loading-card h1 {
   margin: 0.35rem 0 1rem;
-  max-width: 12ch;
+  max-width: 10ch;
   font-family: "Instrument Serif", serif;
-  font-size: clamp(3rem, 5vw, 5.3rem);
-  line-height: 0.95;
+  font-size: clamp(2.7rem, 4.6vw, 4.8rem);
+  line-height: 0.98;
   letter-spacing: -0.03em;
 }
 
@@ -155,7 +179,7 @@ button:disabled {
 .auth-loading-card p {
   max-width: 38rem;
   color: var(--muted);
-  line-height: 1.75;
+  line-height: 1.68;
 }
 
 .auth-hero__stats {
@@ -169,12 +193,97 @@ button:disabled {
 
 .auth-card {
   background: color-mix(in srgb, var(--surface) 94%, transparent);
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.auth-card__top h3 {
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.5rem, 2.6vw, 2rem);
+}
+
+.auth-card__lead {
+  margin: 0.7rem 0 0;
+  max-width: 28rem;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.auth-card__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.6rem;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-soft) 76%, var(--surface));
+  color: var(--brand);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-form-stack {
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+
+.auth-form-stack .field {
+  margin-bottom: 0;
+}
+
+.auth-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.auth-card__actions .button--primary {
+  min-width: 12rem;
+}
+
+.auth-card__divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0.1rem 0;
+}
+
+.auth-card__divider::before {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto;
+  border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.auth-card__divider span {
+  position: relative;
+  padding: 0 0.8rem;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .auth-links {
   margin-top: 1rem;
   display: grid;
   gap: 0.85rem;
+}
+
+.auth-links--premium {
+  margin-top: 0;
 }
 
 .auth-links__row {
@@ -198,6 +307,33 @@ button:disabled {
 
 .auth-link:hover {
   color: var(--brand-strong);
+}
+
+.auth-hero__support {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.15rem;
+}
+
+.auth-hero__support-card {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.05rem;
+  border-radius: 1.2rem;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-hero__support-card strong {
+  font-size: 1rem;
+}
+
+.auth-hero__support-card span {
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .branch-selector-card {
@@ -2898,6 +3034,10 @@ button:disabled {
   }
 
   .branch-selector-card {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero__support {
     grid-template-columns: 1fr;
   }
 

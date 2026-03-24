@@ -800,6 +800,20 @@ function getDeliveryZone(zoneId, zones = defaultDeliveryZones) {
   return sourceZones.find((zone) => zone.id === zoneId) || sourceZones[0];
 }
 
+function formatMinutesAsTime(totalMinutes) {
+  const normalizedMinutes = Number(totalMinutes);
+  if (!Number.isFinite(normalizedMinutes)) {
+    return "time confirmed by PEM";
+  }
+
+  const safeMinutes = ((normalizedMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const normalizedHours = hours % 12 === 0 ? 12 : hours % 12;
+  return `${normalizedHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
+}
+
 function formatHour(hour) {
   const suffix = hour >= 12 ? "PM" : "AM";
   const normalized = hour % 12 === 0 ? 12 : hour % 12;
@@ -964,34 +978,36 @@ function formatScheduleLabelLegacy(item) {
   return `${dayLabel} · ${timeLabel}`;
 }
 
-function getBusinessStatus() {
-  const formatter = new Intl.DateTimeFormat("en-NG", {
-    timeZone: "Africa/Lagos",
-    weekday: "long",
-    hour: "numeric",
-    hour12: false,
-  });
-  const parts = formatter.formatToParts(new Date());
-  const weekday = parts.find((part) => part.type === "weekday")?.value;
-  const hourValue = Number(parts.find((part) => part.type === "hour")?.value || 0);
-  const schedule = businessHours.find((entry) => entry.day === weekday);
-
-  if (!schedule) {
+function getBusinessStatus(hoursText, now = getLagosNowParts()) {
+  const normalizedHours = String(hoursText || "").trim();
+  if (!normalizedHours) {
     return {
-      isOpen: false,
-      label: "Closed today",
+      isOpen: true,
+      label: "Hours confirmed by PEM",
     };
   }
 
-  const isOpen = schedule.close <= schedule.open
-    ? hourValue >= schedule.open || hourValue < schedule.close
-    : hourValue >= schedule.open && hourValue < schedule.close;
+  if (/closed/i.test(normalizedHours) && !normalizedHours.includes("-")) {
+    return {
+      isOpen: false,
+      label: normalizedHours,
+    };
+  }
 
+  const hoursWindow = parseHoursWindow(normalizedHours);
+  if (!hoursWindow) {
+    return {
+      isOpen: false,
+      label: normalizedHours,
+    };
+  }
+
+  const isOpen = isTimeWithinWindow(now.minutes, hoursWindow);
   return {
     isOpen,
     label: isOpen
-      ? `Open now until ${formatHour(schedule.close)}`
-      : `Opens ${formatHour(schedule.open)} today`,
+      ? `Open now until ${formatMinutesAsTime(hoursWindow.closeMinutes)}`
+      : `Opens ${formatMinutesAsTime(hoursWindow.openMinutes)} today`,
   };
 }
 
@@ -1458,11 +1474,22 @@ function StarRatingInputLegacy({ value, onChange }) {
 }
 
 function resolvePageFromHash(hashValue = "") {
-  const normalized = String(hashValue || "").replace(/^#/, "").trim().toLowerCase();
+  const normalized = String(hashValue || "").replace(/^#/, "").split("?")[0].trim().toLowerCase();
   if (["menu", "track", "catering", "contact", "account", "admin"].includes(normalized)) {
     return normalized;
   }
   return "menu";
+}
+
+function getQueryParamFromHash(hashValue = "", key = "") {
+  const normalizedHash = String(hashValue || "").replace(/^#/, "");
+  const queryStart = normalizedHash.indexOf("?");
+  if (queryStart === -1) {
+    return "";
+  }
+
+  const params = new URLSearchParams(normalizedHash.slice(queryStart + 1));
+  return String(params.get(key) || "").trim();
 }
 
 function buildClientDietaryFallback(needs, sourceItems = menuItems) {
@@ -1708,7 +1735,6 @@ function ThemeToggle({ theme, onToggle, floating = false }) {
 }
 
 export default function App() {
-  const businessStatus = getBusinessStatus();
   const [theme, setTheme] = useState("light");
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -1801,6 +1827,10 @@ export default function App() {
   const lagosNow = useMemo(() => getLagosNowParts(), [lagosNowTick]);
   const selectedBranch =
     branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
+  const businessStatus = useMemo(
+    () => getBusinessStatus(selectedBranch?.hours || businessSettings.businessHoursText, lagosNow),
+    [businessSettings.businessHoursText, lagosNow, selectedBranch?.hours],
+  );
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item, lagosNow));
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
@@ -2295,6 +2325,25 @@ export default function App() {
       setAdminBranchFilter(adminSession.branchId);
     }
   }, [adminSession.branchId]);
+
+  useEffect(() => {
+    if (accountToken || adminToken) {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const referralCode = searchParams.get("ref") || getQueryParamFromHash(window.location.hash, "ref");
+    const normalizedReferralCode = String(referralCode || "").trim();
+    if (!normalizedReferralCode) {
+      return;
+    }
+
+    setSignupForm((previous) => ({
+      ...previous,
+      referralCode: previous.referralCode || normalizedReferralCode,
+    }));
+    setAuthView("signup");
+  }, [accountToken, adminToken]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -4561,10 +4610,10 @@ export default function App() {
             </div>
 
             <p className="eyebrow">Welcome to PEM</p>
-            <h1>{authView === "login" ? "Log in to continue your PEM experience." : authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
+            <h1>{authView === "login" ? "Welcome back to PEM." : authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
             <p>
               {authView === "login"
-                ? "Order local dishes, track meals, manage catering, and keep everything in one calm, professional mobile experience."
+                ? "Sign in to order from your branch, keep delivery details saved, and move through PEM with a more polished experience."
                 : authView === "signup"
                   ? "Create your PEM account once, then keep your saved meals, delivery addresses, notifications, and order history in one place."
                   : "Use your email and phone number to reset your password and get back into PEM quickly."}
@@ -4588,22 +4637,38 @@ export default function App() {
               </label>
             </div>
 
+            {authView === "login" ? (
+              <div className="auth-hero__support">
+                <article className="auth-hero__support-card">
+                  <p className="eyebrow">Serving From</p>
+                  <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
+                  <span>{selectedBranch?.hours || businessSettings.businessHoursText}</span>
+                </article>
+                <article className="auth-hero__support-card">
+                  <p className="eyebrow">Direct Support</p>
+                  <strong>{selectedBranch?.phone || businessSettings.phone}</strong>
+                  <span>{selectedBranch?.note || businessSettings.contactPromise}</span>
+                </article>
+              </div>
+            ) : null}
+
           </div>
 
           <div className="auth-hero__forms">
             {authView === "login" ? (
               <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleLogin}>
-                <div className="account-card__header">
+                <div className="auth-card__top">
                   <div>
-                    <p className="eyebrow">Welcome to PEM</p>
+                    <p className="eyebrow">Account Access</p>
                     <h3>Log in to your account</h3>
+                    <p className="auth-card__lead">Use the email and password linked to your PEM profile.</p>
                   </div>
-                  <span>Login</span>
+                  <span className="auth-card__badge">Login</span>
                 </div>
 
-                <div className="service-form__grid">
+                <div className="service-form__grid service-form__grid--single auth-form-stack">
                   <label className="field" data-checkout-field="customerName">
-                    <span>Email</span>
+                    <span>Email address</span>
                     <input
                       type="email"
                       value={loginForm.email}
@@ -4630,15 +4695,23 @@ export default function App() {
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
                 {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
 
-                <p className="account-helper">
-                  Once you sign in, PEM unlocks the full menu, tracking, catering, and account experience.
-                </p>
+                <div className="auth-card__actions">
+                  <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                    {accountState.loading ? "Signing in..." : "Log In"}
+                  </button>
 
-                <button type="submit" className="button button--primary" disabled={accountState.loading}>
-                  {accountState.loading ? "Signing in..." : "Log In"}
-                </button>
+                  {!isInstalled ? (
+                    <button type="button" className="button button--ghost button--small" onClick={handleInstallApp}>
+                      Install PEM App
+                    </button>
+                  ) : null}
+                </div>
 
-                <div className="auth-links">
+                <div className="auth-card__divider">
+                  <span>Other options</span>
+                </div>
+
+                <div className="auth-links auth-links--premium">
                   <p className="auth-links__row">
                     <span>Are you a staff member?</span>
                     <button type="button" className="auth-link" onClick={() => setAuthView("admin")}>
@@ -5210,7 +5283,7 @@ export default function App() {
                     type="button"
                     className="button button--ghost button--small"
                     onClick={async () => {
-                      const referralLink = `${window.location.origin}${window.location.pathname}#account?ref=${accountUser.referralCode}`;
+                      const referralLink = `${window.location.origin}${window.location.pathname}?ref=${accountUser.referralCode}#account`;
                       try {
                         await navigator.clipboard.writeText(referralLink);
                         setOrderPlaced("Referral link copied.");
@@ -6395,7 +6468,7 @@ export default function App() {
             </div>
             <div className="contact-card">
               <h3>Business Hours</h3>
-              <p>{businessSettings.businessHoursText || businessStatus.label}</p>
+              <p>{selectedBranch?.hours || businessSettings.businessHoursText || businessStatus.label}</p>
             </div>
             <div className="contact-card">
               <h3>Support Email</h3>
