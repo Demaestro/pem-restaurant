@@ -516,6 +516,9 @@ const initialCheckout = {
   customerName: "",
   phone: "",
   email: "",
+  orderType: "self",
+  recipientEmail: "",
+  giftMessage: "",
   address: "",
   landmark: "",
   fulfillmentMethod: "delivery",
@@ -691,7 +694,23 @@ const initialAccountForm = {
   email: "",
   password: "",
   phone: "",
+  address: "",
   referralCode: "",
+};
+
+const initialAccountGifts = {
+  received: [],
+  sent: [],
+};
+
+const initialGiftActionState = {
+  loadingRef: "",
+  error: "",
+  success: "",
+  openRef: "",
+  address: "",
+  landmark: "",
+  phone: "",
 };
 
 const initialLoginForm = {
@@ -1762,12 +1781,14 @@ export default function App() {
   const [accountToken, setAccountToken] = useState("");
   const [accountUser, setAccountUser] = useState(initialAccountUser);
   const [accountOrders, setAccountOrders] = useState([]);
+  const [accountGifts, setAccountGifts] = useState(initialAccountGifts);
   const [accountState, setAccountState] = useState({ loading: false, error: "", success: "" });
   const [accountHydrated, setAccountHydrated] = useState(false);
   const [authView, setAuthView] = useState("login");
   const [signupForm, setSignupForm] = useState(initialAccountForm);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
+  const [giftActionState, setGiftActionState] = useState(initialGiftActionState);
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
   const [addressDraft, setAddressDraft] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -1837,6 +1858,7 @@ export default function App() {
 
   function validateCheckoutField(field, value) {
     let error = "";
+    const isGiftCheckout = checkoutForm.orderType === "gift";
     if (field === "customerName" && String(value || "").trim().length < 2) {
       error = "Enter your full name";
     }
@@ -1851,7 +1873,17 @@ export default function App() {
         error = "Enter a valid email";
       }
     }
-    if (field === "address" && checkoutForm.fulfillmentMethod !== "pickup" && String(value || "").trim().length < 5) {
+    if (field === "recipientEmail") {
+      const normalizedValue = String(value || "").trim().toLowerCase();
+      if (!normalizedValue) {
+        error = "Enter your friend's PEM email";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedValue)) {
+        error = "Enter a valid email";
+      } else if (normalizedValue === String(accountUser.email || "").trim().toLowerCase()) {
+        error = "Use the normal checkout if you are ordering for yourself";
+      }
+    }
+    if (field === "address" && !isGiftCheckout && checkoutForm.fulfillmentMethod !== "pickup" && String(value || "").trim().length < 5) {
       error = "Enter a delivery address";
     }
     setCheckoutFieldErrors((previous) => ({ ...previous, [field]: error }));
@@ -1928,6 +1960,7 @@ export default function App() {
     writeCachedJson("pem-account-cache", {
       user: nextAccountUser,
       orders: nextAccountOrders,
+      gifts: accountGifts,
     });
   }
 
@@ -2045,6 +2078,9 @@ export default function App() {
           ...previous,
           customerName: savedCheckout.customerName || previous.customerName,
           phone: savedCheckout.phone || previous.phone,
+          orderType: savedCheckout.orderType || previous.orderType,
+          recipientEmail: savedCheckout.recipientEmail || previous.recipientEmail,
+          giftMessage: savedCheckout.giftMessage || previous.giftMessage,
           address: savedCheckout.address || previous.address,
           deliveryZone: savedCheckout.deliveryZone || previous.deliveryZone,
           fulfillmentMethod: savedCheckout.fulfillmentMethod || previous.fulfillmentMethod,
@@ -2112,8 +2148,9 @@ export default function App() {
     writeCachedJson("pem-account-cache", {
       user: accountUser,
       orders: accountOrders,
+      gifts: accountGifts,
     });
-  }, [accountOrders, accountToken, accountUser]);
+  }, [accountGifts, accountOrders, accountToken, accountUser]);
 
   useEffect(() => {
     try {
@@ -2122,6 +2159,9 @@ export default function App() {
         JSON.stringify({
           customerName: checkoutForm.customerName,
           phone: checkoutForm.phone,
+          orderType: checkoutForm.orderType,
+          recipientEmail: checkoutForm.recipientEmail,
+          giftMessage: checkoutForm.giftMessage,
           address: checkoutForm.address,
           deliveryZone: checkoutForm.deliveryZone,
           fulfillmentMethod: checkoutForm.fulfillmentMethod,
@@ -2136,8 +2176,11 @@ export default function App() {
     checkoutForm.customerName,
     checkoutForm.deliveryZone,
     checkoutForm.fulfillmentMethod,
+    checkoutForm.giftMessage,
     checkoutForm.landmark,
+    checkoutForm.orderType,
     checkoutForm.phone,
+    checkoutForm.recipientEmail,
   ]);
 
   useEffect(() => {
@@ -2151,6 +2194,29 @@ export default function App() {
       paymentReference: "",
     }));
   }, [checkoutForm.paymentMethod]);
+
+  useEffect(() => {
+    if (!isGiftOrder) {
+      return;
+    }
+    if (checkoutForm.paymentMethod === "Bank transfer") {
+      return;
+    }
+    setCheckoutForm((previous) => ({
+      ...previous,
+      paymentMethod: "Bank transfer",
+    }));
+  }, [checkoutForm.paymentMethod, isGiftOrder]);
+
+  useEffect(() => {
+    if (!isGiftOrder || checkoutForm.fulfillmentMethod === "delivery") {
+      return;
+    }
+    setCheckoutForm((previous) => ({
+      ...previous,
+      fulfillmentMethod: "delivery",
+    }));
+  }, [checkoutForm.fulfillmentMethod, isGiftOrder]);
 
   useEffect(() => {
     const savedAccountToken = window.localStorage.getItem("pem-account-token");
@@ -2207,6 +2273,8 @@ export default function App() {
       window.localStorage.removeItem("pem-account-token");
       setAccountUser(initialAccountUser);
       setAccountOrders([]);
+      setAccountGifts(initialAccountGifts);
+      setGiftActionState(initialGiftActionState);
       setProfileForm({ fullName: "", phone: "" });
       setAccountHydrated(true);
     }
@@ -2667,12 +2735,14 @@ export default function App() {
       )}`
     : "#";
   const selectedPaymentIsCard = isCardPaymentMethod(checkoutForm.paymentMethod);
+  const isGiftOrder = checkoutForm.orderType === "gift";
   const bankTransferReady = Boolean(
     String(businessSettings.bankName || "").trim() &&
       String(businessSettings.bankAccountName || "").trim() &&
       String(businessSettings.bankAccountNumber || "").trim(),
   );
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
+  const pendingReceivedGifts = (accountGifts.received || []).filter((gift) => gift.status === "pending_acceptance");
   const loyaltyProgress = Math.min(
     100,
     Math.round(
@@ -2980,8 +3050,13 @@ export default function App() {
         headers: getUserAuthHeaders(tokenOverride),
       });
       const nextUser = { ...initialAccountUser, ...(data.user || {}) };
+      const nextGifts = {
+        received: Array.isArray(data.receivedGifts) ? data.receivedGifts : [],
+        sent: Array.isArray(data.sentGifts) ? data.sentGifts : [],
+      };
       setAccountUser(nextUser);
       setAccountOrders(Array.isArray(data.orders) ? data.orders : []);
+      setAccountGifts(nextGifts);
       setProfileForm({
         fullName: nextUser.fullName || "",
         phone: nextUser.phone || "",
@@ -2991,6 +3066,7 @@ export default function App() {
       writeCachedJson("pem-account-cache", {
         user: nextUser,
         orders: Array.isArray(data.orders) ? data.orders : [],
+        gifts: nextGifts,
       });
       setCheckoutForm((previous) => ({
         ...previous,
@@ -3010,6 +3086,10 @@ export default function App() {
         const nextUser = { ...initialAccountUser, ...(cachedAccount.user || {}) };
         setAccountUser(nextUser);
         setAccountOrders(Array.isArray(cachedAccount.orders) ? cachedAccount.orders : []);
+        setAccountGifts({
+          received: Array.isArray(cachedAccount.gifts?.received) ? cachedAccount.gifts.received : [],
+          sent: Array.isArray(cachedAccount.gifts?.sent) ? cachedAccount.gifts.sent : [],
+        });
         setProfileForm({
           fullName: nextUser.fullName || "",
           phone: nextUser.phone || "",
@@ -3876,10 +3956,29 @@ export default function App() {
 
   async function handleSignup(event) {
     event.preventDefault();
+    const normalizedFullName = String(signupForm.fullName || "").trim();
+    const normalizedEmail = String(signupForm.email || "").trim();
+    const normalizedPhone = sanitizePhoneInput(signupForm.phone);
+    const normalizedAddress = String(signupForm.address || "").trim();
+
+    if (!normalizedAddress || normalizedAddress.length < 5) {
+      setAccountState({
+        loading: false,
+        error: "Add the delivery address you use most often.",
+        success: "",
+      });
+      return;
+    }
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/signup", signupForm);
+      const data = await postJson("/api/auth/signup", {
+        ...signupForm,
+        fullName: normalizedFullName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        address: normalizedAddress,
+      });
       setAccountToken(data.token || "");
       setSignupForm(initialAccountForm);
       setLoginForm(initialLoginForm);
@@ -4053,10 +4152,138 @@ export default function App() {
     }
   }
 
+  function handleCheckoutOrderTypeChange(nextType) {
+    setCheckoutForm((previous) => ({
+      ...previous,
+      orderType: nextType,
+      recipientEmail: nextType === "gift" ? previous.recipientEmail : "",
+      giftMessage: nextType === "gift" ? previous.giftMessage : "",
+      fulfillmentMethod: nextType === "gift" ? "delivery" : previous.fulfillmentMethod,
+      paymentMethod: nextType === "gift" ? "Bank transfer" : previous.paymentMethod,
+      paymentReference: nextType === "gift" || previous.paymentMethod === "Bank transfer" ? previous.paymentReference : "",
+    }));
+    setCheckoutFieldErrors((previous) => ({
+      ...previous,
+      recipientEmail: "",
+    }));
+    setCheckoutState({ loading: false, error: "" });
+  }
+
+  function openGiftAcceptForm(gift) {
+    setGiftActionState({
+      loadingRef: "",
+      error: "",
+      success: "",
+      openRef: gift.reference,
+      address: String(accountUser.savedAddresses?.[0] || "").trim(),
+      landmark: "",
+      phone: sanitizePhoneInput(accountUser.phone || ""),
+    });
+  }
+
+  async function handleGiftAccept(reference) {
+    const normalizedAddress = String(giftActionState.address || "").trim();
+    const normalizedPhone = sanitizePhoneInput(giftActionState.phone);
+    const normalizedLandmark = String(giftActionState.landmark || "").trim();
+
+    if (!normalizedAddress) {
+      setGiftActionState((previous) => ({
+        ...previous,
+        error: "Add the address where PEM should deliver this gift.",
+        success: "",
+      }));
+      return;
+    }
+
+    if (normalizePhoneDigits(normalizedPhone).length < 10) {
+      setGiftActionState((previous) => ({
+        ...previous,
+        error: "Add a valid phone number before accepting this gift.",
+        success: "",
+      }));
+      return;
+    }
+
+    try {
+      setGiftActionState((previous) => ({
+        ...previous,
+        loadingRef: reference,
+        error: "",
+        success: "",
+      }));
+      const data = await requestJson(`/api/gifts/${encodeURIComponent(reference)}/accept`, {
+        method: "POST",
+        headers: getUserAuthHeaders(),
+        payload: {
+          address: normalizedAddress,
+          landmark: normalizedLandmark,
+          phone: normalizedPhone,
+        },
+      });
+      if (data.user) {
+        setAccountUser({ ...initialAccountUser, ...data.user });
+      }
+      setTrackingReference(data.order?.reference || "");
+      await loadAccount();
+      setGiftActionState({
+        loadingRef: "",
+        error: "",
+        success: data.message || "Gift accepted.",
+        openRef: "",
+        address: "",
+        landmark: "",
+        phone: "",
+      });
+    } catch (error) {
+      setGiftActionState((previous) => ({
+        ...previous,
+        loadingRef: "",
+        error: error.message || "PEM could not accept this gift right now.",
+        success: "",
+      }));
+    }
+  }
+
+  async function handleGiftDecline(reference) {
+    try {
+      setGiftActionState((previous) => ({
+        ...previous,
+        loadingRef: reference,
+        error: "",
+        success: "",
+      }));
+      const data = await requestJson(`/api/gifts/${encodeURIComponent(reference)}/decline`, {
+        method: "POST",
+        headers: getUserAuthHeaders(),
+      });
+      if (data.user) {
+        setAccountUser({ ...initialAccountUser, ...data.user });
+      }
+      await loadAccount();
+      setGiftActionState({
+        loadingRef: "",
+        error: "",
+        success: data.message || "Gift declined.",
+        openRef: "",
+        address: "",
+        landmark: "",
+        phone: "",
+      });
+    } catch (error) {
+      setGiftActionState((previous) => ({
+        ...previous,
+        loadingRef: "",
+        error: error.message || "PEM could not decline this gift right now.",
+        success: "",
+      }));
+    }
+  }
+
   async function handlePlaceOrder() {
     const normalizedCustomerName = String(checkoutForm.customerName || "").trim();
     const normalizedCheckoutPhone = sanitizePhoneInput(checkoutForm.phone);
     const normalizedEmail = String(checkoutForm.email || "").trim();
+    const normalizedRecipientEmail = String(checkoutForm.recipientEmail || "").trim().toLowerCase();
     const normalizedAddress = String(checkoutForm.address || "").trim();
     const normalizedPromoCode = checkoutForm.promoCode.trim().toUpperCase();
     const normalizedPaymentReference = String(checkoutForm.paymentReference || "").trim();
@@ -4106,7 +4333,7 @@ export default function App() {
       nextFieldErrors.email = "Enter a valid email for card payment";
     }
 
-    if (checkoutForm.fulfillmentMethod !== "pickup" && normalizedAddress.length < 5) {
+    if (!isGiftOrder && checkoutForm.fulfillmentMethod !== "pickup" && normalizedAddress.length < 5) {
       nextFieldErrors.address = "Enter a delivery address";
     }
 
@@ -4119,6 +4346,33 @@ export default function App() {
 
     if (checkoutForm.paymentMethod === "Bank transfer" && normalizedPaymentReference.length < 3) {
       nextFieldErrors.paymentReference = "Add your transfer reference";
+    }
+
+    if (isGiftOrder) {
+      if (!accountToken) {
+        failCheckout("Sign in before you send a meal gift through PEM.");
+        return;
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedRecipientEmail)) {
+        nextFieldErrors.recipientEmail = "Enter your friend's PEM email";
+      } else if (normalizedRecipientEmail === String(accountUser.email || "").trim().toLowerCase()) {
+        nextFieldErrors.recipientEmail = "Use the normal checkout if you are ordering for yourself";
+      }
+
+      if (checkoutForm.fulfillmentMethod !== "delivery") {
+        failCheckout("Gift orders are delivered after your friend accepts them.", {}, "fulfillmentMethod");
+        return;
+      }
+
+      if (checkoutForm.paymentMethod !== "Bank transfer") {
+        failCheckout(
+          "Gift orders use bank transfer so your friend never gets asked to pay on delivery.",
+          {},
+          "paymentMethod",
+        );
+        return;
+      }
     }
 
     if (checkoutForm.paymentMethod === "Bank transfer" && !bankTransferReady) {
@@ -4160,8 +4414,7 @@ export default function App() {
 
     try {
       setCheckoutState({ loading: true, error: "" });
-
-      const result = await postJson("/api/orders", {
+      const payload = {
         customer: {
           ...checkoutForm,
           customerName: normalizedCustomerName,
@@ -4184,7 +4437,36 @@ export default function App() {
           discount,
           total,
         },
-      }, getUserAuthHeaders());
+      };
+
+      if (isGiftOrder) {
+        const giftResult = await postJson(
+          "/api/gifts",
+          {
+            ...payload,
+            recipientEmail: normalizedRecipientEmail,
+            giftMessage: String(checkoutForm.giftMessage || "").trim(),
+          },
+          getUserAuthHeaders(),
+        );
+        setOrderPlaced(
+          giftResult.message ||
+            `Gift ${giftResult.gift?.reference || ""} sent. Your friend can now accept it in PEM.`,
+        );
+        setReceiptOrder(null);
+        setTrackingState(initialTrackingState);
+        resetCheckoutAfterOrder();
+        setCheckoutState({ loading: false, error: "" });
+        if (accountToken) {
+          loadAccount();
+        }
+        window.setTimeout(() => {
+          setOrderPlaced("");
+        }, 5000);
+        return;
+      }
+
+      const result = await postJson("/api/orders", payload, getUserAuthHeaders());
 
       if (selectedPaymentIsCard) {
         const finalizeOrderState = (message) => {
@@ -4261,6 +4543,14 @@ export default function App() {
   }
 
   function handleWhatsAppOrder() {
+    if (isGiftOrder) {
+      setCheckoutState({
+        loading: false,
+        error: "Gift orders stay inside PEM so your friend can accept or decline them in-app.",
+      });
+      return;
+    }
+
     if (cartItems.length === 0) {
       setCheckoutState({ loading: false, error: "Add at least one meal before sending to WhatsApp." });
       return;
@@ -4758,7 +5048,7 @@ export default function App() {
                       type="tel"
                       value={signupForm.phone}
                       onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
+                        setSignupForm((previous) => ({ ...previous, phone: sanitizePhoneInput(event.target.value) }))
                       }
                       placeholder="0803 334 5161"
                     />
@@ -5158,7 +5448,7 @@ export default function App() {
                       type="tel"
                       value={signupForm.phone}
                       onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, phone: event.target.value }))
+                        setSignupForm((previous) => ({ ...previous, phone: sanitizePhoneInput(event.target.value) }))
                       }
                       placeholder="0803 334 5161"
                     />
@@ -5186,6 +5476,31 @@ export default function App() {
                       }
                       placeholder="At least 6 characters"
                     />
+                  </label>
+
+                  <label className="field">
+                    <span>Main delivery address</span>
+                    <input
+                      type="text"
+                      value={signupForm.address}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, address: event.target.value }))
+                      }
+                      placeholder="Street, area, city"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Main delivery address</span>
+                    <input
+                      type="text"
+                      value={signupForm.address}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, address: event.target.value }))
+                      }
+                      placeholder="Street, area, city"
+                    />
+                    <small className="cart-help">PEM will save this as your default delivery address.</small>
                   </label>
                 </div>
 
@@ -5416,6 +5731,153 @@ export default function App() {
                     <p className="account-helper">Save your most-used delivery addresses here.</p>
                   )}
                 </form>
+              </article>
+
+              <article className="account-card reveal reveal--up reveal--delay-1">
+                <div className="account-card__header">
+                  <div>
+                    <p className="eyebrow">Gift meals</p>
+                    <h3>Send and receive food gifts</h3>
+                  </div>
+                  <span>{pendingReceivedGifts.length} pending</span>
+                </div>
+
+                {giftActionState.error ? <p className="form-message form-message--error">{giftActionState.error}</p> : null}
+                {giftActionState.success ? <p className="form-message form-message--success">{giftActionState.success}</p> : null}
+
+                {(accountGifts.received || []).length > 0 ? (
+                  <>
+                    <p className="account-helper">Received gifts</p>
+                    <div className="account-list">
+                      {accountGifts.received.map((gift) => (
+                        <div key={gift.reference} className={gift.status === "pending_acceptance" ? "account-list__item is-unread" : "account-list__item"}>
+                          <div>
+                            <strong>{gift.senderName} sent you a meal gift</strong>
+                            <p>{gift.reference} • {gift.branchName || businessSettings.appName}</p>
+                            {gift.giftMessage ? <p>"{gift.giftMessage}"</p> : null}
+                            <p>{gift.deliveryZone || "Delivery area will be confirmed after acceptance."}</p>
+                            <p>Status: {String(gift.status || "pending_acceptance").replaceAll("_", " ")}</p>
+                          </div>
+                          <div className="account-list__actions">
+                            {gift.status === "pending_acceptance" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="button button--primary button--small"
+                                  onClick={() =>
+                                    giftActionState.openRef === gift.reference
+                                      ? setGiftActionState(initialGiftActionState)
+                                      : openGiftAcceptForm(gift)
+                                  }
+                                >
+                                  {giftActionState.openRef === gift.reference ? "Hide" : "Accept"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button button--ghost button--small"
+                                  onClick={() => handleGiftDecline(gift.reference)}
+                                  disabled={giftActionState.loadingRef === gift.reference}
+                                >
+                                  {giftActionState.loadingRef === gift.reference ? "Working..." : "Decline"}
+                                </button>
+                              </>
+                            ) : gift.orderReference ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => {
+                                  setTrackingReference(gift.orderReference);
+                                  navigateToPage("track");
+                                }}
+                              >
+                                Track Order
+                              </button>
+                            ) : null}
+                          </div>
+
+                          {giftActionState.openRef === gift.reference ? (
+                            <form
+                              className="service-form account-card__panel"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                handleGiftAccept(gift.reference);
+                              }}
+                            >
+                              <label className="field">
+                                <span>Current delivery address</span>
+                                <input
+                                  type="text"
+                                  value={giftActionState.address}
+                                  onChange={(event) =>
+                                    setGiftActionState((previous) => ({ ...previous, address: event.target.value }))
+                                  }
+                                  placeholder="Where PEM should bring this gift"
+                                />
+                              </label>
+
+                              <label className="field">
+                                <span>Nearest landmark</span>
+                                <input
+                                  type="text"
+                                  value={giftActionState.landmark}
+                                  onChange={(event) =>
+                                    setGiftActionState((previous) => ({ ...previous, landmark: event.target.value }))
+                                  }
+                                  placeholder="Bus stop, gate, popular shop"
+                                />
+                              </label>
+
+                              <label className="field">
+                                <span>Phone number</span>
+                                <input
+                                  type="tel"
+                                  value={giftActionState.phone}
+                                  onChange={(event) =>
+                                    setGiftActionState((previous) => ({
+                                      ...previous,
+                                      phone: sanitizePhoneInput(event.target.value),
+                                    }))
+                                  }
+                                  placeholder="0803 334 5161"
+                                />
+                              </label>
+
+                              <button
+                                type="submit"
+                                className="button button--primary button--small"
+                                disabled={giftActionState.loadingRef === gift.reference}
+                              >
+                                {giftActionState.loadingRef === gift.reference ? "Confirming..." : "Confirm Gift"}
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="account-helper">When another PEM user buys food for you, it will appear here for acceptance.</p>
+                )}
+
+                {(accountGifts.sent || []).length > 0 ? (
+                  <>
+                    <p className="account-helper">Sent gifts</p>
+                    <div className="account-list">
+                      {accountGifts.sent.map((gift) => (
+                        <div key={gift.reference} className="account-list__item">
+                          <div>
+                            <strong>Gift to {gift.recipientName || gift.recipientEmail}</strong>
+                            <p>{gift.reference} • {formatPrice(Number(gift.pricing?.total) || 0)}</p>
+                            <p>{gift.orderReference ? `Accepted as order ${gift.orderReference}` : "Waiting for your friend to respond."}</p>
+                          </div>
+                          <div className="account-list__actions">
+                            <span>Status: {String(gift.status || "pending_acceptance").replaceAll("_", " ")}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
               </article>
 
               <article className="account-card reveal reveal--up">
@@ -7729,6 +8191,30 @@ export default function App() {
                     <span>{selectedBranch?.address || businessSettings.address}</span>
                     <small>{selectedBranch?.note || businessSettings.contactPromise}</small>
                   </div>
+                  <div className="delivery-zone-card">
+                    <p className="delivery-zone-card__title">Who is this order for?</p>
+                    <div className="segmented-toggle">
+                      <button
+                        type="button"
+                        className={!isGiftOrder ? "is-active" : ""}
+                        onClick={() => handleCheckoutOrderTypeChange("self")}
+                      >
+                        For me
+                      </button>
+                      <button
+                        type="button"
+                        className={isGiftOrder ? "is-active" : ""}
+                        onClick={() => handleCheckoutOrderTypeChange("gift")}
+                      >
+                        Buy for a friend
+                      </button>
+                    </div>
+                    {isGiftOrder ? (
+                      <small>PEM will notify your friend in-app so they can accept or decline the gift.</small>
+                    ) : (
+                      <small>Use this when you want the meal delivered to your own order details.</small>
+                    )}
+                  </div>
                   <label className="field">
                     <span>Customer name</span>
                     <input
@@ -7782,6 +8268,46 @@ export default function App() {
                       <small className="cart-help">PEM needs your email to open secure card payment.</small>
                     ) : null}
                   </label>
+
+                  {isGiftOrder ? (
+                    <>
+                      <label className="field" data-checkout-field="recipientEmail">
+                        <span>Friend's PEM email</span>
+                        <input
+                          type="email"
+                          value={checkoutForm.recipientEmail}
+                          onChange={(event) =>
+                            setCheckoutForm((previous) => ({
+                              ...previous,
+                              recipientEmail: event.target.value,
+                            }))
+                          }
+                          onBlur={(event) => validateCheckoutField("recipientEmail", event.target.value)}
+                          placeholder="friend@example.com"
+                        />
+                        {checkoutFieldErrors.recipientEmail ? (
+                          <small className="field__error">{checkoutFieldErrors.recipientEmail}</small>
+                        ) : (
+                          <small className="cart-help">They must already have a PEM account to receive the gift.</small>
+                        )}
+                      </label>
+
+                      <label className="field">
+                        <span>Gift note (optional)</span>
+                        <textarea
+                          rows="2"
+                          value={checkoutForm.giftMessage}
+                          onChange={(event) =>
+                            setCheckoutForm((previous) => ({
+                              ...previous,
+                              giftMessage: event.target.value,
+                            }))
+                          }
+                          placeholder="A short note for your friend"
+                        />
+                      </label>
+                    </>
+                  ) : null}
                   </div>
 
                   <div className="checkout-group">
@@ -7850,37 +8376,49 @@ export default function App() {
                     ) : null}
                   </div>
 
-                  <label className="field">
-                    <span>Delivery address</span>
-                    <textarea
-                      rows="3"
-                      value={checkoutForm.address}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          address: event.target.value,
-                        }))
-                      }
-                      onBlur={(event) => validateCheckoutField("address", event.target.value)}
-                      placeholder="Street, area, city"
-                    />
-                    {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
-                  </label>
+                  {isGiftOrder ? (
+                    <div className="delivery-zone-card delivery-zone-card--muted">
+                      <p className="delivery-zone-card__title">Friend delivery flow</p>
+                      <strong>They choose the final address</strong>
+                      <small>
+                        PEM will notify your friend after payment. They can accept the gift and enter the address where they want it delivered.
+                      </small>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="field">
+                        <span>Delivery address</span>
+                        <textarea
+                          rows="3"
+                          value={checkoutForm.address}
+                          onChange={(event) =>
+                            setCheckoutForm((previous) => ({
+                              ...previous,
+                              address: event.target.value,
+                            }))
+                          }
+                          onBlur={(event) => validateCheckoutField("address", event.target.value)}
+                          placeholder="Street, area, city"
+                        />
+                        {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
+                      </label>
 
-                  <label className="field">
-                    <span>Nearest landmark</span>
-                    <input
-                      type="text"
-                      value={checkoutForm.landmark}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          landmark: event.target.value,
-                        }))
-                      }
-                      placeholder="Bus stop, estate gate, popular shop"
-                    />
-                  </label>
+                      <label className="field">
+                        <span>Nearest landmark</span>
+                        <input
+                          type="text"
+                          value={checkoutForm.landmark}
+                          onChange={(event) =>
+                            setCheckoutForm((previous) => ({
+                              ...previous,
+                              landmark: event.target.value,
+                            }))
+                          }
+                          placeholder="Bus stop, estate gate, popular shop"
+                        />
+                      </label>
+                    </>
+                  )}
                   </div>
 
                   <div className="checkout-group">
@@ -7894,6 +8432,7 @@ export default function App() {
                           key={option.label}
                           type="button"
                           className={checkoutForm.paymentMethod === option.label ? "payment-option is-active" : "payment-option"}
+                          disabled={isGiftOrder && option.label !== "Bank transfer"}
                           onClick={() =>
                             setCheckoutForm((previous) => ({
                               ...previous,
@@ -7907,6 +8446,9 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    {isGiftOrder ? (
+                      <small className="cart-help">Gift orders currently use bank transfer so the recipient is never asked to pay.</small>
+                    ) : null}
 
                   <label className="field">
                     <span>Payment reference</span>
@@ -8094,9 +8636,9 @@ export default function App() {
               type="button"
               className="button button--ghost button--full cart-button--secondary"
               onClick={handleWhatsAppOrder}
-              disabled={!isOnline}
+              disabled={!isOnline || isGiftOrder}
             >
-              Send Order To WhatsApp
+              {isGiftOrder ? "Gift Orders Stay In PEM" : "Send Order To WhatsApp"}
             </button>
             <button
               type="button"
