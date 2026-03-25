@@ -524,7 +524,7 @@ const initialCheckout = {
   fulfillmentMethod: "delivery",
   scheduledFor: "",
   deliveryZone: "gwarinpa",
-  paymentMethod: "Pay on arrival",
+  paymentMethod: "",
   paymentReference: "",
   promoCode: "",
 };
@@ -532,9 +532,8 @@ const initialCheckout = {
 const cardPaymentMethodLabel = "Pay with card";
 
 const checkoutPaymentOptions = [
-  { label: "Pay on arrival", icon: "ARR" },
-  { label: cardPaymentMethodLabel, icon: "CARD" },
-  { label: "Bank transfer", icon: "TRF" },
+  { label: cardPaymentMethodLabel, icon: "CARD", hint: "Secure online checkout" },
+  { label: "Bank transfer", icon: "BANK", hint: "Transfer and confirm inside PEM" },
 ];
 
 function isCardPaymentMethod(method) {
@@ -650,6 +649,7 @@ const initialBusinessSettings = {
   bankAccountName: "Precious Events Makers",
   bankAccountNumber: "0123456789",
   bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
+  cardPaymentEnabled: false,
   minimumOrder: 1500,
   promoCodesText: "",
   staffAdminsText: "",
@@ -1437,27 +1437,6 @@ function getEtaCountdown(order, deliveryZones) {
   return `${remainingMinutes} min remaining in the current delivery window.`;
 }
 
-function buildWhatsAppConfirmationUrlLegacy(order, settings, fallbackNumber) {
-  if (!order?.reference) {
-    return "";
-  }
-
-  const branchName = order.customer?.branchName || settings.appName || "PEM";
-  const lines = [
-    `Hello ${branchName}, I am confirming my PEM order.`,
-    "",
-    `Reference: ${order.reference}`,
-    `Name: ${order.customer?.customerName || "Customer"}`,
-    `Branch: ${branchName}`,
-    `Total: ${formatPrice(order.pricing?.total || 0)}`,
-    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
-    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
-  ];
-
-  const targetNumber = getWhatsAppPhone(settings) || String(fallbackNumber || "").replace(/\D/g, "");
-  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
-}
-
 function formatScheduleLabel(item) {
   const days = normalizeScheduleDays(item.availableDays);
   const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
@@ -1468,27 +1447,6 @@ function formatScheduleLabel(item) {
   const dayLabel = hasCustomDays ? days.map((day) => day.toUpperCase()).join(", ") : "Daily";
   const timeLabel = hasTimeWindow ? `${item.availableFrom} - ${item.availableUntil}` : "All day";
   return `${dayLabel} - ${timeLabel}`;
-}
-
-function buildWhatsAppConfirmationUrl(order, settings) {
-  if (!order?.reference) {
-    return "";
-  }
-
-  const branchName = order.customer?.branchName || settings.appName || "PEM";
-  const lines = [
-    `Hello ${branchName}, I am confirming my PEM order.`,
-    "",
-    `Reference: ${order.reference}`,
-    `Name: ${order.customer?.customerName || "Customer"}`,
-    `Branch: ${branchName}`,
-    `Total: ${formatPrice(order.pricing?.total || 0)}`,
-    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
-    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
-  ];
-
-  const targetNumber = getWhatsAppPhone(settings);
-  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
 }
 
 function StarRatingInputLegacy({ value, onChange }) {
@@ -1874,6 +1832,28 @@ export default function App() {
     () => getBusinessStatus(selectedBranch?.hours || businessSettings.businessHoursText, lagosNow),
     [businessSettings.businessHoursText, lagosNow, selectedBranch?.hours],
   );
+  const bankTransferReady = Boolean(
+    String(businessSettings.bankName || "").trim() &&
+      String(businessSettings.bankAccountName || "").trim() &&
+      String(businessSettings.bankAccountNumber || "").trim(),
+  );
+  const availableCheckoutPaymentOptions = useMemo(
+    () =>
+      checkoutPaymentOptions.filter((option) => {
+        if (option.label === cardPaymentMethodLabel) {
+          return !isGiftOrder && Boolean(businessSettings.cardPaymentEnabled);
+        }
+        if (option.label === "Bank transfer") {
+          return bankTransferReady;
+        }
+        return false;
+      }),
+    [bankTransferReady, businessSettings.cardPaymentEnabled, isGiftOrder],
+  );
+  const selectedPaymentIsCard = isCardPaymentMethod(checkoutForm.paymentMethod);
+  const selectedPaymentOption =
+    availableCheckoutPaymentOptions.find((option) => option.label === checkoutForm.paymentMethod) || null;
+  const hasAvailableInAppPayment = availableCheckoutPaymentOptions.length > 0;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item, lagosNow));
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
@@ -1918,7 +1898,7 @@ export default function App() {
 
     window.requestAnimationFrame(() => {
       const fieldElement = document.querySelector(
-        `[data-checkout-field="${field}"] input, [data-checkout-field="${field}"] textarea, [data-checkout-field="${field}"] select`,
+        `[data-checkout-field="${field}"] input, [data-checkout-field="${field}"] textarea, [data-checkout-field="${field}"] select, [data-checkout-field="${field}"] button`,
       );
 
       if (fieldElement instanceof HTMLElement) {
@@ -2100,6 +2080,7 @@ export default function App() {
           ...previous,
           customerName: savedCheckout.customerName || previous.customerName,
           phone: savedCheckout.phone || previous.phone,
+          email: savedCheckout.email || previous.email,
           orderType: savedCheckout.orderType || previous.orderType,
           recipientEmail: savedCheckout.recipientEmail || previous.recipientEmail,
           giftMessage: savedCheckout.giftMessage || previous.giftMessage,
@@ -2107,6 +2088,9 @@ export default function App() {
           deliveryZone: savedCheckout.deliveryZone || previous.deliveryZone,
           fulfillmentMethod: savedCheckout.fulfillmentMethod || previous.fulfillmentMethod,
           landmark: savedCheckout.landmark || previous.landmark,
+          scheduledFor: savedCheckout.scheduledFor || previous.scheduledFor,
+          paymentMethod: savedCheckout.paymentMethod || previous.paymentMethod,
+          promoCode: savedCheckout.promoCode || previous.promoCode,
         }));
       }
     } catch {
@@ -2181,6 +2165,7 @@ export default function App() {
         JSON.stringify({
           customerName: checkoutForm.customerName,
           phone: checkoutForm.phone,
+          email: checkoutForm.email,
           orderType: checkoutForm.orderType,
           recipientEmail: checkoutForm.recipientEmail,
           giftMessage: checkoutForm.giftMessage,
@@ -2188,6 +2173,9 @@ export default function App() {
           deliveryZone: checkoutForm.deliveryZone,
           fulfillmentMethod: checkoutForm.fulfillmentMethod,
           landmark: checkoutForm.landmark,
+          scheduledFor: checkoutForm.scheduledFor,
+          paymentMethod: checkoutForm.paymentMethod,
+          promoCode: checkoutForm.promoCode,
         }),
       );
     } catch {
@@ -2197,38 +2185,49 @@ export default function App() {
     checkoutForm.address,
     checkoutForm.customerName,
     checkoutForm.deliveryZone,
+    checkoutForm.email,
     checkoutForm.fulfillmentMethod,
     checkoutForm.giftMessage,
     checkoutForm.landmark,
     checkoutForm.orderType,
+    checkoutForm.paymentMethod,
     checkoutForm.phone,
+    checkoutForm.promoCode,
     checkoutForm.recipientEmail,
+    checkoutForm.scheduledFor,
   ]);
 
   useEffect(() => {
-    if (checkoutPaymentOptions.some((option) => option.label === checkoutForm.paymentMethod)) {
+    if (availableCheckoutPaymentOptions.some((option) => option.label === checkoutForm.paymentMethod)) {
       return;
     }
 
     setCheckoutForm((previous) => ({
       ...previous,
-      paymentMethod: initialCheckout.paymentMethod,
-      paymentReference: "",
+      paymentMethod: isGiftOrder
+        ? bankTransferReady
+          ? "Bank transfer"
+          : ""
+        : availableCheckoutPaymentOptions[0]?.label || "",
+      paymentReference:
+        (isGiftOrder ? bankTransferReady : availableCheckoutPaymentOptions[0]?.label === "Bank transfer")
+          ? previous.paymentReference
+          : "",
     }));
-  }, [checkoutForm.paymentMethod]);
+  }, [availableCheckoutPaymentOptions, bankTransferReady, checkoutForm.paymentMethod, isGiftOrder]);
 
   useEffect(() => {
     if (!isGiftOrder) {
       return;
     }
-    if (checkoutForm.paymentMethod === "Bank transfer") {
+    if (checkoutForm.paymentMethod === "Bank transfer" || !bankTransferReady) {
       return;
     }
     setCheckoutForm((previous) => ({
       ...previous,
       paymentMethod: "Bank transfer",
     }));
-  }, [checkoutForm.paymentMethod, isGiftOrder]);
+  }, [bankTransferReady, checkoutForm.paymentMethod, isGiftOrder]);
 
   useEffect(() => {
     if (!isGiftOrder || checkoutForm.fulfillmentMethod === "delivery") {
@@ -2661,7 +2660,6 @@ export default function App() {
       text: "Customers can move from the app to WhatsApp support without losing their order context.",
     },
   ];
-  const receiptWhatsAppUrl = receiptOrder ? buildWhatsAppConfirmationUrl(receiptOrder, businessSettings) : "";
   const receiptEtaCountdown = receiptOrder ? getEtaCountdown(receiptOrder, deliveryZones) : "";
   const trackingEtaCountdown = trackingState.order ? getEtaCountdown(trackingState.order, deliveryZones) : "";
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item, lagosNow));
@@ -2763,12 +2761,6 @@ export default function App() {
         `Hello ${businessSettings.appName}, I need help with my order.`,
       )}`
     : "#";
-  const selectedPaymentIsCard = isCardPaymentMethod(checkoutForm.paymentMethod);
-  const bankTransferReady = Boolean(
-    String(businessSettings.bankName || "").trim() &&
-      String(businessSettings.bankAccountName || "").trim() &&
-      String(businessSettings.bankAccountNumber || "").trim(),
-  );
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
   const pendingReceivedGifts = (accountGifts.received || []).filter((gift) => gift.status === "pending_acceptance");
   const loyaltyProgress = Math.min(
@@ -4204,8 +4196,9 @@ export default function App() {
       recipientEmail: nextType === "gift" ? previous.recipientEmail : "",
       giftMessage: nextType === "gift" ? previous.giftMessage : "",
       fulfillmentMethod: nextType === "gift" ? "delivery" : previous.fulfillmentMethod,
-      paymentMethod: nextType === "gift" ? "Bank transfer" : previous.paymentMethod,
-      paymentReference: nextType === "gift" || previous.paymentMethod === "Bank transfer" ? previous.paymentReference : "",
+      paymentMethod: nextType === "gift" ? (bankTransferReady ? "Bank transfer" : "") : previous.paymentMethod,
+      paymentReference:
+        nextType === "gift" || previous.paymentMethod === "Bank transfer" ? previous.paymentReference : "",
     }));
     setCheckoutFieldErrors((previous) => ({
       ...previous,
@@ -4357,6 +4350,11 @@ export default function App() {
       return;
     }
 
+    if (!hasAvailableInAppPayment) {
+      failCheckout("PEM is updating in-app payment options right now. Please try again shortly.");
+      return;
+    }
+
     if (!businessStatus.isOpen && !checkoutForm.scheduledFor) {
       failCheckout(
         `PEM is currently closed. ${businessStatus.label}. Schedule this order for later to continue.`,
@@ -4376,6 +4374,10 @@ export default function App() {
 
     if (selectedPaymentIsCard && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail || accountUser.email || "")) {
       nextFieldErrors.email = "Enter a valid email for card payment";
+    }
+
+    if (!checkoutForm.paymentMethod) {
+      nextFieldErrors.paymentMethod = "Choose how you want to pay";
     }
 
     if (!isGiftOrder && checkoutForm.fulfillmentMethod !== "pickup" && normalizedAddress.length < 5) {
@@ -4422,14 +4424,14 @@ export default function App() {
 
     if (checkoutForm.paymentMethod === "Bank transfer" && !bankTransferReady) {
       failCheckout(
-        "PEM has not finished setting up bank transfer details yet. Please use pay on arrival or contact the team.",
+        "PEM has not finished setting up bank transfer details yet. Please choose card payment instead.",
       );
       return;
     }
 
     const firstInvalidField = Object.keys(nextFieldErrors).find((field) => nextFieldErrors[field]);
     if (firstInvalidField) {
-      failCheckout("Please complete the highlighted checkout fields before placing your order.", nextFieldErrors, firstInvalidField);
+      failCheckout("A few checkout details still need your attention.", nextFieldErrors, firstInvalidField);
       return;
     }
 
@@ -4585,70 +4587,6 @@ export default function App() {
     } catch (error) {
       failCheckout(error.message || "PEM could not place this order right now. Please try again.");
     }
-  }
-
-  function handleWhatsAppOrder() {
-    if (isGiftOrder) {
-      setCheckoutState({
-        loading: false,
-        error: "Gift orders stay inside PEM so your friend can accept or decline them in-app.",
-      });
-      return;
-    }
-
-    if (cartItems.length === 0) {
-      setCheckoutState({ loading: false, error: "Add at least one meal before sending to WhatsApp." });
-      return;
-    }
-
-    if (!checkoutForm.customerName || !checkoutForm.phone) {
-      setCheckoutState({
-        loading: false,
-        error: "Add your name and phone number before sending your cart to WhatsApp.",
-      });
-      return;
-    }
-
-    const itemLines = cartItems.map((item) => {
-      const noteText = item.note ? ` | Note: ${item.note}` : "";
-      return `- ${item.name} x${item.quantity}${noteText}`;
-    });
-
-    const message = [
-      `Hello ${businessSettings.appName}, I want to place an order.`,
-      "",
-      `Name: ${checkoutForm.customerName}`,
-      `Branch: ${selectedBranch?.label || businessSettings.appName}`,
-      `Phone: ${sanitizePhoneInput(checkoutForm.phone)}`,
-      `Address: ${checkoutForm.address || "Will confirm on WhatsApp"}`,
-      `Landmark: ${checkoutForm.landmark || "Will confirm on WhatsApp"}`,
-      `Area: ${selectedDeliveryZone.label}`,
-      `Estimated delivery time: ${selectedDeliveryZone.eta}`,
-      `Payment: ${checkoutForm.paymentMethod}`,
-      `Payment reference: ${checkoutForm.paymentReference || "Will confirm later"}`,
-      `Promo code: ${checkoutForm.promoCode || "None"}`,
-      `Fulfillment: ${checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : "Delivery"}`,
-      "",
-      "Order items:",
-      ...itemLines,
-      "",
-      `Subtotal: ${formatPrice(subtotal)}`,
-      `Delivery: ${formatPrice(delivery)}`,
-      `Discount: ${formatPrice(discount)}`,
-      `Total: ${formatPrice(total)}`,
-    ].join("\n");
-
-    const targetPhone = getWhatsAppPhone(businessSettings);
-    if (!targetPhone) {
-      setCheckoutState({
-        loading: false,
-        error: "PEM WhatsApp support is not configured right now.",
-      });
-      return;
-    }
-    setOrderPlaced("Opening WhatsApp with your PEM order summary.");
-    window.setTimeout(() => setOrderPlaced(""), 3500);
-    window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
   async function copyBankTransferDetail(label, value) {
@@ -5486,16 +5424,6 @@ export default function App() {
                 >
                   Edit Order Details
                 </button>
-                {receiptWhatsAppUrl ? (
-                  <a
-                    href={receiptWhatsAppUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="button button--ghost"
-                  >
-                    Confirm On WhatsApp
-                  </a>
-                ) : null}
                 <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
                   Dismiss
                 </button>
@@ -8299,330 +8227,450 @@ export default function App() {
                 ))}
 
                 <div className="checkout-fields">
-                  <p className="checkout-fields__title">Delivery details</p>
-                  <p className="cart-help">Minimum order: {formatPrice(Number(businessSettings.minimumOrder || 0))}</p>
+                  <div className="checkout-shell-header">
+                    <div>
+                      <p className="checkout-fields__title">Checkout</p>
+                      <h3>{isGiftOrder ? "Send this order as a gift" : "Finish this order inside PEM"}</h3>
+                    </div>
+                    <div className="checkout-shell-header__meta">
+                      <span>{totalItems} item{totalItems === 1 ? "" : "s"}</span>
+                      <strong>{formatPrice(total)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="checkout-overview">
+                    <div className="delivery-zone-card delivery-zone-card--accent">
+                      <p className="delivery-zone-card__title">Estimated handoff</p>
+                      <strong>{deliveryEtaLabel}</strong>
+                      <span>
+                        {checkoutForm.fulfillmentMethod === "pickup"
+                          ? "PEM will confirm when your meal is ready for collection."
+                          : "Your branch, area, and kitchen volume shape the final timing."}
+                      </span>
+                    </div>
+                    <div className="delivery-zone-card">
+                      <p className="delivery-zone-card__title">Order summary</p>
+                      <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
+                      <span>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup order" : selectedDeliveryZone.label}</span>
+                      <small>{selectedPaymentOption?.label || "Choose a payment option below"}</small>
+                    </div>
+                  </div>
+
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Contact</strong>
-                      <span>Who PEM should reach</span>
+                      <span>Who PEM should reach for this order</span>
                     </div>
-                  <div className="delivery-zone-card delivery-zone-card--accent">
-                    <p className="delivery-zone-card__title">Estimated handoff</p>
-                    <strong>{deliveryEtaLabel}</strong>
-                    <span>
-                      {checkoutForm.fulfillmentMethod === "pickup"
-                        ? "PEM will text or call when your meal is ready for collection."
-                        : "Timing depends on your branch, your area, and kitchen volume."}
-                    </span>
-                  </div>
-                  <div className="delivery-zone-card">
-                    <p className="delivery-zone-card__title">Chosen branch</p>
-                    <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
-                    <span>{selectedBranch?.address || businessSettings.address}</span>
-                    <small>{selectedBranch?.note || businessSettings.contactPromise}</small>
-                  </div>
-                  <div className="delivery-zone-card">
-                    <p className="delivery-zone-card__title">Who is this order for?</p>
-                    <div className="segmented-toggle">
-                      <button
-                        type="button"
-                        className={!isGiftOrder ? "is-active" : ""}
-                        onClick={() => handleCheckoutOrderTypeChange("self")}
-                      >
-                        For me
-                      </button>
-                      <button
-                        type="button"
-                        className={isGiftOrder ? "is-active" : ""}
-                        onClick={() => handleCheckoutOrderTypeChange("gift")}
-                      >
-                        Buy for a friend
-                      </button>
+                    <div className="delivery-zone-card">
+                      <p className="delivery-zone-card__title">Who is this order for?</p>
+                      <div className="segmented-toggle">
+                        <button
+                          type="button"
+                          className={!isGiftOrder ? "is-active" : ""}
+                          onClick={() => handleCheckoutOrderTypeChange("self")}
+                        >
+                          For me
+                        </button>
+                        <button
+                          type="button"
+                          className={isGiftOrder ? "is-active" : ""}
+                          onClick={() => handleCheckoutOrderTypeChange("gift")}
+                        >
+                          Buy for a friend
+                        </button>
+                      </div>
+                      <small>
+                        {isGiftOrder
+                          ? "PEM will notify your friend in-app so they can accept or decline the gift."
+                          : "Use your own delivery details and complete payment here in PEM."}
+                      </small>
                     </div>
-                    {isGiftOrder ? (
-                      <small>PEM will notify your friend in-app so they can accept or decline the gift.</small>
-                    ) : (
-                      <small>Use this when you want the meal delivered to your own order details.</small>
-                    )}
-                  </div>
-                  <label className="field">
-                    <span>Customer name</span>
-                    <input
-                      type="text"
-                      value={checkoutForm.customerName}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          customerName: event.target.value,
-                        }))
-                      }
-                      onBlur={(event) => validateCheckoutField("customerName", event.target.value)}
-                      placeholder="Your full name"
-                    />
-                    {checkoutFieldErrors.customerName ? <small className="field__error">{checkoutFieldErrors.customerName}</small> : null}
-                  </label>
 
-                  <label className="field">
-                    <span>Phone number</span>
-                    <input
-                      type="tel"
-                      value={checkoutForm.phone}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          phone: sanitizePhoneInput(event.target.value),
-                        }))
-                      }
-                      onBlur={(event) => validateCheckoutField("phone", event.target.value)}
-                      placeholder="0803 334 5161"
-                    />
-                    {checkoutFieldErrors.phone ? <small className="field__error">{checkoutFieldErrors.phone}</small> : null}
-                  </label>
-
-                  <label className="field">
-                    <span>{selectedPaymentIsCard ? "Email address" : "Email address (optional)"}</span>
-                    <input
-                      type="email"
-                      value={checkoutForm.email}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          email: event.target.value,
-                        }))
-                      }
-                      onBlur={(event) => validateCheckoutField("email", event.target.value)}
-                      placeholder="you@example.com"
-                    />
-                    {checkoutFieldErrors.email ? <small className="field__error">{checkoutFieldErrors.email}</small> : null}
-                    {selectedPaymentIsCard && !checkoutFieldErrors.email ? (
-                      <small className="cart-help">PEM needs your email to open secure card payment.</small>
-                    ) : null}
-                  </label>
-
-                  {isGiftOrder ? (
-                    <>
-                      <label className="field" data-checkout-field="recipientEmail">
-                        <span>Friend's PEM email</span>
+                    <div className="checkout-grid checkout-grid--two">
+                      <label className="field" data-checkout-field="customerName">
+                        <span>Customer name</span>
                         <input
-                          type="email"
-                          value={checkoutForm.recipientEmail}
+                          type="text"
+                          autoComplete="name"
+                          value={checkoutForm.customerName}
                           onChange={(event) =>
                             setCheckoutForm((previous) => ({
                               ...previous,
-                              recipientEmail: event.target.value,
+                              customerName: event.target.value,
                             }))
                           }
-                          onBlur={(event) => validateCheckoutField("recipientEmail", event.target.value)}
-                          placeholder="friend@example.com"
+                          onBlur={(event) => validateCheckoutField("customerName", event.target.value)}
+                          placeholder="Your full name"
                         />
-                        {checkoutFieldErrors.recipientEmail ? (
-                          <small className="field__error">{checkoutFieldErrors.recipientEmail}</small>
-                        ) : (
-                          <small className="cart-help">They must already have a PEM account to receive the gift.</small>
-                        )}
+                        {checkoutFieldErrors.customerName ? <small className="field__error">{checkoutFieldErrors.customerName}</small> : null}
                       </label>
 
-                      <label className="field">
-                        <span>Gift note (optional)</span>
-                        <textarea
-                          rows="2"
-                          value={checkoutForm.giftMessage}
+                      <label className="field" data-checkout-field="phone">
+                        <span>Phone number</span>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          value={checkoutForm.phone}
                           onChange={(event) =>
                             setCheckoutForm((previous) => ({
                               ...previous,
-                              giftMessage: event.target.value,
+                              phone: sanitizePhoneInput(event.target.value),
                             }))
                           }
-                          placeholder="A short note for your friend"
+                          onBlur={(event) => validateCheckoutField("phone", event.target.value)}
+                          placeholder="0803 334 5161"
                         />
+                        {checkoutFieldErrors.phone ? <small className="field__error">{checkoutFieldErrors.phone}</small> : null}
                       </label>
-                    </>
-                  ) : null}
+                    </div>
+
+                    <label className="field" data-checkout-field="email">
+                      <span>Email address</span>
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        value={checkoutForm.email}
+                        onChange={(event) =>
+                          setCheckoutForm((previous) => ({
+                            ...previous,
+                            email: event.target.value,
+                          }))
+                        }
+                        onBlur={(event) => validateCheckoutField("email", event.target.value)}
+                        placeholder="you@example.com"
+                      />
+                      {checkoutFieldErrors.email ? <small className="field__error">{checkoutFieldErrors.email}</small> : null}
+                      {selectedPaymentIsCard && !checkoutFieldErrors.email ? (
+                        <small className="cart-help">PEM uses this email for secure card payment.</small>
+                      ) : null}
+                    </label>
+
+                    {isGiftOrder ? (
+                      <div className="checkout-grid">
+                        <label className="field" data-checkout-field="recipientEmail">
+                          <span>Friend's PEM email</span>
+                          <input
+                            type="email"
+                            autoComplete="email"
+                            value={checkoutForm.recipientEmail}
+                            onChange={(event) =>
+                              setCheckoutForm((previous) => ({
+                                ...previous,
+                                recipientEmail: event.target.value,
+                              }))
+                            }
+                            onBlur={(event) => validateCheckoutField("recipientEmail", event.target.value)}
+                            placeholder="friend@example.com"
+                          />
+                          {checkoutFieldErrors.recipientEmail ? (
+                            <small className="field__error">{checkoutFieldErrors.recipientEmail}</small>
+                          ) : (
+                            <small className="cart-help">They must already have a PEM account.</small>
+                          )}
+                        </label>
+
+                        <label className="field">
+                          <span>Gift note</span>
+                          <textarea
+                            rows="2"
+                            value={checkoutForm.giftMessage}
+                            onChange={(event) =>
+                              setCheckoutForm((previous) => ({
+                                ...previous,
+                                giftMessage: event.target.value,
+                              }))
+                            }
+                            placeholder="A short note for your friend"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Delivery</strong>
-                      <span>Where and when the meal should get to you</span>
+                      <span>Choose the handoff style and where PEM should go</span>
                     </div>
-                  <label className="field">
-                    <span>Fulfillment</span>
-                    <select
-                      value={checkoutForm.fulfillmentMethod}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          fulfillmentMethod: event.target.value,
-                        }))
-                      }
-                    >
-                      <option value="delivery">Delivery</option>
-                      <option value="pickup">Pickup</option>
-                    </select>
-                  </label>
-
-                  <label className="field">
-                    <span>Schedule for later</span>
-                    <input
-                      type="datetime-local"
-                      value={checkoutForm.scheduledFor}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          scheduledFor: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Delivery area</span>
-                    <select
-                      disabled={checkoutForm.fulfillmentMethod === "pickup"}
-                      value={checkoutForm.deliveryZone}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          deliveryZone: event.target.value,
-                        }))
-                      }
-                    >
-                      {deliveryZones.map((zone) => (
-                        <option key={zone.id} value={zone.id}>
-                          {`${zone.label} - ${formatPrice(zone.fee)} - ${zone.eta}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="delivery-zone-card">
-                    <p className="delivery-zone-card__title">
-                      {checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : "Area delivery estimate"}
-                    </p>
-                    <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "No delivery fee" : formatPrice(selectedDeliveryZone.fee)}</strong>
-                    <span>{checkoutForm.fulfillmentMethod === "pickup" ? "PEM will confirm your pickup time." : selectedDeliveryZone.eta}</span>
-                    {checkoutForm.fulfillmentMethod !== "pickup" && (selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom") ? (
-                      <small>PEM will confirm final timing with you after the order is received.</small>
-                    ) : null}
-                  </div>
-
-                  {isGiftOrder ? (
-                    <div className="delivery-zone-card delivery-zone-card--muted">
-                      <p className="delivery-zone-card__title">Friend delivery flow</p>
-                      <strong>They choose the final address</strong>
-                      <small>
-                        PEM will notify your friend after payment. They can accept the gift and enter the address where they want it delivered.
-                      </small>
-                    </div>
-                  ) : (
-                    <>
-                      <label className="field">
-                        <span>Delivery address</span>
-                        <textarea
-                          rows="3"
-                          value={checkoutForm.address}
+                    <div className="checkout-grid checkout-grid--two">
+                      <label className="field" data-checkout-field="fulfillmentMethod">
+                        <span>Fulfillment</span>
+                        <select
+                          value={checkoutForm.fulfillmentMethod}
                           onChange={(event) =>
                             setCheckoutForm((previous) => ({
                               ...previous,
-                              address: event.target.value,
+                              fulfillmentMethod: event.target.value,
                             }))
                           }
-                          onBlur={(event) => validateCheckoutField("address", event.target.value)}
-                          placeholder="Street, area, city"
-                        />
-                        {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
+                        >
+                          <option value="delivery">Delivery</option>
+                          <option value="pickup">Pickup</option>
+                        </select>
                       </label>
 
-                      <label className="field">
-                        <span>Nearest landmark</span>
+                      <label className="field" data-checkout-field="scheduledFor">
+                        <span>Schedule for later</span>
                         <input
-                          type="text"
-                          value={checkoutForm.landmark}
+                          type="datetime-local"
+                          value={checkoutForm.scheduledFor}
                           onChange={(event) =>
                             setCheckoutForm((previous) => ({
                               ...previous,
-                              landmark: event.target.value,
+                              scheduledFor: event.target.value,
                             }))
                           }
-                          placeholder="Bus stop, estate gate, popular shop"
                         />
+                        {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
                       </label>
-                    </>
-                  )}
+                    </div>
+
+                    <label className="field" data-checkout-field="deliveryZone">
+                      <span>Delivery area</span>
+                      <select
+                        disabled={checkoutForm.fulfillmentMethod === "pickup"}
+                        value={checkoutForm.deliveryZone}
+                        onChange={(event) =>
+                          setCheckoutForm((previous) => ({
+                            ...previous,
+                            deliveryZone: event.target.value,
+                          }))
+                        }
+                      >
+                        {deliveryZones.map((zone) => (
+                          <option key={zone.id} value={zone.id}>
+                            {`${zone.label} - ${formatPrice(zone.fee)} - ${zone.eta}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="delivery-zone-card">
+                      <p className="delivery-zone-card__title">
+                        {checkoutForm.fulfillmentMethod === "pickup" ? "Pickup window" : "Area delivery estimate"}
+                      </p>
+                      <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "No delivery fee" : formatPrice(selectedDeliveryZone.fee)}</strong>
+                      <span>{checkoutForm.fulfillmentMethod === "pickup" ? "PEM will confirm your pickup time." : selectedDeliveryZone.eta}</span>
+                      {checkoutForm.fulfillmentMethod !== "pickup" && (selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom") ? (
+                        <small>PEM will confirm the final timing after the order is received.</small>
+                      ) : null}
+                    </div>
+
+                    {isGiftOrder ? (
+                      <div className="delivery-zone-card">
+                        <p className="delivery-zone-card__title">Friend delivery flow</p>
+                        <strong>They choose the final address</strong>
+                        <small>PEM will notify your friend after payment so they can accept the gift and enter where it should go.</small>
+                      </div>
+                    ) : (
+                      <>
+                        {accountUser.savedAddresses.length > 0 ? (
+                          <div className="checkout-address-shortcuts">
+                            <span>Saved places</span>
+                            <div className="checkout-address-shortcuts__list">
+                              {accountUser.savedAddresses.slice(0, 3).map((savedAddress) => (
+                                <button
+                                  key={savedAddress}
+                                  type="button"
+                                  className={checkoutForm.address === savedAddress ? "checkout-chip is-active" : "checkout-chip"}
+                                  onClick={() =>
+                                    setCheckoutForm((previous) => ({
+                                      ...previous,
+                                      address: savedAddress,
+                                    }))
+                                  }
+                                >
+                                  {savedAddress}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <label className="field" data-checkout-field="address">
+                          <span>Delivery address</span>
+                          <textarea
+                            rows="3"
+                            autoComplete="street-address"
+                            value={checkoutForm.address}
+                            onChange={(event) =>
+                              setCheckoutForm((previous) => ({
+                                ...previous,
+                                address: event.target.value,
+                              }))
+                            }
+                            onBlur={(event) => validateCheckoutField("address", event.target.value)}
+                            placeholder="Street, area, city"
+                          />
+                          {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
+                        </label>
+
+                        <label className="field">
+                          <span>Nearest landmark</span>
+                          <input
+                            type="text"
+                            value={checkoutForm.landmark}
+                            onChange={(event) =>
+                              setCheckoutForm((previous) => ({
+                                ...previous,
+                                landmark: event.target.value,
+                              }))
+                            }
+                            placeholder="Bus stop, estate gate, popular shop"
+                          />
+                        </label>
+                      </>
+                    )}
                   </div>
 
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Payment</strong>
-                      <span>Choose how you want to pay</span>
+                      <span>Choose how you want to complete payment in PEM</span>
                     </div>
-<div className="payment-options">
-                      {checkoutPaymentOptions.map((option) => (
-                        <button
-                          key={option.label}
-                          type="button"
-                          className={checkoutForm.paymentMethod === option.label ? "payment-option is-active" : "payment-option"}
-                          disabled={isGiftOrder && option.label !== "Bank transfer"}
-                          onClick={() =>
-                            setCheckoutForm((previous) => ({
-                              ...previous,
-                              paymentMethod: option.label,
-                              paymentReference: option.label === "Bank transfer" ? previous.paymentReference : "",
-                            }))
-                          }
-                        >
-                          <span aria-hidden="true">{option.icon}</span>
-                          <strong>{option.label}</strong>
-                        </button>
-                      ))}
-                    </div>
-                    {isGiftOrder ? (
-                      <small className="cart-help">Gift orders currently use bank transfer so the recipient is never asked to pay.</small>
+                    {hasAvailableInAppPayment ? (
+                      <div className="payment-options" data-checkout-field="paymentMethod">
+                        {availableCheckoutPaymentOptions.map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            className={checkoutForm.paymentMethod === option.label ? "payment-option is-active" : "payment-option"}
+                            onClick={() =>
+                              setCheckoutForm((previous) => ({
+                                ...previous,
+                                paymentMethod: option.label,
+                                paymentReference: option.label === "Bank transfer" ? previous.paymentReference : "",
+                              }))
+                            }
+                          >
+                            <span aria-hidden="true">{option.icon}</span>
+                            <strong>{option.label}</strong>
+                            <small>{option.hint}</small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="delivery-zone-card">
+                        <p className="delivery-zone-card__title">Payment setup</p>
+                        <strong>No payment option is ready yet</strong>
+                        <small>PEM is updating in-app payment methods. Please try again shortly.</small>
+                      </div>
+                    )}
+                    {checkoutFieldErrors.paymentMethod ? <small className="field__error">{checkoutFieldErrors.paymentMethod}</small> : null}
+                    {isGiftOrder && bankTransferReady ? (
+                      <small className="cart-help">Gift orders use bank transfer so the recipient is never asked to pay.</small>
                     ) : null}
 
-                  <label className="field">
-                    <span>Payment reference</span>
-                    <input
-                      type="text"
-                      disabled={checkoutForm.paymentMethod !== "Bank transfer"}
-                      value={checkoutForm.paymentReference}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          paymentReference: event.target.value,
-                        }))
-                      }
-                      placeholder="Bank transfer reference"
-                    />
-                  </label>
+                    {checkoutForm.paymentMethod === "Bank transfer" ? (
+                      bankTransferReady ? (
+                        <div className="delivery-zone-card transfer-card">
+                          <div className="transfer-card__header">
+                            <div>
+                              <p className="delivery-zone-card__title">Bank transfer details</p>
+                              <strong>{businessSettings.bankName}</strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() =>
+                                copyBankTransferDetail(
+                                  "bank details",
+                                  `${businessSettings.bankName}\n${businessSettings.bankAccountName}\n${businessSettings.bankAccountNumber}`,
+                                )
+                              }
+                            >
+                              Copy all
+                            </button>
+                          </div>
+                          <div className="transfer-card__row">
+                            <div>
+                              <span className="transfer-card__label">Account name</span>
+                              <strong className="transfer-card__value">{businessSettings.bankAccountName}</strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => copyBankTransferDetail("account name", businessSettings.bankAccountName)}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <div className="transfer-card__row">
+                            <div>
+                              <span className="transfer-card__label">Account number</span>
+                              <strong className="transfer-card__value">{businessSettings.bankAccountNumber}</strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => copyBankTransferDetail("account number", businessSettings.bankAccountNumber)}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <small>{businessSettings.bankInstructions}</small>
 
-                  <label className="field">
-                    <span>Promo code</span>
-                    <input
-                      type="text"
-                      value={checkoutForm.promoCode}
-                      onChange={(event) =>
-                        setCheckoutForm((previous) => ({
-                          ...previous,
-                          promoCode: event.target.value.toUpperCase(),
-                        }))
-                      }
-                      placeholder="WELCOME10"
-                    />
-                    {checkoutForm.promoCode.trim() ? (
-                      <small className={promoValidationState.valid ? "field__success" : promoValidationState.error ? "field__error" : "cart-help"}>
-                        {promoValidationState.loading
-                          ? "Validating promo code..."
-                          : promoValidationState.valid
-                            ? `Promo applied: -${formatPrice(promoValidationState.amount)}`
-                            : promoValidationState.error
-                              ? promoValidationState.error
-                              : promoValidationState.minimumOrder
-                                ? `Promo needs a minimum subtotal of ${formatPrice(promoValidationState.minimumOrder)}.`
-                        : "That promo code is not valid right now."}
-                      </small>
+                          <label className="field" data-checkout-field="paymentReference">
+                            <span>Transfer reference</span>
+                            <input
+                              type="text"
+                              value={checkoutForm.paymentReference}
+                              onChange={(event) =>
+                                setCheckoutForm((previous) => ({
+                                  ...previous,
+                                  paymentReference: event.target.value,
+                                }))
+                              }
+                              placeholder="Paste your transfer reference"
+                            />
+                            {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="delivery-zone-card">
+                          <p className="delivery-zone-card__title">Bank transfer details</p>
+                          <strong>Bank transfer is not ready yet</strong>
+                          <small>PEM still needs active bank details before transfer checkout can continue.</small>
+                        </div>
+                      )
                     ) : null}
-                  </label>
+
+                    {selectedPaymentIsCard ? (
+                      <div className="delivery-zone-card">
+                        <p className="delivery-zone-card__title">Card payment</p>
+                        <strong>Secure online checkout</strong>
+                        <small>PEM will open a secure card payment page as the next step.</small>
+                      </div>
+                    ) : null}
+
+                    <label className="field" data-checkout-field="promoCode">
+                      <span>Promo code</span>
+                      <input
+                        type="text"
+                        value={checkoutForm.promoCode}
+                        onChange={(event) =>
+                          setCheckoutForm((previous) => ({
+                            ...previous,
+                            promoCode: event.target.value.toUpperCase(),
+                          }))
+                        }
+                        placeholder="WELCOME10"
+                      />
+                      {checkoutForm.promoCode.trim() ? (
+                        <small className={promoValidationState.valid ? "field__success" : promoValidationState.error ? "field__error" : "cart-help"}>
+                          {promoValidationState.loading
+                            ? "Validating promo code..."
+                            : promoValidationState.valid
+                              ? `Promo applied: -${formatPrice(promoValidationState.amount)}`
+                              : promoValidationState.error
+                                ? promoValidationState.error
+                                : promoValidationState.minimumOrder
+                                  ? `Promo needs a minimum subtotal of ${formatPrice(promoValidationState.minimumOrder)}.`
+                                  : "That promo code is not valid right now."}
+                        </small>
+                      ) : null}
+                    </label>
                   {accountUser.birthdayIsToday && !isGiftOrder ? (
                     <div className="delivery-zone-card delivery-zone-card--accent">
                       <p className="delivery-zone-card__title">Birthday reward</p>
@@ -8639,73 +8687,6 @@ export default function App() {
                     </div>
                   ) : null}
                   </div>
-
-                  {checkoutForm.paymentMethod === "Bank transfer" ? (
-                    bankTransferReady ? (
-                      <div className="delivery-zone-card transfer-card">
-                        <div className="transfer-card__header">
-                          <div>
-                            <p className="delivery-zone-card__title">Bank transfer details</p>
-                            <strong>{businessSettings.bankName}</strong>
-                          </div>
-                          <button
-                            type="button"
-                            className="button button--ghost button--small"
-                            onClick={() =>
-                              copyBankTransferDetail(
-                                "bank details",
-                                `${businessSettings.bankName}\n${businessSettings.bankAccountName}\n${businessSettings.bankAccountNumber}`,
-                              )
-                            }
-                          >
-                            Copy all
-                          </button>
-                        </div>
-                        <div className="transfer-card__row">
-                          <div>
-                            <span className="transfer-card__label">Account name</span>
-                            <strong className="transfer-card__value">{businessSettings.bankAccountName}</strong>
-                          </div>
-                          <button
-                            type="button"
-                            className="button button--ghost button--small"
-                            onClick={() => copyBankTransferDetail("account name", businessSettings.bankAccountName)}
-                          >
-                            Copy
-                          </button>
-                        </div>
-                        <div className="transfer-card__row">
-                          <div>
-                            <span className="transfer-card__label">Account number</span>
-                            <strong className="transfer-card__value">{businessSettings.bankAccountNumber}</strong>
-                          </div>
-                          <button
-                            type="button"
-                            className="button button--ghost button--small"
-                            onClick={() => copyBankTransferDetail("account number", businessSettings.bankAccountNumber)}
-                          >
-                            Copy
-                          </button>
-                        </div>
-                        <small>{businessSettings.bankInstructions}</small>
-                      </div>
-                    ) : (
-                      <div className="delivery-zone-card">
-                        <p className="delivery-zone-card__title">Bank transfer details</p>
-                        <strong>Bank transfer not set yet</strong>
-                        <small>PEM has not added transfer details in Admin. Use pay on arrival or contact the team.</small>
-                      </div>
-                    )
-                  ) : null}
-
-                  {selectedPaymentIsCard ? (
-                    <div className="delivery-zone-card">
-                      <p className="delivery-zone-card__title">Card payment</p>
-                      <strong>Secure online checkout</strong>
-                      <small>PEM will open a secure card payment page after your order is created.</small>
-                    </div>
-                  ) : null}
-                </div>
 
                 {smartCartSuggestions.length > 0 ? (
                   <div className="cart-suggestions">
@@ -8731,6 +8712,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : null}
+                </div>
               </>
             )}
           </div>
@@ -8740,22 +8722,9 @@ export default function App() {
               <p className="form-message form-message--error">{checkoutState.error}</p>
             ) : null}
 
-            <p className="cart-help">
-              Prefer chat? Send this cart to PEM on WhatsApp and continue the order there.
-            </p>
             <div className="cart-footer__highlights">
               <span>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup ready confirmation by PEM" : deliveryEtaLabel}</span>
-              <span>{selectedBranch?.label || `${businessSettings.appName} Branch`}</span>
-            </div>
-            <div className="cart-order-summary">
-              <div>
-                <span>Branch</span>
-                <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
-              </div>
-              <div>
-                <span>Area</span>
-                <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup" : selectedDeliveryZone.label}</strong>
-              </div>
+              <span>{selectedPaymentOption?.label || "Payment setup"}</span>
             </div>
 
             <div className="cart-total">
@@ -8779,25 +8748,21 @@ export default function App() {
 
             <button
               type="button"
-              className="button button--ghost button--full cart-button--secondary"
-              onClick={handleWhatsAppOrder}
-              disabled={!isOnline || isGiftOrder}
-            >
-              {isGiftOrder ? "Gift Orders Stay In PEM" : "Send Order To WhatsApp"}
-            </button>
-            <button
-              type="button"
               className="button button--primary button--full"
               onClick={handlePlaceOrder}
-              disabled={checkoutState.loading || !isOnline}
+              disabled={checkoutState.loading || !isOnline || !hasAvailableInAppPayment}
             >
               {checkoutState.loading
                 ? selectedPaymentIsCard
                   ? "Opening secure card payment..."
                   : "Submitting order..."
-                : selectedPaymentIsCard
-                  ? "Proceed to card payment"
-                  : "Place Order"}
+                : !hasAvailableInAppPayment
+                  ? "Payment unavailable"
+                  : isGiftOrder
+                    ? "Send gift request"
+                    : selectedPaymentIsCard
+                      ? "Pay securely now"
+                      : "I have sent the transfer"}
             </button>
           </div>
         </div>
