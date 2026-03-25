@@ -760,8 +760,9 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
 }));
 
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
-  const { fullName, email, password, phone, referralCode } = request.body || {};
+  const { fullName, email, password, phone, address, referralCode } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedAddress = String(address || "").trim();
 
   if (!fullName || !normalizedEmail || !password) {
     return response.status(400).json({ error: "Full name, email, and password are required." });
@@ -783,7 +784,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     fullName: String(fullName).trim(),
     phone: String(phone || "").trim(),
     favoriteItemIds: [],
-    savedAddresses: [],
+    savedAddresses: normalizedAddress ? [normalizedAddress] : [],
     orderReferences: [],
     notifications: [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")],
     loyaltyPoints: normalizedReferralCode ? 5 : 0,
@@ -863,10 +864,16 @@ app.post("/api/auth/logout", requireUser, (request, response) => {
 
 app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
   const user = await storage.getUserByEmail(request.userSession.email);
-  const orders = await storage.getOrdersByReferences(user?.orderReferences || []);
+  const [orders, receivedGifts, sentGifts] = await Promise.all([
+    storage.getOrdersByReferences(user?.orderReferences || []),
+    storage.getReceivedGiftsByEmail(request.userSession.email),
+    storage.getSentGiftsByEmail(request.userSession.email),
+  ]);
   response.json({
     user: sanitizeUser(user),
     orders,
+    receivedGifts,
+    sentGifts,
   });
 }));
 
@@ -931,6 +938,449 @@ app.patch("/api/account/notifications/:id/read", requireUser, asyncHandler(async
     notifications,
   });
   response.json({ user: sanitizeUser(savedUser) });
+}));
+
+app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
+  const { customer, items, pricing, recipientEmail, giftMessage } = request.body || {};
+  const sender = await storage.getUserByEmail(request.userSession.email);
+  const settings = await storage.getSettings();
+  const promoCodes = parsePromoCodes(settings.promoCodesText);
+  const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
+  const sanitizedPhone = sanitizePhoneInput(customer?.phone || sender?.phone);
+  const normalizedRecipientEmail = String(recipientEmail || "").trim().toLowerCase();
+  const normalizedSenderName = String(customer?.customerName || sender?.fullName || "").trim();
+  const normalizedGiftMessage = String(giftMessage || "").trim();
+  const normalizedPaymentReference = String(customer?.paymentReference || "").trim();
+
+  if (!sender) {
+    return response.status(401).json({ error: "Sign in to send a meal gift through PEM." });
+  }
+
+  if (!normalizedSenderName || !sanitizedPhone) {
+    return response.status(400).json({ error: "Your name and phone number are required before sending a gift." });
+  }
+
+  if (normalizePhoneDigits(sanitizedPhone).length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number before sending a gift." });
+  }
+
+  if (!normalizedRecipientEmail) {
+    return response.status(400).json({ error: "Enter your friend's PEM email address." });
+  }
+
+  if (normalizedRecipientEmail === sender.email) {
+    return response.status(400).json({ error: "Use the normal checkout if you are ordering for yourself." });
+  }
+
+  const recipient = await storage.getUserByEmail(normalizedRecipientEmail);
+  if (!recipient) {
+    return response.status(404).json({ error: "That email is not linked to a PEM account yet." });
+  }
+
+  if ((customer?.fulfillmentMethod || "delivery") !== "delivery") {
+    return response.status(400).json({ error: "Gift orders are delivered after your friend accepts them." });
+  }
+
+  if (customer?.scheduledFor && Number.isNaN(new Date(customer.scheduledFor).getTime())) {
+    return response.status(400).json({ error: "Scheduled gift time is invalid." });
+  }
+
+  if (customer?.scheduledFor && !isScheduledWithinBusinessHours(customer.scheduledFor, selectedBranch.hours)) {
+    return response.status(400).json({ error: "Scheduled gifts must fall within branch business hours." });
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return response.status(400).json({ error: "Add at least one meal before sending a gift." });
+  }
+
+  if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
+    return response.status(400).json({
+      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
+    });
+  }
+
+  if (String(customer?.paymentMethod || "").trim() !== "Bank transfer") {
+    return response.status(400).json({ error: "Choose bank transfer to send a meal gift." });
+  }
+
+  if (normalizedPaymentReference.length < 3) {
+    return response.status(400).json({ error: "Add your transfer reference before sending this gift." });
+  }
+
+  const subtotal = Number(pricing?.subtotal) || 0;
+  const delivery = Number(pricing?.delivery) || 0;
+  const promo = getPromoDiscount(customer?.promoCode, subtotal, promoCodes);
+
+  if (String(customer?.promoCode || "").trim() && !promo.valid) {
+    return response.status(400).json({
+      error: promo.minimumOrder
+        ? `This promo code needs a minimum subtotal of NGN ${promo.minimumOrder.toLocaleString("en-NG")}.`
+        : "That promo code is not valid right now.",
+    });
+  }
+
+  const discount = promo.valid ? promo.amount : 0;
+  const total = Math.max(0, subtotal + delivery - discount);
+
+  const menuItems = await storage.getMenuItems();
+  const soldOutItems = items.filter((item) =>
+    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
+  );
+
+  if (soldOutItems.length > 0) {
+    return response.status(400).json({
+      error: `${soldOutItems[0].name} is currently sold out. Please remove it and try again.`,
+    });
+  }
+
+  const unavailableStockItem = items.find((item) => {
+    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
+    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
+  });
+
+  if (unavailableStockItem) {
+    return response.status(400).json({
+      error: `${unavailableStockItem.name} only has limited stock left right now.`,
+    });
+  }
+
+  const gift = await storage.createGift({
+    reference: makeReference("PEM-GFT"),
+    senderEmail: sender.email,
+    senderName: normalizedSenderName,
+    senderPhone: sanitizedPhone,
+    recipientEmail: recipient.email,
+    recipientName: recipient.fullName || recipient.email.split("@")[0],
+    branchId: selectedBranch.id,
+    branchName: selectedBranch.label,
+    branchAddress: selectedBranch.address,
+    branchPhone: selectedBranch.phone,
+    deliveryZone: String(customer?.deliveryZone || ""),
+    deliveryEta: String(customer?.deliveryEta || ""),
+    giftMessage: normalizedGiftMessage,
+    items,
+    pricing: {
+      subtotal,
+      delivery,
+      discount,
+      total,
+    },
+    payment: {
+      method: "Bank transfer",
+      status: "reference_submitted",
+      reference: normalizedPaymentReference,
+      paidAt: null,
+    },
+    status: "pending_acceptance",
+    orderReference: "",
+    createdAt: new Date().toISOString(),
+  });
+
+  await storage.updateUser(sender.email, {
+    ...sender,
+    phone: sender.phone || sanitizedPhone,
+    notifications: [
+      createNotification(
+        `Gift ${gift.reference} was sent to ${gift.recipientName}. PEM will wait for them to accept it.`,
+        "gift",
+        {
+          giftReference: gift.reference,
+          giftStatus: gift.status,
+          giftRole: "sender",
+          counterpartyEmail: gift.recipientEmail,
+          counterpartyName: gift.recipientName,
+        },
+      ),
+      ...(sender.notifications || []),
+    ].slice(0, 20),
+    updatedAt: new Date().toISOString(),
+  });
+
+  await storage.updateUser(recipient.email, {
+    ...recipient,
+    notifications: [
+      createNotification(
+        `${gift.senderName} sent you a meal gift from ${gift.branchName}. Accept it in your PEM account or decline it if you do not want it.`,
+        "gift",
+        {
+          giftReference: gift.reference,
+          giftStatus: gift.status,
+          giftRole: "recipient",
+          counterpartyEmail: gift.senderEmail,
+          counterpartyName: gift.senderName,
+        },
+      ),
+      ...(recipient.notifications || []),
+    ].slice(0, 20),
+    updatedAt: new Date().toISOString(),
+  });
+
+  response.status(201).json({
+    message: "Gift request sent. Your friend can now accept it and choose their current address.",
+    gift,
+  });
+}));
+
+app.post("/api/gifts/:reference/accept", requireUser, asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim();
+  const recipient = await storage.getUserByEmail(request.userSession.email);
+  const gift = await storage.getGiftByReference(reference);
+  const menuItems = await storage.getMenuItems();
+  const recipientAddress = String(request.body?.address || "").trim();
+  const recipientLandmark = String(request.body?.landmark || "").trim();
+  const recipientPhone = sanitizePhoneInput(request.body?.phone || recipient?.phone);
+
+  if (!recipient) {
+    return response.status(401).json({ error: "Recipient account not found." });
+  }
+
+  if (!gift) {
+    return response.status(404).json({ error: "Gift request not found." });
+  }
+
+  if (gift.recipientEmail !== recipient.email) {
+    return response.status(403).json({ error: "Only the intended recipient can accept this gift." });
+  }
+
+  if (gift.status !== "pending_acceptance") {
+    return response.status(400).json({ error: "This gift is no longer waiting for acceptance." });
+  }
+
+  if (recipientAddress.length < 5) {
+    return response.status(400).json({ error: "Add your current delivery address before accepting this gift." });
+  }
+
+  if (normalizePhoneDigits(recipientPhone).length < 10) {
+    return response.status(400).json({ error: "Add a valid phone number before accepting this gift." });
+  }
+
+  const soldOutItems = (gift.items || []).filter((item) =>
+    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
+  );
+
+  if (soldOutItems.length > 0) {
+    return response.status(400).json({
+      error: `${soldOutItems[0].name} is no longer available. Please ask the sender to update the gift.`,
+    });
+  }
+
+  const unavailableStockItem = (gift.items || []).find((item) => {
+    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
+    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
+  });
+
+  if (unavailableStockItem) {
+    return response.status(400).json({
+      error: `${unavailableStockItem.name} no longer has enough stock for this gift.`,
+    });
+  }
+
+  const order = await storage.createOrder({
+    reference: makeReference("PEM-ORD"),
+    customer: {
+      customerName: recipient.fullName || gift.recipientName || recipient.email.split("@")[0],
+      phone: recipientPhone,
+      email: recipient.email,
+      address: recipientAddress,
+      landmark: recipientLandmark,
+      paymentMethod: gift.payment?.method || "Bank transfer",
+      paymentReference: gift.payment?.reference || "",
+      branchId: gift.branchId,
+      branchName: gift.branchName,
+      branchAddress: gift.branchAddress,
+      branchPhone: gift.branchPhone,
+      deliveryZone: gift.deliveryZone,
+      deliveryEta: gift.deliveryEta,
+      isGift: true,
+      giftReference: gift.reference,
+      giftedBy: {
+        email: gift.senderEmail,
+        name: gift.senderName,
+      },
+      giftMessage: gift.giftMessage || "",
+    },
+    items: gift.items || [],
+    pricing: gift.pricing || {},
+    payment: {
+      method: gift.payment?.method || "Bank transfer",
+      status: "unpaid",
+      reference: gift.payment?.reference || "",
+      paidAt: gift.payment?.paidAt || null,
+    },
+    createdAt: new Date().toISOString(),
+    status: "received",
+  });
+
+  const nextMenuItems = menuItems.map((menuItem) => {
+    const orderedItem = (gift.items || []).find((item) => Number(item.id) === Number(menuItem.id));
+    if (!orderedItem || Number(menuItem.stockQuantity || 0) <= 0) {
+      return menuItem;
+    }
+    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - Number(orderedItem.quantity || 0));
+    return {
+      ...menuItem,
+      stockQuantity: remainingStock,
+      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
+    };
+  });
+  await storage.updateMenuItems(nextMenuItems);
+
+  const savedGift = await storage.updateGift(reference, {
+    ...gift,
+    status: "accepted",
+    recipientAddress,
+    recipientLandmark,
+    recipientPhone,
+    orderReference: order.reference,
+    respondedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const recipientOrderReferences = [
+    order.reference,
+    ...(recipient.orderReferences || []).filter((entry) => entry !== order.reference),
+  ].slice(0, 20);
+  const recipientSavedAddresses = [
+    recipientAddress,
+    ...(recipient.savedAddresses || []).filter((entry) => entry !== recipientAddress),
+  ].slice(0, 5);
+  const recipientNotifications = [
+    createNotification(
+      `You accepted gift ${gift.reference}. PEM created order ${order.reference} for delivery to your current address.`,
+      "gift",
+      {
+        giftReference: gift.reference,
+        giftStatus: "accepted",
+        giftRole: "recipient",
+        orderReference: order.reference,
+        counterpartyEmail: gift.senderEmail,
+        counterpartyName: gift.senderName,
+      },
+    ),
+    ...(recipient.notifications || []).map((item) =>
+      item.giftReference === gift.reference ? { ...item, read: true, giftStatus: "accepted" } : item,
+    ),
+  ].slice(0, 20);
+  const savedRecipient = await storage.updateUser(recipient.email, {
+    ...recipient,
+    phone: recipientPhone,
+    savedAddresses: recipientSavedAddresses,
+    orderReferences: recipientOrderReferences,
+    notifications: recipientNotifications,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const sender = await storage.getUserByEmail(gift.senderEmail);
+  if (sender) {
+    await storage.updateUser(sender.email, {
+      ...sender,
+      notifications: [
+        createNotification(
+          `${recipient.fullName || recipient.email.split("@")[0]} accepted your gift ${gift.reference}. PEM created order ${order.reference}.`,
+          "gift",
+          {
+            giftReference: gift.reference,
+            giftStatus: "accepted",
+            giftRole: "sender",
+            orderReference: order.reference,
+            counterpartyEmail: recipient.email,
+            counterpartyName: recipient.fullName || recipient.email.split("@")[0],
+          },
+        ),
+        ...(sender.notifications || []).map((item) =>
+          item.giftReference === gift.reference ? { ...item, giftStatus: "accepted" } : item,
+        ),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  response.json({
+    message: `Gift accepted. PEM created order ${order.reference}.`,
+    gift: savedGift,
+    order,
+    user: sanitizeUser(savedRecipient),
+  });
+}));
+
+app.post("/api/gifts/:reference/decline", requireUser, asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim();
+  const recipient = await storage.getUserByEmail(request.userSession.email);
+  const gift = await storage.getGiftByReference(reference);
+
+  if (!recipient) {
+    return response.status(401).json({ error: "Recipient account not found." });
+  }
+
+  if (!gift) {
+    return response.status(404).json({ error: "Gift request not found." });
+  }
+
+  if (gift.recipientEmail !== recipient.email) {
+    return response.status(403).json({ error: "Only the intended recipient can decline this gift." });
+  }
+
+  if (gift.status !== "pending_acceptance") {
+    return response.status(400).json({ error: "This gift is no longer waiting for acceptance." });
+  }
+
+  const savedGift = await storage.updateGift(reference, {
+    ...gift,
+    status: "declined",
+    respondedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const savedRecipient = await storage.updateUser(recipient.email, {
+    ...recipient,
+    notifications: [
+      createNotification(
+        `You declined gift ${gift.reference}. PEM will let the sender know.`,
+        "gift",
+        {
+          giftReference: gift.reference,
+          giftStatus: "declined",
+          giftRole: "recipient",
+          counterpartyEmail: gift.senderEmail,
+          counterpartyName: gift.senderName,
+        },
+      ),
+      ...(recipient.notifications || []).map((item) =>
+        item.giftReference === gift.reference ? { ...item, read: true, giftStatus: "declined" } : item,
+      ),
+    ].slice(0, 20),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const sender = await storage.getUserByEmail(gift.senderEmail);
+  if (sender) {
+    await storage.updateUser(sender.email, {
+      ...sender,
+      notifications: [
+        createNotification(
+          `${recipient.fullName || recipient.email.split("@")[0]} declined gift ${gift.reference}.`,
+          "gift",
+          {
+            giftReference: gift.reference,
+            giftStatus: "declined",
+            giftRole: "sender",
+            counterpartyEmail: recipient.email,
+            counterpartyName: recipient.fullName || recipient.email.split("@")[0],
+          },
+        ),
+        ...(sender.notifications || []).map((item) =>
+          item.giftReference === gift.reference ? { ...item, giftStatus: "declined" } : item,
+        ),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  response.json({
+    message: "Gift declined.",
+    gift: savedGift,
+    user: sanitizeUser(savedRecipient),
+  });
 }));
 
 app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
