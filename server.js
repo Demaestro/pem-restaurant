@@ -28,6 +28,7 @@ const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS ||
   .filter(Boolean);
 const adminSessions = new Map();
 const userSessions = new Map();
+const BIRTHDAY_DISCOUNT_PERCENT = 15;
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
@@ -197,12 +198,69 @@ function isCardPaymentMethod(method) {
   return ["Pay with card", "Paystack"].includes(String(method || "").trim());
 }
 
+function getLagosDateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: String(values.year || ""),
+    month: String(values.month || ""),
+    day: String(values.day || ""),
+  };
+}
+
+function normalizeBirthday(value) {
+  const normalized = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return "";
+  }
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const today = getLagosDateParts();
+  if (normalized > `${today.year}-${today.month}-${today.day}`) {
+    return "";
+  }
+  return normalized;
+}
+
+function isBirthdayToday(birthday, now = getLagosDateParts()) {
+  const normalized = normalizeBirthday(birthday);
+  if (!normalized) {
+    return false;
+  }
+  const [, month, day] = normalized.split("-");
+  return month === now.month && day === now.day;
+}
+
+function isBirthdayDiscountEligible(user, now = getLagosDateParts()) {
+  if (!user || !isBirthdayToday(user.birthday, now)) {
+    return false;
+  }
+  return String(user.birthdayDiscountLastUsedYear || "") !== now.year;
+}
+
 function sanitizeUser(user) {
   if (!user) {
     return null;
   }
-  const { passwordHash, ...rest } = user;
-  return rest;
+  const now = getLagosDateParts();
+  const birthdayIsToday = isBirthdayToday(user.birthday, now);
+  const birthdayDiscountEligible = isBirthdayDiscountEligible(user, now);
+  const { passwordHash, birthdayGreetingYear, birthdayDiscountLastUsedYear, ...rest } = user;
+  return {
+    ...rest,
+    birthday: rest.birthday || "",
+    birthdayIsToday,
+    birthdayDiscountEligible,
+    birthdayDiscountPercent: BIRTHDAY_DISCOUNT_PERCENT,
+  };
 }
 
 function buildLoyaltyTier(points) {
@@ -219,6 +277,36 @@ function createNotification(message, type = "general") {
     createdAt: new Date().toISOString(),
     read: false,
   };
+}
+
+function createBirthdayNotification(fullName) {
+  const firstName = String(fullName || "").trim().split(/\s+/)[0] || "there";
+  return createNotification(
+    `Happy Birthday, ${firstName}. Your first PEM order today gets ${BIRTHDAY_DISCOUNT_PERCENT}% off.`,
+    "birthday",
+  );
+}
+
+function withBirthdayGreeting(user, now = getLagosDateParts()) {
+  if (!user || !isBirthdayToday(user.birthday, now) || String(user.birthdayGreetingYear || "") === now.year) {
+    return user;
+  }
+  return {
+    ...user,
+    notifications: [
+      createBirthdayNotification(user.fullName),
+      ...(user.notifications || []),
+    ].slice(0, 15),
+    birthdayGreetingYear: now.year,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getBirthdayDiscountAmount(user, subtotal, now = getLagosDateParts()) {
+  if (!isBirthdayDiscountEligible(user, now)) {
+    return 0;
+  }
+  return Math.max(0, Math.round((Number(subtotal) || 0) * (BIRTHDAY_DISCOUNT_PERCENT / 100)));
 }
 
 function parsePromoCodes(rawValue) {
@@ -760,12 +848,18 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
 }));
 
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
-  const { fullName, email, password, phone, address, referralCode } = request.body || {};
+  const { fullName, email, password, phone, address, birthday, referralCode } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const normalizedAddress = String(address || "").trim();
+  const normalizedBirthday = normalizeBirthday(birthday);
+  const now = getLagosDateParts();
 
   if (!fullName || !normalizedEmail || !password) {
     return response.status(400).json({ error: "Full name, email, and password are required." });
+  }
+
+  if (!normalizedBirthday) {
+    return response.status(400).json({ error: "A valid birthday is required to create your PEM account." });
   }
 
   if (String(password).length < 6) {
@@ -777,21 +871,29 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     return response.status(409).json({ error: "An account with that email already exists." });
   }
   const normalizedReferralCode = String(referralCode || "").trim().toLowerCase();
+  const welcomeNotifications = [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")];
+  const birthdayIsToday = isBirthdayToday(normalizedBirthday, now);
+  if (birthdayIsToday) {
+    welcomeNotifications.unshift(createBirthdayNotification(fullName));
+  }
 
   const user = await storage.createUser({
     email: normalizedEmail,
     passwordHash: createPasswordHash(password),
     fullName: String(fullName).trim(),
     phone: String(phone || "").trim(),
+    birthday: normalizedBirthday,
     favoriteItemIds: [],
     savedAddresses: normalizedAddress ? [normalizedAddress] : [],
     orderReferences: [],
-    notifications: [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")],
+    notifications: welcomeNotifications,
     loyaltyPoints: normalizedReferralCode ? 5 : 0,
     loyaltyTier: "bronze",
     referralCode: createReferralCode(fullName),
     referredBy: normalizedReferralCode,
     referralCredits: 0,
+    birthdayGreetingYear: birthdayIsToday ? now.year : "",
+    birthdayDiscountLastUsedYear: "",
     createdAt: new Date().toISOString(),
   });
 
@@ -813,12 +915,15 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
     return response.status(401).json({ error: "Incorrect email or password." });
   }
 
+  const greetedUser = withBirthdayGreeting(user);
+  const activeUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
+
   const token = createAdminToken();
-  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+  userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
 
   response.json({
     token,
-    user: sanitizeUser(user),
+    user: sanitizeUser(activeUser),
   });
 }));
 
@@ -864,13 +969,15 @@ app.post("/api/auth/logout", requireUser, (request, response) => {
 
 app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
   const user = await storage.getUserByEmail(request.userSession.email);
+  const greetedUser = user ? withBirthdayGreeting(user) : null;
+  const activeUser = greetedUser && greetedUser !== user ? await storage.updateUser(user.email, greetedUser) : user;
   const [orders, receivedGifts, sentGifts] = await Promise.all([
-    storage.getOrdersByReferences(user?.orderReferences || []),
+    storage.getOrdersByReferences(activeUser?.orderReferences || []),
     storage.getReceivedGiftsByEmail(request.userSession.email),
     storage.getSentGiftsByEmail(request.userSession.email),
   ]);
   response.json({
-    user: sanitizeUser(user),
+    user: sanitizeUser(activeUser),
     orders,
     receivedGifts,
     sentGifts,
@@ -887,8 +994,13 @@ app.put("/api/account/profile", requireUser, asyncHandler(async (request, respon
     ...user,
     fullName: String(request.body?.fullName || user.fullName).trim(),
     phone: String(request.body?.phone || user.phone || "").trim(),
+    birthday: request.body?.birthday === undefined ? (user.birthday || "") : normalizeBirthday(request.body?.birthday),
   };
-  const savedUser = await storage.updateUser(user.email, nextUser);
+  if (request.body?.birthday !== undefined && !nextUser.birthday) {
+    return response.status(400).json({ error: "Enter a valid birthday before saving your profile." });
+  }
+  const preparedUser = withBirthdayGreeting(nextUser);
+  const savedUser = await storage.updateUser(user.email, preparedUser);
   response.json({ user: sanitizeUser(savedUser) });
 }));
 
@@ -1632,6 +1744,10 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     });
   }
 
+  const optionalSession = getOptionalUserSession(request);
+  const candidateEmail = String(optionalSession?.email || "").trim().toLowerCase();
+  const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
+  const now = getLagosDateParts();
   const subtotal = Number(pricing?.subtotal) || 0;
   const delivery = Number(pricing?.delivery) || 0;
   const promo = getPromoDiscount(customer?.promoCode, subtotal, promoCodes);
@@ -1641,10 +1757,13 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       error: promo.minimumOrder
         ? `This promo code needs a minimum subtotal of NGN ${promo.minimumOrder.toLocaleString("en-NG")}.`
         : "That promo code is not valid right now.",
-    });
+      });
   }
 
-  const discount = promo.valid ? promo.amount : 0;
+  const promoDiscount = promo.valid ? promo.amount : 0;
+  const birthdayDiscount = getBirthdayDiscountAmount(linkedUser, subtotal, now);
+  const birthdayDiscountApplied = birthdayDiscount > promoDiscount;
+  const discount = birthdayDiscountApplied ? birthdayDiscount : promoDiscount;
   const total = Math.max(0, subtotal + delivery - discount);
 
   const menuItems = await storage.getMenuItems();
@@ -1684,6 +1803,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       subtotal,
       delivery,
       discount,
+      discountLabel: birthdayDiscountApplied ? "birthday" : promo.valid ? "promo" : "",
       total,
     },
     payment: {
@@ -1712,16 +1832,15 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   });
   await storage.updateMenuItems(nextMenuItems);
 
-  const optionalSession = getOptionalUserSession(request);
-  const candidateEmail = String(optionalSession?.email || customer?.email || "").trim().toLowerCase();
-  const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
-
   if (linkedUser) {
     const orderReferences = [
       savedOrder.reference,
       ...(linkedUser.orderReferences || []).filter((reference) => reference !== savedOrder.reference),
     ].slice(0, 20);
     const notifications = [
+      ...(birthdayDiscountApplied
+        ? [createNotification(`Happy Birthday. PEM applied ${BIRTHDAY_DISCOUNT_PERCENT}% off to order ${savedOrder.reference}.`, "birthday")]
+        : []),
       createNotification(
         awaitingCardPayment
           ? `Order ${savedOrder.reference} is waiting for your card payment before ${selectedBranch.label} confirms it.`
@@ -1747,6 +1866,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       savedAddresses: nextSavedAddresses,
       loyaltyPoints,
       loyaltyTier: buildLoyaltyTier(loyaltyPoints),
+      birthdayDiscountLastUsedYear: birthdayDiscountApplied ? now.year : linkedUser.birthdayDiscountLastUsedYear || "",
       updatedAt: new Date().toISOString(),
     });
   }

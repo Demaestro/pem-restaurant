@@ -119,6 +119,7 @@ create table if not exists public.users (
   password_hash text not null,
   full_name text not null,
   phone text,
+  birthday date,
   favorite_item_ids jsonb not null default '[]'::jsonb,
   saved_addresses jsonb not null default '[]'::jsonb,
   order_references jsonb not null default '[]'::jsonb,
@@ -128,6 +129,8 @@ create table if not exists public.users (
   referral_code text,
   referred_by text,
   referral_credits integer not null default 0,
+  birthday_greeting_year text,
+  birthday_discount_last_used_year text,
   created_at timestamptz not null default now(),
   updated_at timestamptz
 );
@@ -140,6 +143,15 @@ add column if not exists referred_by text;
 
 alter table public.users
 add column if not exists referral_credits integer not null default 0;
+
+alter table public.users
+add column if not exists birthday date;
+
+alter table public.users
+add column if not exists birthday_greeting_year text;
+
+alter table public.users
+add column if not exists birthday_discount_last_used_year text;
 
 create table if not exists public.reservations (
   id bigint generated always as identity primary key,
