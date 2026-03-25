@@ -4961,11 +4961,9 @@ export default function App() {
 
                 <p className="eyebrow">Welcome to PEM</p>
                 <h1>{authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
-                <p>
-                  {authView === "signup"
-                    ? "Create your PEM account once, then keep your saved meals, delivery addresses, notifications, and order history in one place."
-                    : "Use your email and phone number to reset your password and get back into PEM quickly."}
-                </p>
+                {authView === "forgot" ? (
+                  <p>Use your email and phone number to reset your password and get back into PEM quickly.</p>
+                ) : null}
               </>
             )}
 
@@ -5137,7 +5135,6 @@ export default function App() {
                         setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
                       }
                     />
-                    <small className="cart-help">PEM sends a Happy Birthday note and unlocks 15% off your first birthday order.</small>
                   </label>
 
                   <label className="field" data-checkout-field="promoCode">
@@ -5163,7 +5160,6 @@ export default function App() {
                     }
                     placeholder="Street, area, city"
                   />
-                  <small className="cart-help">PEM saves this as your default delivery address for checkout.</small>
                 </label>
 
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
