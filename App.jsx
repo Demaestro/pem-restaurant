@@ -4933,7 +4933,15 @@ export default function App() {
         <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
 
         <section className="auth-hero">
-          <div className={authView === "login" ? "auth-hero__copy auth-hero__copy--login reveal reveal--up" : "auth-hero__copy reveal reveal--up"}>
+          <div
+            className={
+              authView === "login"
+                ? "auth-hero__copy auth-hero__copy--login reveal reveal--up"
+                : authView === "signup"
+                  ? "auth-hero__copy auth-hero__copy--signup reveal reveal--up"
+                  : "auth-hero__copy reveal reveal--up"
+            }
+          >
             {authView === "login" ? (
               <>
                 <h1>Welcome to the PEM experience.</h1>
@@ -4961,6 +4969,30 @@ export default function App() {
 
                 <p className="eyebrow">Welcome to PEM</p>
                 <h1>{authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
+                {authView === "signup" ? (
+                  <>
+                    <p className="auth-hero__lead">
+                      Join once, then move through PEM with your details already in place.
+                    </p>
+                    <div className="auth-signup-highlights">
+                      <article className="auth-signup-card">
+                        <span className="eyebrow">Saved</span>
+                        <strong>Main address</strong>
+                        <p>Start checkout faster every time you return.</p>
+                      </article>
+                      <article className="auth-signup-card">
+                        <span className="eyebrow">Birthday</span>
+                        <strong>15% first order reward</strong>
+                        <p>PEM keeps your date and celebrates you automatically.</p>
+                      </article>
+                      <article className="auth-signup-card">
+                        <span className="eyebrow">Gifting</span>
+                        <strong>Send meals to friends</strong>
+                        <p>Buy for another PEM user and let them accept in-app.</p>
+                      </article>
+                    </div>
+                  </>
+                ) : null}
                 {authView === "forgot" ? (
                   <p>Use your email and phone number to reset your password and get back into PEM quickly.</p>
                 ) : null}
@@ -5065,79 +5097,113 @@ export default function App() {
             ) : null}
 
             {authView === "signup" ? (
-              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleSignup}>
-                <div className="account-card__header">
+              <form className="service-form auth-card auth-card--signup reveal reveal--up reveal--delay-1" onSubmit={handleSignup}>
+                <div className="auth-card__top auth-card__top--signup">
                   <div>
                     <p className="eyebrow">New customer</p>
                     <h3>Create your PEM account</h3>
+                    <p className="auth-card__subcopy">Keep this simple. PEM only needs the details that make repeat ordering easier.</p>
                   </div>
-                  <span>Signup</span>
                 </div>
 
-                <div className="service-form__grid">
-                  <label className="field" data-checkout-field="email">
-                    <span>Full name</span>
-                    <input
-                      type="text"
-                      value={signupForm.fullName}
+                <div className="auth-card__section">
+                  <div className="auth-card__section-label">
+                    <span className="eyebrow">Personal details</span>
+                    <strong>Who you are</strong>
+                  </div>
+                  <div className="service-form__grid auth-signup-grid">
+                    <label className="field auth-signup-grid__wide" data-checkout-field="email">
+                      <span>Full name</span>
+                      <input
+                        type="text"
+                        value={signupForm.fullName}
+                        onChange={(event) =>
+                          setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
+                        }
+                        placeholder="Your full name"
+                      />
+                    </label>
+
+                    <label className="field" data-checkout-field="scheduledFor">
+                      <span>Phone number</span>
+                      <input
+                        type="tel"
+                        value={signupForm.phone}
+                        onChange={(event) =>
+                          setSignupForm((previous) => ({ ...previous, phone: sanitizePhoneInput(event.target.value) }))
+                        }
+                        placeholder="0803 334 5161"
+                      />
+                      {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
+                    </label>
+
+                    <label className="field">
+                      <span>Birthday</span>
+                      <input
+                        type="date"
+                        max={new Date().toISOString().slice(0, 10)}
+                        value={signupForm.birthday}
+                        onChange={(event) =>
+                          setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="auth-card__section">
+                  <div className="auth-card__section-label">
+                    <span className="eyebrow">Account access</span>
+                    <strong>How you sign in</strong>
+                  </div>
+                  <div className="service-form__grid auth-signup-grid">
+                    <label className="field auth-signup-grid__wide" data-checkout-field="address">
+                      <span>Email</span>
+                      <input
+                        type="email"
+                        value={signupForm.email}
+                        onChange={(event) =>
+                          setSignupForm((previous) => ({ ...previous, email: event.target.value }))
+                        }
+                        placeholder="you@example.com"
+                      />
+                    </label>
+
+                    <label className="field auth-signup-grid__wide" data-checkout-field="paymentReference">
+                      <span>Password</span>
+                      <input
+                        type="password"
+                        value={signupForm.password}
+                        onChange={(event) =>
+                          setSignupForm((previous) => ({ ...previous, password: event.target.value }))
+                        }
+                        placeholder="At least 6 characters"
+                      />
+                      {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
+                    </label>
+                  </div>
+                </div>
+
+                <div className="auth-card__section">
+                  <div className="auth-card__section-label">
+                    <span className="eyebrow">Delivery</span>
+                    <strong>Where PEM should know first</strong>
+                  </div>
+                  <label className="field auth-signup-grid__wide">
+                    <span>Main delivery address</span>
+                    <textarea
+                      rows="3"
+                      value={signupForm.address}
                       onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
+                        setSignupForm((previous) => ({ ...previous, address: event.target.value }))
                       }
-                      placeholder="Your full name"
+                      placeholder="Street, area, city"
                     />
                   </label>
+                </div>
 
-                  <label className="field" data-checkout-field="scheduledFor">
-                    <span>Phone number</span>
-                    <input
-                      type="tel"
-                      value={signupForm.phone}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, phone: sanitizePhoneInput(event.target.value) }))
-                      }
-                      placeholder="0803 334 5161"
-                    />
-                    {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
-                  </label>
-
-                  <label className="field" data-checkout-field="address">
-                    <span>Email</span>
-                    <input
-                      type="email"
-                      value={signupForm.email}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, email: event.target.value }))
-                      }
-                      placeholder="you@example.com"
-                    />
-                  </label>
-
-                  <label className="field" data-checkout-field="paymentReference">
-                    <span>Password</span>
-                    <input
-                      type="password"
-                      value={signupForm.password}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, password: event.target.value }))
-                      }
-                      placeholder="At least 6 characters"
-                    />
-                    {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
-                  </label>
-
-                  <label className="field">
-                    <span>Birthday</span>
-                    <input
-                      type="date"
-                      max={new Date().toISOString().slice(0, 10)}
-                      value={signupForm.birthday}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
-                      }
-                    />
-                  </label>
-
-                  <label className="field" data-checkout-field="promoCode">
+                <div className="auth-card__section auth-card__section--compact">
+                  <label className="field auth-signup-grid__wide" data-checkout-field="promoCode">
                     <span>Referral code</span>
                     <input
                       type="text"
@@ -5150,26 +5216,17 @@ export default function App() {
                   </label>
                 </div>
 
-                <label className="field">
-                  <span>Main delivery address</span>
-                  <textarea
-                    rows="3"
-                    value={signupForm.address}
-                    onChange={(event) =>
-                      setSignupForm((previous) => ({ ...previous, address: event.target.value }))
-                    }
-                    placeholder="Street, area, city"
-                  />
-                </label>
-
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
                 {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
 
-                <button type="submit" className="button button--primary" disabled={accountState.loading}>
-                  {accountState.loading ? "Creating account..." : "Create Account"}
-                </button>
+                <div className="auth-card__actions auth-card__actions--signup">
+                  <button type="submit" className="button button--primary" disabled={accountState.loading}>
+                    {accountState.loading ? "Creating account..." : "Create Account"}
+                  </button>
+                  <p className="auth-card__meta">You can update these later in Account.</p>
+                </div>
 
-                <div className="auth-links">
+                <div className="auth-links auth-links--signup">
                   <p className="auth-links__row">
                     <span>Already have an account?</span>
                     <button type="button" className="auth-link" onClick={() => setAuthView("login")}>
