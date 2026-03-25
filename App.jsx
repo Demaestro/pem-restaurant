@@ -610,6 +610,7 @@ const initialAdminState = {
     catering: [],
     reservations: [],
     reviews: [],
+    passwordRecoveryRequests: [],
   },
 };
 
@@ -726,7 +727,10 @@ const initialLoginForm = {
 const initialForgotPasswordForm = {
   email: "",
   phone: "",
+  requestReference: "",
+  approvalCode: "",
   newPassword: "",
+  confirmPassword: "",
 };
 
 const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "preparing", "ready", "out_for_delivery", "delivered", "cancelled"];
@@ -1767,6 +1771,7 @@ export default function App() {
   const [signupForm, setSignupForm] = useState(initialAccountForm);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
+  const [forgotPasswordStage, setForgotPasswordStage] = useState("request");
   const [giftActionState, setGiftActionState] = useState(initialGiftActionState);
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "", birthday: "" });
   const [addressDraft, setAddressDraft] = useState("");
@@ -1817,6 +1822,13 @@ export default function App() {
   });
   const [passwordState, setPasswordState] = useState({ loading: false, error: "", success: "" });
   const [orderActionState, setOrderActionState] = useState({ loadingRef: "", error: "", success: "" });
+  const [recoveryActionState, setRecoveryActionState] = useState({
+    loadingRef: "",
+    error: "",
+    success: "",
+    approvalCode: "",
+    reference: "",
+  });
   const [receiptOrder, setReceiptOrder] = useState(null);
   const [reviewForm, setReviewForm] = useState(initialReviewForm);
   const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
@@ -2285,6 +2297,14 @@ export default function App() {
     }
     window.localStorage.setItem("pem-admin-profile", JSON.stringify(adminSession));
   }, [adminSession, adminToken]);
+
+  useEffect(() => {
+    if (authView === "forgot") {
+      return;
+    }
+    setForgotPasswordStage("request");
+    setForgotPasswordForm(initialForgotPasswordForm);
+  }, [authView]);
 
   useEffect(() => {
     if (accountToken) {
@@ -2798,6 +2818,10 @@ export default function App() {
   )
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4);
+  const passwordRecoveryRequests = adminState.data.passwordRecoveryRequests || [];
+  const pendingPasswordRecoveryRequests = passwordRecoveryRequests.filter((entry) =>
+    ["pending_review", "approved"].includes(entry.status),
+  );
 
   const filteredAdminContacts = adminState.data.contacts.filter((message) => {
     const matchesBranch =
@@ -3337,6 +3361,7 @@ export default function App() {
           catering: Array.isArray(data.catering) ? data.catering : [],
           reservations: Array.isArray(data.reservations) ? data.reservations : [],
           reviews: Array.isArray(data.reviews) ? data.reviews : [],
+          passwordRecoveryRequests: Array.isArray(data.passwordRecoveryRequests) ? data.passwordRecoveryRequests : [],
         },
       });
     } catch (error) {
@@ -3354,6 +3379,7 @@ export default function App() {
             catering: Array.isArray(cachedAdmin.catering) ? cachedAdmin.catering : [],
             reservations: Array.isArray(cachedAdmin.reservations) ? cachedAdmin.reservations : [],
             reviews: Array.isArray(cachedAdmin.reviews) ? cachedAdmin.reviews : [],
+            passwordRecoveryRequests: Array.isArray(cachedAdmin.passwordRecoveryRequests) ? cachedAdmin.passwordRecoveryRequests : [],
           },
         });
         return;
@@ -3757,6 +3783,76 @@ export default function App() {
     }
   }
 
+  async function handleApproveRecoveryRequest(reference) {
+    try {
+      setRecoveryActionState({ loadingRef: reference, error: "", success: "", approvalCode: "", reference: "" });
+      const response = await fetch(apiUrl(`/api/admin/password-recovery/${reference}/approve`), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to approve this recovery request.");
+      }
+
+      setAdminState((previous) => ({
+        ...previous,
+        data: {
+          ...previous.data,
+          passwordRecoveryRequests: previous.data.passwordRecoveryRequests.map((item) =>
+            item.reference === reference ? data.request : item,
+          ),
+        },
+      }));
+      setRecoveryActionState({
+        loadingRef: "",
+        error: "",
+        success: "Recovery request approved. Share this code with the customer now.",
+        approvalCode: data.approvalCode || "",
+        reference,
+      });
+    } catch (error) {
+      setRecoveryActionState({ loadingRef: "", error: error.message, success: "", approvalCode: "", reference: "" });
+    }
+  }
+
+  async function handleRejectRecoveryRequest(reference) {
+    try {
+      setRecoveryActionState({ loadingRef: reference, error: "", success: "", approvalCode: "", reference: "" });
+      const response = await fetch(apiUrl(`/api/admin/password-recovery/${reference}/reject`), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to decline this recovery request.");
+      }
+
+      setAdminState((previous) => ({
+        ...previous,
+        data: {
+          ...previous.data,
+          passwordRecoveryRequests: previous.data.passwordRecoveryRequests.map((item) =>
+            item.reference === reference ? data.request : item,
+          ),
+        },
+      }));
+      setRecoveryActionState({
+        loadingRef: "",
+        error: "",
+        success: data.message || "Recovery request declined.",
+        approvalCode: "",
+        reference,
+      });
+    } catch (error) {
+      setRecoveryActionState({ loadingRef: "", error: error.message, success: "", approvalCode: "", reference: "" });
+    }
+  }
+
   function printOrderSlip(order) {
     const slipWindow = window.open("", "_blank", "width=760,height=900");
     if (!slipWindow) {
@@ -4051,13 +4147,62 @@ export default function App() {
     }
   }
 
-  async function handleForgotPassword(event) {
+  async function handleForgotPasswordRequest(event) {
     event.preventDefault();
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/forgot-password", forgotPasswordForm);
+      const data = await postJson("/api/auth/forgot-password", {
+        email: forgotPasswordForm.email,
+        phone: sanitizePhoneInput(forgotPasswordForm.phone),
+      });
+      setForgotPasswordForm((previous) => ({
+        ...previous,
+        email: String(previous.email || "").trim(),
+        phone: sanitizePhoneInput(previous.phone),
+        requestReference: data.reference || previous.requestReference,
+        approvalCode: "",
+        newPassword: "",
+        confirmPassword: "",
+      }));
+      setForgotPasswordStage("complete");
+      setAccountState({
+        loading: false,
+        error: "",
+        success: data.message || "Recovery request received.",
+      });
+    } catch (error) {
+      setAccountState({
+        loading: false,
+        error: error.message,
+        success: "",
+      });
+    }
+  }
+
+  async function handlePasswordReset(event) {
+    event.preventDefault();
+
+    if (String(forgotPasswordForm.newPassword || "") !== String(forgotPasswordForm.confirmPassword || "")) {
+      setAccountState({
+        loading: false,
+        error: "The new password fields did not match.",
+        success: "",
+      });
+      return;
+    }
+
+    try {
+      setAccountState({ loading: true, error: "", success: "" });
+      const data = await postJson("/api/auth/reset-password", {
+        email: forgotPasswordForm.email,
+        requestReference: forgotPasswordForm.requestReference,
+        approvalCode: forgotPasswordForm.approvalCode,
+        newPassword: forgotPasswordForm.newPassword,
+        confirmPassword: forgotPasswordForm.confirmPassword,
+      });
       setForgotPasswordForm(initialForgotPasswordForm);
+      setForgotPasswordStage("request");
       setAccountState({
         loading: false,
         error: "",
@@ -5147,7 +5292,10 @@ export default function App() {
             ) : null}
 
             {authView === "forgot" ? (
-              <form className="service-form auth-card reveal reveal--up reveal--delay-1" onSubmit={handleForgotPassword}>
+              <form
+                className="service-form auth-card reveal reveal--up reveal--delay-1"
+                onSubmit={forgotPasswordStage === "request" ? handleForgotPasswordRequest : handlePasswordReset}
+              >
                 <div className="account-card__header">
                   <div>
                     <p className="eyebrow">Forgot password?</p>
@@ -5180,28 +5328,99 @@ export default function App() {
                       placeholder="The number on your account"
                     />
                   </label>
-
-                  <label className="field">
-                    <span>New password</span>
-                    <input
-                      type="password"
-                      value={forgotPasswordForm.newPassword}
-                      onChange={(event) =>
-                        setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
-                      }
-                      placeholder="Choose a new password"
-                    />
-                  </label>
                 </div>
+
+                {forgotPasswordStage === "complete" ? (
+                  <>
+                    <div className="service-form__grid">
+                      <label className="field">
+                        <span>Recovery reference</span>
+                        <input
+                          type="text"
+                          value={forgotPasswordForm.requestReference}
+                          onChange={(event) =>
+                            setForgotPasswordForm((previous) => ({ ...previous, requestReference: event.target.value.toUpperCase() }))
+                          }
+                          placeholder="PEM-REC-..."
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>Approval code</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={forgotPasswordForm.approvalCode}
+                          onChange={(event) =>
+                            setForgotPasswordForm((previous) => ({ ...previous, approvalCode: event.target.value }))
+                          }
+                          placeholder="6-digit code"
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>New password</span>
+                        <input
+                          type="password"
+                          value={forgotPasswordForm.newPassword}
+                          onChange={(event) =>
+                            setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
+                          }
+                          placeholder="At least 8 characters"
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>Confirm new password</span>
+                        <input
+                          type="password"
+                          value={forgotPasswordForm.confirmPassword}
+                          onChange={(event) =>
+                            setForgotPasswordForm((previous) => ({ ...previous, confirmPassword: event.target.value }))
+                          }
+                          placeholder="Repeat your new password"
+                        />
+                      </label>
+                    </div>
+                  </>
+                ) : null}
 
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
                 {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
 
                 <button type="submit" className="button button--primary" disabled={accountState.loading}>
-                  {accountState.loading ? "Updating..." : "Reset Password"}
+                  {accountState.loading
+                    ? forgotPasswordStage === "request"
+                      ? "Submitting..."
+                      : "Updating..."
+                    : forgotPasswordStage === "request"
+                      ? "Request reset approval"
+                      : "Reset Password"}
                 </button>
 
                 <div className="auth-links">
+                  {forgotPasswordStage === "complete" ? (
+                    <p className="auth-links__row">
+                      <span>Need a new request?</span>
+                      <button
+                        type="button"
+                        className="auth-link"
+                        onClick={() => {
+                          setForgotPasswordStage("request");
+                          setForgotPasswordForm((previous) => ({
+                            ...previous,
+                            requestReference: "",
+                            approvalCode: "",
+                            newPassword: "",
+                            confirmPassword: "",
+                          }));
+                          setAccountState({ loading: false, error: "", success: "" });
+                        }}
+                      >
+                        Start again
+                      </button>
+                    </p>
+                  ) : null}
                   <p className="auth-links__row">
                     <span>Remembered your password?</span>
                     <button type="button" className="auth-link" onClick={() => setAuthView("login")}>
@@ -7072,7 +7291,7 @@ export default function App() {
             <form className="service-form admin-login reveal reveal--up reveal--delay-1" onSubmit={handleAdminLogin}>
               <div className="admin-login__copy">
                 <h3>Admin sign in</h3>
-                <p>Enter your PEM admin password to unlock orders, contact messages, and catering records.</p>
+                <p>Enter your PEM admin username and password to unlock orders, contact messages, and catering records.</p>
                 <p className="admin-login__hint">
                   Forgot the password? Open your local <code>.env</code> file and set a new
                   <code> ADMIN_PASSWORD</code> value, then restart the app.
@@ -7085,7 +7304,7 @@ export default function App() {
                   type="text"
                   value={adminUsername}
                   onChange={(event) => setAdminUsername(event.target.value)}
-                  placeholder="Leave blank for owner login"
+                  placeholder="owner or assigned staff username"
                 />
               </label>
 
@@ -7350,6 +7569,71 @@ export default function App() {
                     </div>
                   )}
                 </article>
+
+                {adminSession.isOwner ? (
+                  <article className="admin-card reveal reveal--up">
+                    <div className="admin-card__header">
+                      <h3>Password Recovery</h3>
+                      <span>{pendingPasswordRecoveryRequests.length}</span>
+                    </div>
+
+                    {recoveryActionState.error ? (
+                      <p className="form-message form-message--error">{recoveryActionState.error}</p>
+                    ) : null}
+                    {recoveryActionState.success ? (
+                      <p className="form-message form-message--success">{recoveryActionState.success}</p>
+                    ) : null}
+                    {recoveryActionState.approvalCode ? (
+                      <div className="delivery-zone-card delivery-zone-card--accent">
+                        <p className="delivery-zone-card__title">Share this recovery code now</p>
+                        <strong>{recoveryActionState.approvalCode}</strong>
+                        <small>Reference: {recoveryActionState.reference}</small>
+                      </div>
+                    ) : null}
+
+                    {passwordRecoveryRequests.length === 0 ? (
+                      <p className="admin-empty">No password recovery requests yet.</p>
+                    ) : (
+                      <div className="admin-list">
+                        {passwordRecoveryRequests.slice(0, 8).map((entry) => (
+                          <div key={entry.reference} className="admin-item">
+                            <div className="admin-item__row">
+                              <strong>{entry.fullName || entry.userEmail}</strong>
+                              <span className={`status-pill status-pill--${entry.status}`}>{entry.status.replaceAll("_", " ")}</span>
+                            </div>
+                            <p>{entry.userEmail}</p>
+                            <p className="admin-item__subtle">Phone ending {entry.phoneLast4 || "N/A"}</p>
+                            <p>{formatDateTime(entry.reviewedAt || entry.createdAt)}</p>
+                            <div className="admin-status-actions">
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleApproveRecoveryRequest(entry.reference)}
+                                disabled={
+                                  recoveryActionState.loadingRef === entry.reference ||
+                                  !["pending_review", "approved"].includes(entry.status)
+                                }
+                              >
+                                {recoveryActionState.loadingRef === entry.reference ? "Working..." : "Approve"}
+                              </button>
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleRejectRecoveryRequest(entry.reference)}
+                                disabled={
+                                  recoveryActionState.loadingRef === entry.reference ||
+                                  !["pending_review", "approved"].includes(entry.status)
+                                }
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ) : null}
 
                 {adminSession.isOwner ? (
                   <article className="admin-card reveal reveal--up">

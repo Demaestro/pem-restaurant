@@ -28,7 +28,36 @@ const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS ||
   .filter(Boolean);
 const adminSessions = new Map();
 const userSessions = new Map();
+const authAttemptBuckets = new Map();
 const BIRTHDAY_DISCOUNT_PERCENT = 15;
+const OWNER_ADMIN_USERNAME = "owner";
+const PASSWORD_RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
+const authAttemptPolicies = {
+  userLogin: {
+    windowMs: 10 * 60 * 1000,
+    maxAttempts: 6,
+    blockMs: 15 * 60 * 1000,
+    error: "Too many sign-in attempts. Please wait 15 minutes and try again.",
+  },
+  adminLogin: {
+    windowMs: 10 * 60 * 1000,
+    maxAttempts: 5,
+    blockMs: 20 * 60 * 1000,
+    error: "Too many admin login attempts. Please wait 20 minutes and try again.",
+  },
+  passwordRecoveryRequest: {
+    windowMs: 30 * 60 * 1000,
+    maxAttempts: 4,
+    blockMs: 30 * 60 * 1000,
+    error: "Too many password recovery attempts. Please wait 30 minutes and try again.",
+  },
+  passwordReset: {
+    windowMs: 30 * 60 * 1000,
+    maxAttempts: 5,
+    blockMs: 30 * 60 * 1000,
+    error: "Too many password reset attempts. Please wait 30 minutes and try again.",
+  },
+};
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
@@ -132,6 +161,67 @@ function getBearerToken(request) {
   }
 
   return authHeader.slice(7);
+}
+
+function getClientAddress(request) {
+  const forwarded = String(request.headers["x-forwarded-for"] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .find(Boolean);
+  return forwarded || request.ip || request.socket?.remoteAddress || "unknown";
+}
+
+function buildAttemptKey(scope, request, identifier = "") {
+  return `${scope}:${getClientAddress(request)}:${String(identifier || "anon").trim().toLowerCase()}`;
+}
+
+function cleanupAttemptBucket(bucket, now = Date.now()) {
+  if (!bucket) {
+    return bucket;
+  }
+  if (bucket.blockedUntil && bucket.blockedUntil <= now) {
+    bucket.blockedUntil = 0;
+  }
+  bucket.attempts = (bucket.attempts || []).filter((timestamp) => now - timestamp <= bucket.windowMs);
+  return bucket;
+}
+
+function getAttemptBucket(scope, request, identifier = "") {
+  const policy = authAttemptPolicies[scope];
+  const key = buildAttemptKey(scope, request, identifier);
+  const existing = cleanupAttemptBucket(authAttemptBuckets.get(key), Date.now());
+  if (existing) {
+    authAttemptBuckets.set(key, existing);
+    return { key, policy, bucket: existing };
+  }
+  const fresh = {
+    attempts: [],
+    blockedUntil: 0,
+    windowMs: policy.windowMs,
+  };
+  authAttemptBuckets.set(key, fresh);
+  return { key, policy, bucket: fresh };
+}
+
+function getAttemptLimitError(scope, request, identifier = "") {
+  const { bucket, policy } = getAttemptBucket(scope, request, identifier);
+  return bucket.blockedUntil && bucket.blockedUntil > Date.now() ? policy.error : "";
+}
+
+function registerFailedAttempt(scope, request, identifier = "") {
+  const { key, bucket, policy } = getAttemptBucket(scope, request, identifier);
+  const now = Date.now();
+  bucket.attempts.push(now);
+  bucket.attempts = bucket.attempts.filter((timestamp) => now - timestamp <= policy.windowMs);
+  if (bucket.attempts.length >= policy.maxAttempts) {
+    bucket.blockedUntil = now + policy.blockMs;
+  }
+  authAttemptBuckets.set(key, bucket);
+  return bucket.blockedUntil && bucket.blockedUntil > now ? policy.error : "";
+}
+
+function clearAttemptBucket(scope, request, identifier = "") {
+  authAttemptBuckets.delete(buildAttemptKey(scope, request, identifier));
 }
 
 function requireAdmin(request, response, next) {
@@ -265,6 +355,18 @@ function sanitizeUser(user) {
     birthdayDiscountEligible,
     birthdayDiscountPercent: BIRTHDAY_DISCOUNT_PERCENT,
   };
+}
+
+function sanitizePasswordRecoveryRequest(entry) {
+  if (!entry) {
+    return null;
+  }
+  const { approvalCodeHash, ...safeEntry } = entry;
+  return safeEntry;
+}
+
+function createRecoveryCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function buildLoyaltyTier(points) {
@@ -517,6 +619,7 @@ function filterSummaryByBranch(summary, branchId) {
     catering: (summary.catering || []).filter(matchesBranch),
     reservations: (summary.reservations || []).filter(matchesBranch),
     reviews: (summary.reviews || []).filter(matchesBranch),
+    passwordRecoveryRequests: [],
   };
 }
 
@@ -917,10 +1020,15 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
 app.post("/api/auth/login", asyncHandler(async (request, response) => {
   const { email, password } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
+  const attemptLimitError = getAttemptLimitError("userLogin", request, normalizedEmail);
+  if (attemptLimitError) {
+    return response.status(429).json({ error: attemptLimitError });
+  }
   const user = await storage.getUserByEmail(normalizedEmail);
 
   if (!user || !verifyPassword(String(password || ""), user.passwordHash)) {
-    return response.status(401).json({ error: "Incorrect email or password." });
+    const blockedError = registerFailedAttempt("userLogin", request, normalizedEmail);
+    return response.status(blockedError ? 429 : 401).json({ error: blockedError || "Incorrect email or password." });
   }
 
   const greetedUser = withBirthdayGreeting(user);
@@ -928,6 +1036,7 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
 
   const token = createAdminToken();
   userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
+  clearAttemptBucket("userLogin", request, normalizedEmail);
 
   response.json({
     token,
@@ -936,24 +1045,93 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
 }));
 
 app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => {
-  const { email, phone, newPassword } = request.body || {};
+  const { email, phone } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const normalizedPhone = String(phone || "").replace(/\D/g, "");
+  if (!normalizedEmail || !normalizedPhone) {
+    return response.status(400).json({ error: "Email and phone number are required." });
+  }
+
+  const attemptLimitError = getAttemptLimitError("passwordRecoveryRequest", request, normalizedEmail);
+  if (attemptLimitError) {
+    return response.status(429).json({ error: attemptLimitError });
+  }
+
+  const genericMessage =
+    "If the details match a PEM account, a recovery request has been created for owner review.";
   const user = await storage.getUserByEmail(normalizedEmail);
 
-  if (!user) {
-    return response.status(404).json({ error: "No PEM account was found for that email." });
+  if (!user || String(user.phone || "").replace(/\D/g, "") !== normalizedPhone) {
+    registerFailedAttempt("passwordRecoveryRequest", request, normalizedEmail);
+    return response.json({ message: genericMessage });
   }
 
-  if (!normalizedPhone || String(user.phone || "").replace(/\D/g, "") !== normalizedPhone) {
-    return response.status(401).json({ error: "The recovery phone number did not match this account." });
+  const recoveryRequest = await storage.createPasswordRecoveryRequest({
+    reference: makeReference("PEM-REC"),
+    userEmail: user.email,
+    fullName: user.fullName,
+    phoneLast4: normalizedPhone.slice(-4),
+    status: "pending_review",
+    approvalCodeHash: "",
+    approvalCodeExpiresAt: null,
+    reviewedBy: "",
+    reviewedAt: null,
+    completedAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+  });
+  clearAttemptBucket("passwordRecoveryRequest", request, normalizedEmail);
+
+  response.json({
+    message: "Recovery request received. PEM will review it and share the next step.",
+    reference: recoveryRequest.reference,
+  });
+}));
+
+app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
+  const { email, requestReference, approvalCode, newPassword, confirmPassword } = request.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedReference = String(requestReference || "").trim().toUpperCase();
+  const normalizedApprovalCode = String(approvalCode || "").trim();
+
+  if (!normalizedEmail || !normalizedReference || !normalizedApprovalCode || !newPassword || !confirmPassword) {
+    return response.status(400).json({ error: "Email, recovery reference, approval code, and new password are required." });
   }
 
-  if (String(newPassword || "").length < 6) {
-    return response.status(400).json({ error: "New password must be at least 6 characters long." });
+  if (String(newPassword).length < 8) {
+    return response.status(400).json({ error: "New password must be at least 8 characters long." });
   }
 
-  const savedUser = await storage.updateUser(user.email, {
+  if (String(newPassword) !== String(confirmPassword)) {
+    return response.status(400).json({ error: "The new password fields did not match." });
+  }
+
+  const attemptLimitError = getAttemptLimitError("passwordReset", request, normalizedEmail);
+  if (attemptLimitError) {
+    return response.status(429).json({ error: attemptLimitError });
+  }
+
+  const [user, recoveryRequest] = await Promise.all([
+    storage.getUserByEmail(normalizedEmail),
+    storage.getPasswordRecoveryRequestByReference(normalizedReference),
+  ]);
+
+  const invalidResetError = "The recovery details were invalid or have expired.";
+  if (
+    !user ||
+    !recoveryRequest ||
+    recoveryRequest.userEmail !== normalizedEmail ||
+    recoveryRequest.status !== "approved" ||
+    !recoveryRequest.approvalCodeHash ||
+    !recoveryRequest.approvalCodeExpiresAt ||
+    new Date(recoveryRequest.approvalCodeExpiresAt).getTime() <= Date.now() ||
+    !verifyPassword(normalizedApprovalCode, recoveryRequest.approvalCodeHash)
+  ) {
+    const blockedError = registerFailedAttempt("passwordReset", request, normalizedEmail);
+    return response.status(blockedError ? 429 : 401).json({ error: blockedError || invalidResetError });
+  }
+
+  await storage.updateUser(user.email, {
     ...user,
     passwordHash: createPasswordHash(newPassword),
     notifications: [
@@ -963,9 +1141,18 @@ app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => 
     updatedAt: new Date().toISOString(),
   });
 
+  await storage.updatePasswordRecoveryRequest(recoveryRequest.reference, {
+    ...recoveryRequest,
+    status: "completed",
+    approvalCodeHash: "",
+    approvalCodeExpiresAt: null,
+    completedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  clearAttemptBucket("passwordReset", request, normalizedEmail);
+
   response.json({
     message: "Password updated successfully. You can now log in.",
-    user: sanitizeUser(savedUser),
   });
 }));
 
@@ -1510,33 +1697,40 @@ app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
 
 app.post("/api/admin/login", asyncHandler(async (request, response) => {
   const { username, password } = request.body || {};
+  const normalizedUsername = String(username || "").trim().toLowerCase();
 
-  if (!password) {
-    return response.status(400).json({ error: "Password is required." });
+  if (!normalizedUsername || !password) {
+    return response.status(400).json({ error: "Username and password are required." });
+  }
+
+  const attemptLimitError = getAttemptLimitError("adminLogin", request, normalizedUsername);
+  if (attemptLimitError) {
+    return response.status(429).json({ error: attemptLimitError });
   }
 
   const settings = await storage.getSettings();
   const staffAdmins = parseStaffAdmins(settings.staffAdminsText);
-  const matchedStaffAdmin = username
-    ? staffAdmins.find(
-        (item) => item.username === String(username || "").trim().toLowerCase() && item.password === password,
-      )
-    : null;
+  const matchedStaffAdmin = staffAdmins.find(
+    (item) => item.username === normalizedUsername && item.password === password,
+  );
+  const isOwnerLogin = normalizedUsername === OWNER_ADMIN_USERNAME && password === adminPassword;
 
-  if (!matchedStaffAdmin && password !== adminPassword) {
-    return response.status(401).json({ error: "Incorrect admin credentials." });
+  if (!matchedStaffAdmin && !isOwnerLogin) {
+    const blockedError = registerFailedAttempt("adminLogin", request, normalizedUsername);
+    return response.status(blockedError ? 429 : 401).json({ error: blockedError || "Incorrect admin credentials." });
   }
 
   const token = createAdminToken();
   const session = {
     createdAt: new Date().toISOString(),
-    username: matchedStaffAdmin?.username || "owner",
+    username: matchedStaffAdmin?.username || OWNER_ADMIN_USERNAME,
     label: matchedStaffAdmin?.label || "Owner",
     branchId: matchedStaffAdmin?.branchId || "",
     isOwner: !matchedStaffAdmin,
   };
 
   adminSessions.set(token, session);
+  clearAttemptBucket("adminLogin", request, normalizedUsername);
 
   return response.json({
     token,
@@ -1588,7 +1782,90 @@ app.get("/api/admin/summary", requireAdmin, asyncHandler(async (request, respons
     : summary;
   response.json({
     ...filteredSummary,
+    passwordRecoveryRequests: (filteredSummary.passwordRecoveryRequests || []).map(sanitizePasswordRecoveryRequest),
     admin: request.adminSession,
+  });
+}));
+
+app.post("/api/admin/password-recovery/:reference/approve", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim().toUpperCase();
+  const recoveryRequest = await storage.getPasswordRecoveryRequestByReference(reference);
+
+  if (!recoveryRequest) {
+    return response.status(404).json({ error: "Recovery request not found." });
+  }
+
+  if (!["pending_review", "approved"].includes(recoveryRequest.status)) {
+    return response.status(400).json({ error: "This recovery request can no longer be approved." });
+  }
+
+  const approvalCode = createRecoveryCode();
+  const updatedRequest = await storage.updatePasswordRecoveryRequest(reference, {
+    ...recoveryRequest,
+    status: "approved",
+    approvalCodeHash: createPasswordHash(approvalCode),
+    approvalCodeExpiresAt: new Date(Date.now() + PASSWORD_RECOVERY_CODE_TTL_MS).toISOString(),
+    reviewedBy: request.adminSession.username,
+    reviewedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const user = await storage.getUserByEmail(recoveryRequest.userEmail);
+  if (user) {
+    await storage.updateUser(user.email, {
+      ...user,
+      notifications: [
+        createNotification("Your password recovery request was approved. Use the code from PEM to finish resetting your password.", "security"),
+        ...(user.notifications || []),
+      ].slice(0, 15),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  response.json({
+    message: "Recovery request approved. Share the code with the customer within 30 minutes.",
+    approvalCode,
+    request: sanitizePasswordRecoveryRequest(updatedRequest),
+  });
+}));
+
+app.post("/api/admin/password-recovery/:reference/reject", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim().toUpperCase();
+  const recoveryRequest = await storage.getPasswordRecoveryRequestByReference(reference);
+
+  if (!recoveryRequest) {
+    return response.status(404).json({ error: "Recovery request not found." });
+  }
+
+  if (!["pending_review", "approved"].includes(recoveryRequest.status)) {
+    return response.status(400).json({ error: "This recovery request can no longer be declined." });
+  }
+
+  const updatedRequest = await storage.updatePasswordRecoveryRequest(reference, {
+    ...recoveryRequest,
+    status: "rejected",
+    approvalCodeHash: "",
+    approvalCodeExpiresAt: null,
+    reviewedBy: request.adminSession.username,
+    reviewedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const user = await storage.getUserByEmail(recoveryRequest.userEmail);
+  if (user) {
+    await storage.updateUser(user.email, {
+      ...user,
+      notifications: [
+        createNotification("Your password recovery request was declined. Please contact PEM support if you still need help.", "security"),
+        ...(user.notifications || []),
+      ].slice(0, 15),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  response.json({
+    message: "Recovery request declined.",
+    request: sanitizePasswordRecoveryRequest(updatedRequest),
   });
 }));
 
