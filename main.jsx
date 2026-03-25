@@ -1,50 +1,7 @@
-import { Component, StrictMode } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
-
-class AppBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch() {
-    // Keep the browser from landing on a blank shell if a runtime render error slips through.
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="auth-shell">
-          <section className="auth-hero">
-            <div className="auth-loading-card">
-              <p className="eyebrow">PEM needs a quick refresh</p>
-              <h1>We hit a loading issue.</h1>
-              <p>
-                Refresh this page to load the newest PEM version. If you installed the app,
-                reopen it once so the latest update can take over.
-              </p>
-              <button
-                type="button"
-                className="button button--primary"
-                onClick={() => window.location.reload()}
-              >
-                Refresh PEM
-              </button>
-            </div>
-          </section>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
 
 if (typeof window !== "undefined") {
   if ("scrollRestoration" in window.history) {
@@ -61,9 +18,7 @@ if (typeof window !== "undefined") {
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <AppBoundary>
-      <App />
-    </AppBoundary>
+    <App />
   </StrictMode>,
 );
 
