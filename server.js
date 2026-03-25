@@ -198,6 +198,10 @@ function isCardPaymentMethod(method) {
   return ["Pay with card", "Paystack"].includes(String(method || "").trim());
 }
 
+function isSupportedCheckoutPaymentMethod(method) {
+  return ["Bank transfer", "Pay with card", "Paystack"].includes(String(method || "").trim());
+}
+
 function getLagosDateParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
@@ -820,11 +824,15 @@ app.get("/api/menu", asyncHandler(async (_request, response) => {
 app.get("/api/settings", asyncHandler(async (request, response) => {
   const settings = await storage.getSettings();
   const adminSession = getOptionalAdminSession(request);
+  const settingsPayload = {
+    ...settings,
+    cardPaymentEnabled: Boolean(paystackSecretKey),
+  };
   response.json({
     settings: adminSession
-      ? settings
+      ? settingsPayload
       : {
-          ...settings,
+          ...settingsPayload,
           promoCodesText: "",
           staffAdminsText: "",
         },
@@ -1714,8 +1722,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Please enter a valid phone number." });
   }
 
+  if (!isSupportedCheckoutPaymentMethod(customer.paymentMethod)) {
+    return response.status(400).json({ error: "Choose bank transfer or card payment to continue in PEM." });
+  }
+
   if (isCardPaymentMethod(customer.paymentMethod) && !paystackSecretKey) {
-    return response.status(400).json({ error: "Card payment is not available right now. Please use bank transfer or pay on arrival." });
+    return response.status(400).json({ error: "Card payment is not available right now. Choose bank transfer to continue in PEM." });
   }
 
   if (isCardPaymentMethod(customer.paymentMethod) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(customer.email || "").trim())) {
@@ -1807,7 +1819,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       total,
     },
     payment: {
-      method: customer?.paymentMethod || "Pay on arrival",
+      method: customer?.paymentMethod || "Bank transfer",
       status: isCardPaymentMethod(customer?.paymentMethod) ? "pending" : "unpaid",
       reference: String(customer?.paymentReference || "").trim(),
       paidAt: null,
