@@ -1,6 +1,6 @@
-const CACHE_NAME = "pem-pwa-v3";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/pem-icon.jpeg", "/offline.html"];
-const RUNTIME_CACHE = "pem-runtime-v3";
+const CACHE_NAME = "pem-pwa-v4";
+const APP_SHELL = ["/manifest.webmanifest", "/pem-icon.jpeg", "/offline.html"];
+const RUNTIME_CACHE = "pem-runtime-v4";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -12,7 +12,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+      Promise.all(keys.filter((key) => ![CACHE_NAME, RUNTIME_CACHE].includes(key)).map((key) => caches.delete(key))),
     ),
   );
   self.clients.claim();
@@ -32,12 +32,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
-        .then((response) => {
-          const clonedResponse = response.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, clonedResponse));
-          return response;
-        })
-        .catch(async () => (await caches.match(event.request)) || caches.match("/offline.html")),
+        .catch(async () => caches.match("/offline.html")),
     );
     return;
   }

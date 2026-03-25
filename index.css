@@ -124,7 +124,8 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(22rem, 0.95fr);
   gap: 1.5rem;
-  align-items: center;
+  align-items: start;
+  padding-block: 1rem 2rem;
 }
 
 .auth-hero__copy,
