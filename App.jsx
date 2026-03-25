@@ -670,6 +670,10 @@ const initialAccountUser = {
   email: "",
   fullName: "",
   phone: "",
+  birthday: "",
+  birthdayIsToday: false,
+  birthdayDiscountEligible: false,
+  birthdayDiscountPercent: 15,
   favoriteItemIds: [],
   savedAddresses: [],
   orderReferences: [],
@@ -695,6 +699,7 @@ const initialAccountForm = {
   password: "",
   phone: "",
   address: "",
+  birthday: "",
   referralCode: "",
 };
 
@@ -959,6 +964,22 @@ function sanitizePhoneInput(value) {
     .replace(/\s{2,}/g, " ")
     .trimStart()
     .slice(0, 22);
+}
+
+function normalizeBirthdayInput(value) {
+  const normalized = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return "";
+  }
+  const parsed = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (normalized > today) {
+    return "";
+  }
+  return normalized;
 }
 
 function getWhatsAppPhone(settings) {
@@ -1789,7 +1810,7 @@ export default function App() {
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [giftActionState, setGiftActionState] = useState(initialGiftActionState);
-  const [profileForm, setProfileForm] = useState({ fullName: "", phone: "" });
+  const [profileForm, setProfileForm] = useState({ fullName: "", phone: "", birthday: "" });
   const [addressDraft, setAddressDraft] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -2276,7 +2297,7 @@ export default function App() {
       setAccountOrders([]);
       setAccountGifts(initialAccountGifts);
       setGiftActionState(initialGiftActionState);
-      setProfileForm({ fullName: "", phone: "" });
+      setProfileForm({ fullName: "", phone: "", birthday: "" });
       setAccountHydrated(true);
     }
   }, [accountToken]);
@@ -2538,7 +2559,14 @@ export default function App() {
   const selectedDeliveryZone =
     deliveryZones.find((zone) => zone.id === checkoutForm.deliveryZone) || getDeliveryZone(checkoutForm.deliveryZone, deliveryZones);
   const delivery = subtotal > 0 && checkoutForm.fulfillmentMethod !== "pickup" ? selectedDeliveryZone.fee : 0;
-  const discount = promoValidationState.valid ? promoValidationState.amount : 0;
+  const promoDiscount = promoValidationState.valid ? promoValidationState.amount : 0;
+  const birthdayDiscountAmount =
+    accountUser.birthdayDiscountEligible && !isGiftOrder && subtotal > 0
+      ? Math.round(subtotal * ((Number(accountUser.birthdayDiscountPercent) || 15) / 100))
+      : 0;
+  const birthdayDiscountWins = birthdayDiscountAmount > promoDiscount;
+  const discount = birthdayDiscountWins ? birthdayDiscountAmount : promoDiscount;
+  const discountLabel = birthdayDiscountWins ? "Birthday discount" : "Promo discount";
   const total = Math.max(0, subtotal + delivery - discount);
   useEffect(() => {
     const normalizedPromoCode = checkoutForm.promoCode.trim().toUpperCase();
@@ -3060,6 +3088,7 @@ export default function App() {
       setProfileForm({
         fullName: nextUser.fullName || "",
         phone: nextUser.phone || "",
+        birthday: nextUser.birthday || "",
       });
       setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
       setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
@@ -3093,6 +3122,7 @@ export default function App() {
         setProfileForm({
           fullName: nextUser.fullName || "",
           phone: nextUser.phone || "",
+          birthday: nextUser.birthday || "",
         });
         setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
         setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
@@ -3960,11 +3990,21 @@ export default function App() {
     const normalizedEmail = String(signupForm.email || "").trim();
     const normalizedPhone = sanitizePhoneInput(signupForm.phone);
     const normalizedAddress = String(signupForm.address || "").trim();
+    const normalizedBirthday = normalizeBirthdayInput(signupForm.birthday);
 
     if (!normalizedAddress || normalizedAddress.length < 5) {
       setAccountState({
         loading: false,
         error: "Add the delivery address you use most often.",
+        success: "",
+      });
+      return;
+    }
+
+    if (!normalizedBirthday) {
+      setAccountState({
+        loading: false,
+        error: "Add your birthday so PEM can celebrate you properly.",
         success: "",
       });
       return;
@@ -3978,6 +4018,7 @@ export default function App() {
         email: normalizedEmail,
         phone: normalizedPhone,
         address: normalizedAddress,
+        birthday: normalizedBirthday,
       });
       setAccountToken(data.token || "");
       setSignupForm(initialAccountForm);
@@ -4059,13 +4100,17 @@ export default function App() {
 
   async function handleProfileSave(event) {
     event.preventDefault();
+    const normalizedBirthday = normalizeBirthdayInput(profileForm.birthday);
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
       const data = await requestJson("/api/account/profile", {
         method: "PUT",
         headers: getUserAuthHeaders(),
-        payload: profileForm,
+        payload: {
+          ...profileForm,
+          birthday: normalizedBirthday || undefined,
+        },
       });
       const nextUser = { ...initialAccountUser, ...(data.user || {}) };
       setAccountUser(nextUser);
@@ -4924,23 +4969,25 @@ export default function App() {
               </>
             )}
 
-            <div className="branch-selector-card">
-              <div>
-                <p className="eyebrow">Current branch</p>
-                <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
-                <span>{selectedBranch?.address || businessSettings.address}</span>
+            {authView !== "signup" ? (
+              <div className="branch-selector-card">
+                <div>
+                  <p className="eyebrow">Current branch</p>
+                  <strong>{selectedBranch?.label || `${businessSettings.appName} Main Branch`}</strong>
+                  <span>{selectedBranch?.address || businessSettings.address}</span>
+                </div>
+                <label className="field">
+                  <span>Choose branch</span>
+                  <select value={selectedBranch?.id || ""} onChange={(event) => handleBranchSelect(event.target.value)}>
+                    {branchLocations.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <label className="field">
-                <span>Choose branch</span>
-                <select value={selectedBranch?.id || ""} onChange={(event) => handleBranchSelect(event.target.value)}>
-                  {branchLocations.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            ) : null}
 
           </div>
 
@@ -5080,6 +5127,19 @@ export default function App() {
                     {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
                   </label>
 
+                  <label className="field">
+                    <span>Birthday</span>
+                    <input
+                      type="date"
+                      max={new Date().toISOString().slice(0, 10)}
+                      value={signupForm.birthday}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
+                      }
+                    />
+                    <small className="cart-help">PEM sends a Happy Birthday note and unlocks 15% off your first birthday order.</small>
+                  </label>
+
                   <label className="field" data-checkout-field="promoCode">
                     <span>Referral code</span>
                     <input
@@ -5092,6 +5152,19 @@ export default function App() {
                     />
                   </label>
                 </div>
+
+                <label className="field">
+                  <span>Main delivery address</span>
+                  <textarea
+                    rows="3"
+                    value={signupForm.address}
+                    onChange={(event) =>
+                      setSignupForm((previous) => ({ ...previous, address: event.target.value }))
+                    }
+                    placeholder="Street, area, city"
+                  />
+                  <small className="cart-help">PEM saves this as your default delivery address for checkout.</small>
+                </label>
 
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
                 {accountState.success ? <p className="form-message form-message--success">{accountState.success}</p> : null}
@@ -5490,6 +5563,31 @@ export default function App() {
                     />
                     <small className="cart-help">PEM will save this as your default delivery address.</small>
                   </label>
+
+                  <label className="field">
+                    <span>Birthday</span>
+                    <input
+                      type="date"
+                      max={new Date().toISOString().slice(0, 10)}
+                      value={signupForm.birthday}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
+                      }
+                    />
+                    <small className="cart-help">PEM will wish you a happy birthday and apply 15% off your first birthday order.</small>
+                  </label>
+
+                  <label className="field">
+                    <span>Referral code</span>
+                    <input
+                      type="text"
+                      value={signupForm.referralCode}
+                      onChange={(event) =>
+                        setSignupForm((previous) => ({ ...previous, referralCode: event.target.value }))
+                      }
+                      placeholder="Optional referral code"
+                    />
+                  </label>
                 </div>
 
                 {accountState.error ? <p className="form-message form-message--error">{accountState.error}</p> : null}
@@ -5635,6 +5733,26 @@ export default function App() {
                     <span>Email</span>
                     <input type="email" value={accountUser.email} disabled />
                   </label>
+
+                  <label className="field">
+                    <span>Birthday</span>
+                    <input
+                      type="date"
+                      max={new Date().toISOString().slice(0, 10)}
+                      value={profileForm.birthday}
+                      onChange={(event) =>
+                        setProfileForm((previous) => ({ ...previous, birthday: event.target.value }))
+                      }
+                    />
+                  </label>
+
+                  {accountUser.birthdayIsToday ? (
+                    <p className="account-helper">
+                      {accountUser.birthdayDiscountEligible
+                        ? `Happy Birthday. PEM will apply ${accountUser.birthdayDiscountPercent || 15}% off to your first birthday order today.`
+                        : "Happy Birthday. Your birthday reward has already been used for this year."}
+                    </p>
+                  ) : null}
 
                   <button type="submit" className="button button--primary" disabled={accountState.loading}>
                     {accountState.loading ? "Saving..." : "Save Profile"}
@@ -8481,6 +8599,21 @@ export default function App() {
                       </small>
                     ) : null}
                   </label>
+                  {accountUser.birthdayIsToday && !isGiftOrder ? (
+                    <div className="delivery-zone-card delivery-zone-card--accent">
+                      <p className="delivery-zone-card__title">Birthday reward</p>
+                      <strong>
+                        {accountUser.birthdayDiscountEligible
+                          ? `${accountUser.birthdayDiscountPercent || 15}% off is available today`
+                          : "Birthday reward already used"}
+                      </strong>
+                      <small>
+                        {accountUser.birthdayDiscountEligible
+                          ? "PEM applies the better discount automatically on your first birthday order."
+                          : "You can still use a promo code or continue with the normal checkout total."}
+                      </small>
+                    </div>
+                  ) : null}
                   </div>
 
                   {checkoutForm.paymentMethod === "Bank transfer" ? (
@@ -8611,7 +8744,7 @@ export default function App() {
             </div>
             {discount > 0 ? (
               <div className="cart-total">
-                <span>Promo discount</span>
+                <span>{discountLabel}</span>
                 <strong>-{formatPrice(discount)}</strong>
               </div>
             ) : null}
