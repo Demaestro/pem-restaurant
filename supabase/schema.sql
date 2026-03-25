@@ -180,3 +180,33 @@ add column if not exists branch_id text;
 
 alter table public.reviews
 add column if not exists branch_name text;
+
+create table if not exists public.gifts (
+  id bigint generated always as identity primary key,
+  reference text not null unique,
+  sender_email text not null,
+  sender_name text not null,
+  sender_phone text,
+  recipient_email text not null,
+  recipient_name text,
+  branch_id text,
+  branch_name text,
+  branch_address text,
+  branch_phone text,
+  delivery_zone text,
+  delivery_eta text,
+  gift_message text,
+  recipient_address text,
+  recipient_landmark text,
+  recipient_phone text,
+  items jsonb not null default '[]'::jsonb,
+  pricing jsonb not null default '{}'::jsonb,
+  payment jsonb not null default '{}'::jsonb,
+  status text not null default 'pending_acceptance',
+  order_reference text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz,
+  responded_at timestamptz
+);
+
+notify pgrst, 'reload schema';
