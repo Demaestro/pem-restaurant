@@ -153,8 +153,22 @@ button:disabled {
   text-align: center;
 }
 
+.auth-hero__copy--signup {
+  display: grid;
+  align-content: center;
+  gap: 1.15rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand) 16%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 98%, transparent), color-mix(in srgb, var(--surface) 92%, transparent));
+}
+
 .auth-hero__copy--login h1 {
   max-width: 11.5ch;
+}
+
+.auth-hero__copy--signup h1 {
+  max-width: 8ch;
+  margin-bottom: 0.25rem;
 }
 
 .auth-hero__copy--login .branch-selector-card {
@@ -242,6 +256,41 @@ button:disabled {
   line-height: 1.68;
 }
 
+.auth-hero__lead {
+  margin: 0;
+  max-width: 30rem;
+  font-size: 1.02rem;
+}
+
+.auth-signup-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.auth-signup-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1rem 1.05rem;
+  border-radius: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--surface-strong) 80%, transparent));
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-signup-card strong {
+  font-size: 1.02rem;
+  line-height: 1.2;
+}
+
+.auth-signup-card p {
+  margin: 0;
+  max-width: none;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
 .auth-hero__stats {
   margin-top: 1.5rem;
 }
@@ -257,6 +306,13 @@ button:disabled {
   gap: 1rem;
 }
 
+.auth-card--signup {
+  gap: 1.25rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand) 10%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, transparent), color-mix(in srgb, var(--surface-strong) 92%, transparent));
+}
+
 .auth-card__top {
   display: flex;
   align-items: flex-start;
@@ -267,6 +323,18 @@ button:disabled {
 .auth-card__top h3 {
   margin: 0.25rem 0 0;
   font-size: clamp(1.5rem, 2.6vw, 2rem);
+}
+
+.auth-card__top--signup {
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.auth-card__subcopy {
+  margin: 0.65rem 0 0;
+  max-width: 30rem;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .auth-form-stack {
@@ -289,8 +357,18 @@ button:disabled {
   justify-content: flex-start;
 }
 
+.auth-card__actions--signup {
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.15rem;
+}
+
 .auth-card__actions .button--primary {
   min-width: 12rem;
+}
+
+.auth-card__actions--signup .button--primary {
+  min-width: 14rem;
 }
 
 .auth-install-button {
@@ -332,6 +410,10 @@ button:disabled {
   margin-top: 0;
 }
 
+.auth-links--signup {
+  margin-top: 0;
+}
+
 .auth-links__row {
   margin: 0;
   display: flex;
@@ -359,6 +441,46 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   min-height: 3rem;
+}
+
+.auth-card__section {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem 1.05rem;
+  border-radius: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-strong) 72%, transparent);
+}
+
+.auth-card__section--compact {
+  padding-top: 0.9rem;
+  padding-bottom: 0.9rem;
+}
+
+.auth-card__section-label {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.auth-card__section-label strong {
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.auth-signup-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.95rem;
+}
+
+.auth-signup-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.auth-card__meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .auth-hero__support {
@@ -3086,6 +3208,11 @@ button:disabled {
     border-radius: 1.5rem;
   }
 
+  .auth-signup-highlights,
+  .auth-signup-grid {
+    grid-template-columns: 1fr;
+  }
+
   .branch-selector-card {
     grid-template-columns: 1fr;
   }
@@ -3098,6 +3225,14 @@ button:disabled {
   .auth-loading-card h1 {
     max-width: none;
     font-size: clamp(2.5rem, 10vw, 3.6rem);
+  }
+
+  .auth-card__section {
+    padding: 0.9rem;
+  }
+
+  .auth-card__actions--signup {
+    align-items: flex-start;
   }
 
   .dietary-form__actions .button,
