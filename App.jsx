@@ -1799,6 +1799,7 @@ export default function App() {
   const [lastAddedItemId, setLastAddedItemId] = useState(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
+  const isGiftOrder = checkoutForm.orderType === "gift";
   const [checkoutState, setCheckoutState] = useState({ loading: false, error: "" });
   const [checkoutFieldErrors, setCheckoutFieldErrors] = useState({});
   const [contactForm, setContactForm] = useState(initialContact);
@@ -2735,7 +2736,6 @@ export default function App() {
       )}`
     : "#";
   const selectedPaymentIsCard = isCardPaymentMethod(checkoutForm.paymentMethod);
-  const isGiftOrder = checkoutForm.orderType === "gift";
   const bankTransferReady = Boolean(
     String(businessSettings.bankName || "").trim() &&
       String(businessSettings.bankAccountName || "").trim() &&
@@ -5475,18 +5475,6 @@ export default function App() {
                         setSignupForm((previous) => ({ ...previous, password: event.target.value }))
                       }
                       placeholder="At least 6 characters"
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Main delivery address</span>
-                    <input
-                      type="text"
-                      value={signupForm.address}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, address: event.target.value }))
-                      }
-                      placeholder="Street, area, city"
                     />
                   </label>
 
