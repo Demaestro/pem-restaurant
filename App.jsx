@@ -4968,31 +4968,7 @@ export default function App() {
                 </div>
 
                 <p className="eyebrow">Welcome to PEM</p>
-                <h1>{authView === "signup" ? "Create your PEM account." : "Recover your PEM account."}</h1>
-                {authView === "signup" ? (
-                  <>
-                    <p className="auth-hero__lead">
-                      Join once, then move through PEM with your details already in place.
-                    </p>
-                    <div className="auth-signup-highlights">
-                      <article className="auth-signup-card">
-                        <span className="eyebrow">Saved</span>
-                        <strong>Main address</strong>
-                        <p>Start checkout faster every time you return.</p>
-                      </article>
-                      <article className="auth-signup-card">
-                        <span className="eyebrow">Birthday</span>
-                        <strong>15% first order reward</strong>
-                        <p>PEM keeps your date and celebrates you automatically.</p>
-                      </article>
-                      <article className="auth-signup-card">
-                        <span className="eyebrow">Gifting</span>
-                        <strong>Send meals to friends</strong>
-                        <p>Buy for another PEM user and let them accept in-app.</p>
-                      </article>
-                    </div>
-                  </>
-                ) : null}
+                {authView !== "signup" ? <h1>Recover your PEM account.</h1> : null}
                 {authView === "forgot" ? (
                   <p>Use your email and phone number to reset your password and get back into PEM quickly.</p>
                 ) : null}
@@ -5102,14 +5078,12 @@ export default function App() {
                   <div>
                     <p className="eyebrow">New customer</p>
                     <h3>Create your PEM account</h3>
-                    <p className="auth-card__subcopy">Keep this simple. PEM only needs the details that make repeat ordering easier.</p>
                   </div>
                 </div>
 
                 <div className="auth-card__section">
                   <div className="auth-card__section-label">
                     <span className="eyebrow">Personal details</span>
-                    <strong>Who you are</strong>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
                     <label className="field auth-signup-grid__wide" data-checkout-field="email">
@@ -5154,7 +5128,6 @@ export default function App() {
                 <div className="auth-card__section">
                   <div className="auth-card__section-label">
                     <span className="eyebrow">Account access</span>
-                    <strong>How you sign in</strong>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
                     <label className="field auth-signup-grid__wide" data-checkout-field="address">
@@ -5187,7 +5160,6 @@ export default function App() {
                 <div className="auth-card__section">
                   <div className="auth-card__section-label">
                     <span className="eyebrow">Delivery</span>
-                    <strong>Where PEM should know first</strong>
                   </div>
                   <label className="field auth-signup-grid__wide">
                     <span>Main delivery address</span>
@@ -5223,7 +5195,6 @@ export default function App() {
                   <button type="submit" className="button button--primary" disabled={accountState.loading}>
                     {accountState.loading ? "Creating account..." : "Create Account"}
                   </button>
-                  <p className="auth-card__meta">You can update these later in Account.</p>
                 </div>
 
                 <div className="auth-links auth-links--signup">
