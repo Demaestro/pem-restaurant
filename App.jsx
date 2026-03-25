@@ -2024,6 +2024,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const previousScrollRestoration = window.history.scrollRestoration;
+
+    try {
+      window.history.scrollRestoration = "manual";
+    } catch {
+      // Ignore browsers that do not allow changing scroll restoration.
+    }
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+
+    return () => {
+      try {
+        window.history.scrollRestoration = previousScrollRestoration || "auto";
+      } catch {
+        // Ignore browsers that do not allow changing scroll restoration.
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     function handleHeaderScroll() {
       setIsCompactHeader(window.scrollY > 32);
     }
