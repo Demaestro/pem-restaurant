@@ -212,14 +212,6 @@ function sanitizeUser(user) {
   return rest;
 }
 
-function sanitizePublicSettings(settings) {
-  return {
-    ...settings,
-    promoCodesText: "",
-    staffAdminsText: "",
-  };
-}
-
 function buildLoyaltyTier(points) {
   if (points >= 120) return "gold";
   if (points >= 60) return "silver";
@@ -799,26 +791,17 @@ app.get("/api/menu", asyncHandler(async (_request, response) => {
   response.json({ menuItems });
 }));
 
-app.get("/api/bootstrap", asyncHandler(async (request, response) => {
-  const adminSession = getOptionalAdminSession(request);
-  const [menuItems, deliveryZones, settings] = await Promise.all([
-    storage.getMenuItems(),
-    storage.getDeliveryZones(),
-    storage.getSettings(),
-  ]);
-
-  response.json({
-    menuItems,
-    deliveryZones,
-    settings: adminSession ? settings : sanitizePublicSettings(settings),
-  });
-}));
-
 app.get("/api/settings", asyncHandler(async (request, response) => {
   const settings = await storage.getSettings();
   const adminSession = getOptionalAdminSession(request);
   response.json({
-    settings: adminSession ? settings : sanitizePublicSettings(settings),
+    settings: adminSession
+      ? settings
+      : {
+          ...settings,
+          promoCodesText: "",
+          staffAdminsText: "",
+        },
   });
 }));
 

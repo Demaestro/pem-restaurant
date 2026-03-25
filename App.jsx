@@ -1564,18 +1564,6 @@ function getQueryParamFromHash(hashValue = "", key = "") {
   return String(params.get(key) || "").trim();
 }
 
-function scrollViewportToTop() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.scrollTo({
-    top: 0,
-    left: 0,
-    behavior: "auto",
-  });
-}
-
 function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   const normalizedNeeds = needs.trim().toLowerCase();
   const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
@@ -2482,63 +2470,13 @@ export default function App() {
   }, [accountToken]);
 
   useEffect(() => {
-    const cachedZones = readCachedJson("pem-delivery-zones-cache", defaultDeliveryZones, CACHE_TTL.deliveryZones);
-    if (Array.isArray(cachedZones) && cachedZones.length > 0) {
-      setDeliveryZones(cachedZones);
-      setDeliveryZoneAdminState((previous) => ({
-        ...previous,
-        zones: cachedZones,
-      }));
-    }
-
-    const cachedMenu = readCachedJson("pem-menu-cache", null, CACHE_TTL.menu);
-    if (Array.isArray(cachedMenu) && cachedMenu.length > 0) {
-      const mergedItems = mergeMenuCatalog(menuItems, cachedMenu);
-      setMenuCatalog(mergedItems);
-      setMenuAdminState((previous) => ({
-        ...previous,
-        loading: false,
-        items: mergedItems,
-      }));
-    }
-
-    const cachedSettings = readCachedJson("pem-settings-cache", null, CACHE_TTL.settings);
-    if (cachedSettings) {
-      const nextSettings = {
-        ...initialBusinessSettings,
-        ...cachedSettings,
-        promoCodesText: "",
-        staffAdminsText: "",
-      };
-      setBusinessSettings(nextSettings);
-      setSettingsAdminState((previous) => ({
-        ...previous,
-        loading: false,
-        settings: nextSettings,
-      }));
-    }
-
-    loadPublicBootstrap();
+    loadPublicDeliveryZones();
+    loadMenuCatalog();
+    loadPublicSettings();
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !accountHydrated) {
-      return;
-    }
-
-    if (!accountToken && !adminToken) {
-      const frameId = window.requestAnimationFrame(() => {
-        scrollViewportToTop();
-      });
-      return () => window.cancelAnimationFrame(frameId);
-    }
-  }, [accountHydrated, accountToken, adminToken, authView]);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      loadPublicReviews(selectedBranch?.id || "");
-    }, 500);
-    return () => window.clearTimeout(timeoutId);
+    loadPublicReviews(selectedBranch?.id || "");
   }, [selectedBranch?.id]);
 
   useEffect(() => {
@@ -3457,47 +3395,6 @@ export default function App() {
     } catch {
       const cachedZones = readCachedJson("pem-delivery-zones-cache", defaultDeliveryZones, CACHE_TTL.deliveryZones);
       setDeliveryZones(Array.isArray(cachedZones) && cachedZones.length > 0 ? cachedZones : defaultDeliveryZones);
-    }
-  }
-
-  async function loadPublicBootstrap() {
-    try {
-      const data = await requestJson("/api/bootstrap", { retryOnTimeout: true });
-
-      if (Array.isArray(data.deliveryZones) && data.deliveryZones.length > 0) {
-        setDeliveryZones(data.deliveryZones);
-        writeCachedJson("pem-delivery-zones-cache", data.deliveryZones);
-        setDeliveryZoneAdminState((previous) => ({
-          ...previous,
-          zones: data.deliveryZones,
-        }));
-      }
-
-      if (Array.isArray(data.menuItems) && data.menuItems.length > 0) {
-        const mergedItems = mergeMenuCatalog(menuItems, data.menuItems);
-        setMenuCatalog(mergedItems);
-        writeCachedJson("pem-menu-cache", mergedItems);
-        setMenuAdminState((previous) => ({
-          ...previous,
-          loading: false,
-          error: "",
-          items: mergedItems,
-        }));
-      }
-
-      if (data.settings) {
-        const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
-        setBusinessSettings(nextSettings);
-        writeCachedJson("pem-settings-cache", nextSettings);
-        setSettingsAdminState((previous) => ({
-          ...previous,
-          loading: false,
-          error: "",
-          settings: nextSettings,
-        }));
-      }
-    } catch {
-      // Keep the app responsive with cached/default values if the backend is waking up.
     }
   }
 
