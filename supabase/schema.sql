@@ -221,4 +221,20 @@ create table if not exists public.gifts (
   responded_at timestamptz
 );
 
+create table if not exists public.password_recovery_requests (
+  id bigint generated always as identity primary key,
+  reference text not null unique,
+  user_email text not null,
+  full_name text,
+  phone_last4 text,
+  status text not null default 'pending_review',
+  approval_code_hash text,
+  approval_code_expires_at timestamptz,
+  reviewed_by text,
+  reviewed_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
 notify pgrst, 'reload schema';
