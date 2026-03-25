@@ -742,49 +742,12 @@ function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
 }
 
-function readLocalStorage(key, fallback = "") {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-
-  try {
-    const value = window.localStorage.getItem(key);
-    return value ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeLocalStorage(key, value) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore storage issues so PEM can still render.
-  }
-}
-
-function removeLocalStorage(key) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // Ignore storage issues so PEM can still render.
-  }
-}
-
 function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINITY) {
   if (typeof window === "undefined") {
     return fallback;
   }
   try {
-    const rawValue = readLocalStorage(key, "");
+    const rawValue = window.localStorage.getItem(key);
     if (!rawValue) {
       return fallback;
     }
@@ -802,14 +765,14 @@ function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINIT
         maxAgeMs !== Number.POSITIVE_INFINITY &&
         Date.now() - Number(parsed.savedAt || 0) > maxAgeMs
       ) {
-        removeLocalStorage(key);
+        window.localStorage.removeItem(key);
         return fallback;
       }
       return parsed.value;
     }
 
     if (Number.isFinite(maxAgeMs) && maxAgeMs !== Number.POSITIVE_INFINITY) {
-      removeLocalStorage(key);
+      window.localStorage.removeItem(key);
       return fallback;
     }
 
@@ -824,7 +787,7 @@ function writeCachedJson(key, value) {
     return;
   }
   try {
-    writeLocalStorage(
+    window.localStorage.setItem(
       key,
       JSON.stringify({
         savedAt: Date.now(),
@@ -2139,7 +2102,7 @@ export default function App() {
     ].slice(0, 5);
     setSavedReferences(nextSavedReferences);
     if (typeof window !== "undefined") {
-      writeLocalStorage("pem-order-history", JSON.stringify(nextSavedReferences));
+      window.localStorage.setItem("pem-order-history", JSON.stringify(nextSavedReferences));
     }
 
     if (!accountToken) {
@@ -2224,8 +2187,8 @@ export default function App() {
     if (typeof window !== "undefined") {
       if (selectedBranchId) {
         try {
-          const persistedBranchCarts = JSON.parse(readLocalStorage("pem-branch-carts", "{}") || "{}");
-          writeLocalStorage(
+          const persistedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
+          window.localStorage.setItem(
             "pem-branch-carts",
             JSON.stringify({
               ...persistedBranchCarts,
@@ -2236,12 +2199,12 @@ export default function App() {
           // Ignore local storage write issues.
         }
       }
-      removeLocalStorage("pem-checkout-draft");
+      window.localStorage.removeItem("pem-checkout-draft");
     }
   }
 
   useEffect(() => {
-    const savedTheme = readLocalStorage("pem-theme", "");
+    const savedTheme = window.localStorage.getItem("pem-theme");
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
     }
@@ -2314,7 +2277,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const savedCheckout = JSON.parse(readLocalStorage("pem-checkout-draft", "null") || "null");
+      const savedCheckout = JSON.parse(window.localStorage.getItem("pem-checkout-draft") || "null");
       if (savedCheckout && typeof savedCheckout === "object") {
         setCheckoutForm((previous) => ({
           ...previous,
@@ -2338,11 +2301,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const storedFavorites = JSON.parse(readLocalStorage("pem-favorites", "[]") || "[]");
-      const storedReferences = JSON.parse(readLocalStorage("pem-order-history", "[]") || "[]");
-      const storedBranchId = readLocalStorage("pem-selected-branch", "");
-      const storedBranchCarts = JSON.parse(readLocalStorage("pem-branch-carts", "{}") || "{}");
-      const storedRecentlyViewed = JSON.parse(readLocalStorage("pem-recently-viewed", "[]") || "[]");
+      const storedFavorites = JSON.parse(window.localStorage.getItem("pem-favorites") || "[]");
+      const storedReferences = JSON.parse(window.localStorage.getItem("pem-order-history") || "[]");
+      const storedBranchId = window.localStorage.getItem("pem-selected-branch") || "";
+      const storedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
+      const storedRecentlyViewed = JSON.parse(window.localStorage.getItem("pem-recently-viewed") || "[]");
       if (Array.isArray(storedFavorites)) {
         setFavorites(storedFavorites);
       }
@@ -2369,19 +2332,19 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    writeLocalStorage("pem-theme", theme);
+    window.localStorage.setItem("pem-theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    writeLocalStorage("pem-favorites", JSON.stringify(favorites));
+    window.localStorage.setItem("pem-favorites", JSON.stringify(favorites));
   }, [favorites]);
 
   useEffect(() => {
-    writeLocalStorage("pem-recently-viewed", JSON.stringify(recentlyViewed));
+    window.localStorage.setItem("pem-recently-viewed", JSON.stringify(recentlyViewed));
   }, [recentlyViewed]);
 
   useEffect(() => {
-    writeLocalStorage("pem-order-history", JSON.stringify(savedReferences));
+    window.localStorage.setItem("pem-order-history", JSON.stringify(savedReferences));
   }, [savedReferences]);
 
   useEffect(() => {
@@ -2398,7 +2361,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      writeLocalStorage(
+      window.localStorage.setItem(
         "pem-checkout-draft",
         JSON.stringify({
           customerName: checkoutForm.customerName,
@@ -2444,7 +2407,7 @@ export default function App() {
   }, [availableCheckoutPaymentOptions, checkoutForm.paymentMethod]);
 
   useEffect(() => {
-    const savedAccountToken = readLocalStorage("pem-account-token", "");
+    const savedAccountToken = window.localStorage.getItem("pem-account-token");
     if (savedAccountToken) {
       setAccountToken(savedAccountToken);
     } else {
@@ -2453,10 +2416,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const savedAdminToken = readLocalStorage("pem-admin-token", "");
+    const savedAdminToken = window.localStorage.getItem("pem-admin-token");
     let savedAdminProfile = null;
     try {
-      savedAdminProfile = JSON.parse(readLocalStorage("pem-admin-profile", "null") || "null");
+      savedAdminProfile = JSON.parse(window.localStorage.getItem("pem-admin-profile") || "null");
     } catch {
       savedAdminProfile = null;
     }
@@ -2470,14 +2433,14 @@ export default function App() {
 
   useEffect(() => {
     if (adminToken) {
-      writeLocalStorage("pem-admin-token", adminToken);
+      window.localStorage.setItem("pem-admin-token", adminToken);
       loadAdminData(adminToken);
       loadDeliveryZones(adminToken);
       loadMenuCatalog(adminToken);
       loadPublicSettings(adminToken);
     } else {
-      removeLocalStorage("pem-admin-token");
-      removeLocalStorage("pem-admin-profile");
+      window.localStorage.removeItem("pem-admin-token");
+      window.localStorage.removeItem("pem-admin-profile");
       setAdminSession(initialAdminSession);
       setAdminState(initialAdminState);
     }
@@ -2487,15 +2450,15 @@ export default function App() {
     if (!adminToken) {
       return;
     }
-    writeLocalStorage("pem-admin-profile", JSON.stringify(adminSession));
+    window.localStorage.setItem("pem-admin-profile", JSON.stringify(adminSession));
   }, [adminSession, adminToken]);
 
   useEffect(() => {
     if (accountToken) {
-      writeLocalStorage("pem-account-token", accountToken);
+      window.localStorage.setItem("pem-account-token", accountToken);
       loadAccount(accountToken);
     } else {
-      removeLocalStorage("pem-account-token");
+      window.localStorage.removeItem("pem-account-token");
       setAccountUser(initialAccountUser);
       setAccountOrders([]);
       setAccountGifts(initialAccountGifts);
@@ -2557,7 +2520,7 @@ export default function App() {
     if (!selectedBranchId) {
       return;
     }
-    writeLocalStorage("pem-selected-branch", selectedBranchId);
+    window.localStorage.setItem("pem-selected-branch", selectedBranchId);
   }, [selectedBranchId]);
 
   useEffect(() => {
@@ -2596,7 +2559,7 @@ export default function App() {
     if (!branchCartHydrated) {
       return;
     }
-    writeLocalStorage("pem-branch-carts", JSON.stringify(branchCarts));
+    window.localStorage.setItem("pem-branch-carts", JSON.stringify(branchCarts));
   }, [branchCartHydrated, branchCarts]);
 
   useEffect(() => {

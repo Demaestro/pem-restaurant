@@ -1,6 +1,6 @@
-const CACHE_NAME = "pem-pwa-v5";
+const CACHE_NAME = "pem-pwa-v3";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/pem-icon.jpeg", "/offline.html"];
-const RUNTIME_CACHE = "pem-runtime-v5";
+const RUNTIME_CACHE = "pem-runtime-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -12,11 +12,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME && key !== RUNTIME_CACHE)
-          .map((key) => caches.delete(key)),
-      ),
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
     ),
   );
   self.clients.claim();
