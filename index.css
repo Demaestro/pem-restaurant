@@ -285,6 +285,12 @@ button:disabled {
   align-items: center;
 }
 
+.auth-card__helper {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .auth-card__actions--login {
   justify-content: flex-start;
 }
@@ -410,6 +416,12 @@ button:disabled {
 .branch-bar__toggle small,
 .branch-bar__summary span {
   color: var(--muted);
+}
+
+.branch-selector-card__actions {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.45rem;
 }
 
 .topbar {
@@ -809,6 +821,15 @@ button:disabled {
   justify-items: end;
   gap: 0.2rem;
   text-align: right;
+}
+
+.branch-bar__location-button {
+  justify-self: end;
+  margin-top: 0.25rem;
+}
+
+.branch-feedback {
+  margin: 0.55rem 4.5rem 0;
 }
 
 .pre-menu-tools {
@@ -2466,6 +2487,94 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.gift-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.gift-summary > div {
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, var(--brand-soft));
+}
+
+.gift-summary strong {
+  display: block;
+  font-size: 1.15rem;
+}
+
+.gift-summary span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gift-card__content {
+  display: grid;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.gift-card__message {
+  font-style: italic;
+}
+
+.gift-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.gift-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.gift-pill--accepted {
+  background: color-mix(in srgb, var(--success) 16%, var(--surface));
+  color: var(--success);
+}
+
+.gift-pill--declined {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+}
+
+.gift-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.gift-accept-form {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.4rem;
+  padding: 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
+  background: color-mix(in srgb, var(--surface) 92%, var(--brand-soft));
+}
+
+.gift-address-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .tracking-timeline {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
@@ -2551,8 +2660,16 @@ button:disabled {
   font-weight: 600;
 }
 
+.form-message--compact {
+  margin-top: 0.25rem;
+}
+
 .form-message--error {
   color: var(--error);
+}
+
+.form-message--notice {
+  color: color-mix(in srgb, var(--brand) 72%, var(--text));
 }
 
 .form-message--success {
@@ -2700,6 +2817,11 @@ button:disabled {
 .delivery-zone-card--accent {
   border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
   background: linear-gradient(135deg, color-mix(in srgb, var(--brand-soft) 78%, var(--surface)), var(--surface));
+}
+
+.delivery-zone-card--muted {
+  background: color-mix(in srgb, var(--surface) 92%, var(--brand-soft));
+  border-color: color-mix(in srgb, var(--line) 86%, var(--brand-soft));
 }
 
 .delivery-zone-card__title {
@@ -2918,6 +3040,7 @@ button:disabled {
 
   .branch-bar,
   .branch-menu,
+  .branch-feedback,
   .reviews-section,
   .trust-section {
     margin-left: 1rem;
@@ -2966,10 +3089,18 @@ button:disabled {
     text-align: left;
   }
 
+  .branch-bar__location-button {
+    justify-self: start;
+  }
+
   .branch-menu {
     position: static;
     margin-top: 0.65rem;
     max-height: min(18rem, calc(100vh - 14rem));
+  }
+
+  .segmented-toggle {
+    width: 100%;
   }
 
   .cart-suggestion {
@@ -3516,6 +3647,43 @@ button:disabled {
   font-size: 0.84rem;
 }
 
+.checkout-location-mode {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.checkout-location-mode--tight {
+  margin-top: 0.1rem;
+}
+
+.segmented-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brand) 12%, var(--line));
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+}
+
+.segmented-toggle button {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  padding: 0.72rem 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.segmented-toggle button.is-active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 82%, #ff9a73), var(--brand));
+  color: #fff7f0;
+  box-shadow: 0 12px 28px rgba(146, 27, 20, 0.18);
+}
+
 .payment-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3554,30 +3722,6 @@ button:disabled {
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.06em;
-}
-
-.payment-option span {
-  font-size: 0;
-}
-
-.payment-option span::after {
-  font-size: 0.75rem;
-}
-
-.payment-option:nth-child(1) span::after {
-  content: "COD";
-}
-
-.payment-option:nth-child(2) span::after {
-  content: "TRF";
-}
-
-.payment-option:nth-child(3) span::after {
-  content: "POS";
-}
-
-.payment-option:nth-child(4) span::after {
-  content: "PAY";
 }
 
 .payment-option strong {
@@ -3748,6 +3892,7 @@ button:disabled {
   .combo-grid--compact,
   .payment-options,
   .cart-order-summary,
+  .gift-summary,
   .admin-bulk-bar {
     grid-template-columns: 1fr;
   }
