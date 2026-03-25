@@ -32,6 +32,9 @@ const authAttemptBuckets = new Map();
 const BIRTHDAY_DISCOUNT_PERCENT = 15;
 const OWNER_ADMIN_USERNAME = "owner";
 const PASSWORD_RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
+const USER_SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const JSON_BODY_LIMIT = "150kb";
 const authAttemptPolicies = {
   userLogin: {
     windowMs: 10 * 60 * 1000,
@@ -59,6 +62,7 @@ const authAttemptPolicies = {
   },
 };
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+app.disable("x-powered-by");
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
@@ -143,7 +147,14 @@ app.use(
     },
   }),
 );
-app.use(express.json());
+app.use((request, response, next) => {
+  response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), payment=()");
+  next();
+});
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 function makeReference(prefix) {
   const random = Math.floor(1000 + Math.random() * 9000);
@@ -224,14 +235,36 @@ function clearAttemptBucket(scope, request, identifier = "") {
   authAttemptBuckets.delete(buildAttemptKey(scope, request, identifier));
 }
 
+function readActiveSession(sessionStore, token, ttlMs) {
+  if (!token) {
+    return null;
+  }
+  const session = sessionStore.get(token);
+  if (!session) {
+    return null;
+  }
+  const lastSeenAt = Date.parse(session.lastSeenAt || session.createdAt || "");
+  if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt > ttlMs) {
+    sessionStore.delete(token);
+    return null;
+  }
+  const refreshedSession = {
+    ...session,
+    lastSeenAt: new Date().toISOString(),
+  };
+  sessionStore.set(token, refreshedSession);
+  return refreshedSession;
+}
+
 function requireAdmin(request, response, next) {
   const token = getBearerToken(request);
+  const session = readActiveSession(adminSessions, token, ADMIN_SESSION_TTL_MS);
 
-  if (!token || !adminSessions.has(token)) {
+  if (!token || !session) {
     return response.status(401).json({ error: "Admin login required." });
   }
 
-  request.adminSession = adminSessions.get(token);
+  request.adminSession = session;
   next();
 }
 
@@ -244,7 +277,7 @@ function requireOwnerAdmin(request, response, next) {
 
 function requireUser(request, response, next) {
   const token = getBearerToken(request);
-  const session = userSessions.get(token);
+  const session = readActiveSession(userSessions, token, USER_SESSION_TTL_MS);
 
   if (!token || !session?.email) {
     return response.status(401).json({ error: "User login required." });
@@ -256,12 +289,12 @@ function requireUser(request, response, next) {
 
 function getOptionalUserSession(request) {
   const token = getBearerToken(request);
-  return token ? userSessions.get(token) || null : null;
+  return readActiveSession(userSessions, token, USER_SESSION_TTL_MS);
 }
 
 function getOptionalAdminSession(request) {
   const token = getBearerToken(request);
-  return token ? adminSessions.get(token) || null : null;
+  return readActiveSession(adminSessions, token, ADMIN_SESSION_TTL_MS);
 }
 
 function asyncHandler(handler) {
@@ -367,6 +400,13 @@ function sanitizePasswordRecoveryRequest(entry) {
 
 function createRecoveryCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function normalizeProfileText(value, maxLength = 160) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function buildLoyaltyTier(points) {
@@ -961,20 +1001,30 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   const { fullName, email, password, phone, address, birthday, referralCode } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  const normalizedAddress = String(address || "").trim();
+  const normalizedFullName = normalizeProfileText(fullName, 80);
+  const normalizedPhone = sanitizePhoneInput(phone);
+  const normalizedAddress = normalizeProfileText(address, 180);
   const normalizedBirthday = normalizeBirthday(birthday);
   const now = getLagosDateParts();
 
-  if (!fullName || !normalizedEmail || !password) {
-    return response.status(400).json({ error: "Full name, email, and password are required." });
+  if (!normalizedFullName || !normalizedEmail || !password || !normalizedPhone) {
+    return response.status(400).json({ error: "Full name, email, phone number, and password are required." });
+  }
+
+  if (normalizePhoneDigits(normalizedPhone).length < 10) {
+    return response.status(400).json({ error: "Enter a valid phone number before creating your PEM account." });
+  }
+
+  if (normalizedAddress.length < 5) {
+    return response.status(400).json({ error: "Add a valid main delivery address before creating your PEM account." });
   }
 
   if (!normalizedBirthday) {
     return response.status(400).json({ error: "A valid birthday is required to create your PEM account." });
   }
 
-  if (String(password).length < 6) {
-    return response.status(400).json({ error: "Password must be at least 6 characters long." });
+  if (String(password).length < 8) {
+    return response.status(400).json({ error: "Password must be at least 8 characters long." });
   }
 
   const existingUser = await storage.getUserByEmail(normalizedEmail);
@@ -991,8 +1041,8 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   const user = await storage.createUser({
     email: normalizedEmail,
     passwordHash: createPasswordHash(password),
-    fullName: String(fullName).trim(),
-    phone: String(phone || "").trim(),
+    fullName: normalizedFullName,
+    phone: normalizedPhone,
     birthday: normalizedBirthday,
     favoriteItemIds: [],
     savedAddresses: normalizedAddress ? [normalizedAddress] : [],
@@ -1009,7 +1059,11 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   });
 
   const token = createAdminToken();
-  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+  userSessions.set(token, {
+    email: user.email,
+    createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+  });
 
   response.status(201).json({
     token,
@@ -1035,7 +1089,11 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   const activeUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
 
   const token = createAdminToken();
-  userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
+  userSessions.set(token, {
+    email: activeUser.email,
+    createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+  });
   clearAttemptBucket("userLogin", request, normalizedEmail);
 
   response.json({
@@ -1187,10 +1245,13 @@ app.put("/api/account/profile", requireUser, asyncHandler(async (request, respon
 
   const nextUser = {
     ...user,
-    fullName: String(request.body?.fullName || user.fullName).trim(),
-    phone: String(request.body?.phone || user.phone || "").trim(),
+    fullName: normalizeProfileText(request.body?.fullName || user.fullName, 80),
+    phone: sanitizePhoneInput(request.body?.phone || user.phone || ""),
     birthday: request.body?.birthday === undefined ? (user.birthday || "") : normalizeBirthday(request.body?.birthday),
   };
+  if (!nextUser.fullName || normalizePhoneDigits(nextUser.phone).length < 10) {
+    return response.status(400).json({ error: "Add a full name and a valid phone number before saving your profile." });
+  }
   if (request.body?.birthday !== undefined && !nextUser.birthday) {
     return response.status(400).json({ error: "Enter a valid birthday before saving your profile." });
   }
@@ -1206,8 +1267,14 @@ app.put("/api/account/addresses", requireUser, asyncHandler(async (request, resp
   }
 
   const savedAddresses = Array.isArray(request.body?.savedAddresses)
-    ? request.body.savedAddresses.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 5)
+    ? request.body.savedAddresses
+        .map((item) => normalizeProfileText(item, 180))
+        .filter((item) => item.length >= 5)
+        .slice(0, 5)
     : [];
+  if (Array.isArray(request.body?.savedAddresses) && request.body.savedAddresses.length > 0 && savedAddresses.length === 0) {
+    return response.status(400).json({ error: "Add at least one valid saved address before updating this section." });
+  }
   const savedUser = await storage.updateUser(user.email, {
     ...user,
     savedAddresses,
@@ -1723,6 +1790,7 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
   const token = createAdminToken();
   const session = {
     createdAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
     username: matchedStaffAdmin?.username || OWNER_ADMIN_USERNAME,
     label: matchedStaffAdmin?.label || "Owner",
     branchId: matchedStaffAdmin?.branchId || "",

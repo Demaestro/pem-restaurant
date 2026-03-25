@@ -1542,6 +1542,17 @@ button:disabled {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
 }
 
+.field.is-invalid span {
+  color: #b44848;
+}
+
+.field.is-invalid input,
+.field.is-invalid select,
+.field.is-invalid textarea {
+  border-color: rgba(214, 72, 72, 0.78);
+  box-shadow: 0 0 0 3px rgba(214, 72, 72, 0.12);
+}
+
 .field__error {
   margin: -0.1rem 0 0;
   color: #d64848;

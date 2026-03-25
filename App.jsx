@@ -704,6 +704,16 @@ const initialAccountForm = {
   referralCode: "",
 };
 
+const initialSignupFieldErrors = {
+  fullName: "",
+  phone: "",
+  birthday: "",
+  email: "",
+  password: "",
+  address: "",
+  referralCode: "",
+};
+
 const initialAccountGifts = {
   received: [],
   sent: [],
@@ -984,6 +994,38 @@ function normalizeBirthdayInput(value) {
     return "";
   }
   return normalized;
+}
+
+function validateSignupValue(field, value) {
+  if (field === "fullName") {
+    return String(value || "").trim().length < 2 ? "Enter your full name" : "";
+  }
+  if (field === "phone") {
+    return normalizePhoneDigits(value).length < 10 ? "Phone must be at least 10 digits" : "";
+  }
+  if (field === "birthday") {
+    return normalizeBirthdayInput(value) ? "" : "Choose a valid birthday";
+  }
+  if (field === "email") {
+    const normalizedValue = String(value || "").trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedValue) ? "" : "Enter a valid email";
+  }
+  if (field === "password") {
+    return String(value || "").length < 8 ? "Password must be at least 8 characters" : "";
+  }
+  if (field === "address") {
+    return String(value || "").trim().length < 5 ? "Enter your main delivery address" : "";
+  }
+  return "";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function getWhatsAppPhone(settings) {
@@ -1769,6 +1811,7 @@ export default function App() {
   const [accountHydrated, setAccountHydrated] = useState(false);
   const [authView, setAuthView] = useState("login");
   const [signupForm, setSignupForm] = useState(initialAccountForm);
+  const [signupFieldErrors, setSignupFieldErrors] = useState(initialSignupFieldErrors);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [forgotPasswordStage, setForgotPasswordStage] = useState("request");
@@ -1901,6 +1944,36 @@ export default function App() {
       error = "Enter a delivery address";
     }
     setCheckoutFieldErrors((previous) => ({ ...previous, [field]: error }));
+  }
+
+  function validateSignupField(field, value) {
+    const error = validateSignupValue(field, value);
+    setSignupFieldErrors((previous) => ({ ...previous, [field]: error }));
+    return error;
+  }
+
+  function updateSignupField(field, value) {
+    setSignupForm((previous) => ({ ...previous, [field]: value }));
+    setSignupFieldErrors((previous) => (previous[field] ? { ...previous, [field]: "" } : previous));
+  }
+
+  function focusSignupField(field) {
+    if (typeof document === "undefined" || !field) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const fieldElement = document.querySelector(
+        `[data-signup-field="${field}"] input, [data-signup-field="${field}"] textarea, [data-signup-field="${field}"] select`,
+      );
+
+      if (!fieldElement) {
+        return;
+      }
+
+      fieldElement.focus();
+      fieldElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 
   function focusCheckoutField(field) {
@@ -2304,6 +2377,12 @@ export default function App() {
     }
     setForgotPasswordStage("request");
     setForgotPasswordForm(initialForgotPasswordForm);
+  }, [authView]);
+
+  useEffect(() => {
+    if (authView !== "signup") {
+      setSignupFieldErrors(initialSignupFieldErrors);
+    }
   }, [authView]);
 
   useEffect(() => {
@@ -3868,12 +3947,12 @@ export default function App() {
       .map(
         (item) => `
           <tr>
-            <td>${item.name}</td>
+            <td>${escapeHtml(item.name)}</td>
             <td>${item.quantity}</td>
             <td>${formatPrice(item.price)}</td>
             <td>${formatPrice(item.price * item.quantity)}</td>
           </tr>
-          ${item.note ? `<tr><td colspan="4" style="font-size:12px;color:#555;">Note: ${item.note}</td></tr>` : ""}
+          ${item.note ? `<tr><td colspan="4" style="font-size:12px;color:#555;">Note: ${escapeHtml(item.note)}</td></tr>` : ""}
         `,
       )
       .join("");
@@ -3881,7 +3960,7 @@ export default function App() {
     slipWindow.document.write(`
       <html>
         <head>
-          <title>PEM Order Slip - ${order.reference}</title>
+          <title>PEM Order Slip - ${escapeHtml(order.reference)}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 24px; color: #1f1f1f; }
             h1, p { margin: 0 0 10px; }
@@ -3895,19 +3974,19 @@ export default function App() {
         </head>
         <body>
           <h1>PEM Order Slip</h1>
-          <p>${order.reference}</p>
+          <p>${escapeHtml(order.reference)}</p>
           <div class="meta">
-            <p><strong>Customer:</strong> ${order.customer.customerName}</p>
-            <p><strong>Phone:</strong> ${order.customer.phone}</p>
-            <p><strong>Address:</strong> ${order.customer.address}</p>
-            <p><strong>Landmark:</strong> ${order.customer.landmark || "-"}</p>
-            <p><strong>Fulfillment:</strong> ${order.customer.fulfillmentMethod || "delivery"}</p>
-            <p><strong>Scheduled For:</strong> ${order.customer.scheduledFor ? formatDateTime(order.customer.scheduledFor) : "-"}</p>
-            <p><strong>Payment:</strong> ${order.customer.paymentMethod}</p>
-            <p><strong>Payment Status:</strong> ${order.payment?.status || "unpaid"}</p>
-            <p><strong>Payment Reference:</strong> ${order.payment?.reference || "-"}</p>
-            <p><strong>Created:</strong> ${formatDateTime(order.createdAt)}</p>
-            <p><strong>Status:</strong> ${order.status}</p>
+            <p><strong>Customer:</strong> ${escapeHtml(order.customer.customerName)}</p>
+            <p><strong>Phone:</strong> ${escapeHtml(order.customer.phone)}</p>
+            <p><strong>Address:</strong> ${escapeHtml(order.customer.address)}</p>
+            <p><strong>Landmark:</strong> ${escapeHtml(order.customer.landmark || "-")}</p>
+            <p><strong>Fulfillment:</strong> ${escapeHtml(order.customer.fulfillmentMethod || "delivery")}</p>
+            <p><strong>Scheduled For:</strong> ${escapeHtml(order.customer.scheduledFor ? formatDateTime(order.customer.scheduledFor) : "-")}</p>
+            <p><strong>Payment:</strong> ${escapeHtml(order.customer.paymentMethod)}</p>
+            <p><strong>Payment Status:</strong> ${escapeHtml(order.payment?.status || "unpaid")}</p>
+            <p><strong>Payment Reference:</strong> ${escapeHtml(order.payment?.reference || "-")}</p>
+            <p><strong>Created:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
+            <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
           </div>
           <table>
             <thead>
@@ -3926,7 +4005,7 @@ export default function App() {
             <p><strong>Discount:</strong> ${formatPrice(order.pricing.discount || 0)}</p>
             <p><strong>Grand Total:</strong> ${formatPrice(order.pricing.total)}</p>
           </div>
-          <p style="margin-top:20px;font-size:12px;color:#666;">${businessSettings.receiptFooter}</p>
+          <p style="margin-top:20px;font-size:12px;color:#666;">${escapeHtml(businessSettings.receiptFooter)}</p>
         </body>
       </html>
     `);
@@ -3939,7 +4018,7 @@ export default function App() {
     const receiptMarkup = `
       <html>
         <head>
-          <title>${order.reference} Receipt</title>
+          <title>${escapeHtml(order.reference)} Receipt</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 24px; color: #1f1f1f; }
             h1, h2, p { margin: 0 0 10px; }
@@ -3950,22 +4029,22 @@ export default function App() {
           </style>
         </head>
         <body>
-          <h1>${businessSettings.appName} Receipt</h1>
-          <p>${businessSettings.businessName}</p>
-          <p>${order.reference}</p>
+          <h1>${escapeHtml(businessSettings.appName)} Receipt</h1>
+          <p>${escapeHtml(businessSettings.businessName)}</p>
+          <p>${escapeHtml(order.reference)}</p>
           <div class="block">
             <h2>Customer</h2>
-            <p>Branch: ${order.customer.branchName || selectedBranch?.label || "PEM Branch"}</p>
-            <p>${order.customer.customerName}</p>
-            <p>${order.customer.phone}</p>
-            <p>${order.customer.address}</p>
+            <p>Branch: ${escapeHtml(order.customer.branchName || selectedBranch?.label || "PEM Branch")}</p>
+            <p>${escapeHtml(order.customer.customerName)}</p>
+            <p>${escapeHtml(order.customer.phone)}</p>
+            <p>${escapeHtml(order.customer.address)}</p>
           </div>
           <div class="block">
             <h2>Payment</h2>
-            <p>Method: ${order.customer.paymentMethod}</p>
-            <p>Status: ${order.payment?.status || "unpaid"}</p>
-            <p>Reference: ${order.payment?.reference || "-"}</p>
-            <p>Paid At: ${formatDateTime(order.payment?.paidAt)}</p>
+            <p>Method: ${escapeHtml(order.customer.paymentMethod)}</p>
+            <p>Status: ${escapeHtml(order.payment?.status || "unpaid")}</p>
+            <p>Reference: ${escapeHtml(order.payment?.reference || "-")}</p>
+            <p>Paid At: ${escapeHtml(formatDateTime(order.payment?.paidAt))}</p>
           </div>
           <table>
             <thead>
@@ -3974,7 +4053,7 @@ export default function App() {
             <tbody>
               ${order.items
                 .map(
-                  (item) => `<tr><td>${item.name}</td><td>${item.quantity}</td><td>${formatPrice(item.price)}</td><td>${formatPrice(item.price * item.quantity)}</td></tr>`,
+                  (item) => `<tr><td>${escapeHtml(item.name)}</td><td>${item.quantity}</td><td>${formatPrice(item.price)}</td><td>${formatPrice(item.price * item.quantity)}</td></tr>`,
                 )
                 .join("")}
             </tbody>
@@ -3984,7 +4063,7 @@ export default function App() {
             <p>Delivery: ${formatPrice(order.pricing.delivery)}</p>
             <p><strong>Total: ${formatPrice(order.pricing.total)}</strong></p>
           </div>
-          <p>${businessSettings.receiptFooter}</p>
+          <p>${escapeHtml(businessSettings.receiptFooter)}</p>
         </body>
       </html>
     `;
@@ -3998,7 +4077,11 @@ export default function App() {
   }
 
   function downloadCsv(filename, rows) {
-    const escapeCell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const escapeCell = (value) => {
+      const rawValue = String(value ?? "");
+      const normalizedValue = /^[=+\-@]/.test(rawValue) ? `'${rawValue}` : rawValue;
+      return `"${normalizedValue.replaceAll('"', '""')}"`;
+    };
     const csv = rows.map((row) => row.map(escapeCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -4079,22 +4162,25 @@ export default function App() {
     const normalizedPhone = sanitizePhoneInput(signupForm.phone);
     const normalizedAddress = String(signupForm.address || "").trim();
     const normalizedBirthday = normalizeBirthdayInput(signupForm.birthday);
+    const nextFieldErrors = {
+      fullName: validateSignupValue("fullName", normalizedFullName),
+      phone: validateSignupValue("phone", normalizedPhone),
+      birthday: validateSignupValue("birthday", normalizedBirthday),
+      email: validateSignupValue("email", normalizedEmail),
+      password: validateSignupValue("password", signupForm.password),
+      address: validateSignupValue("address", normalizedAddress),
+      referralCode: "",
+    };
+    setSignupFieldErrors(nextFieldErrors);
 
-    if (!normalizedAddress || normalizedAddress.length < 5) {
+    const firstInvalidField = Object.entries(nextFieldErrors).find(([, value]) => value)?.[0];
+    if (firstInvalidField) {
       setAccountState({
         loading: false,
-        error: "Add the delivery address you use most often.",
+        error: "Check the highlighted account details and try again.",
         success: "",
       });
-      return;
-    }
-
-    if (!normalizedBirthday) {
-      setAccountState({
-        loading: false,
-        error: "Add your birthday so PEM can celebrate you properly.",
-        success: "",
-      });
+      focusSignupField(firstInvalidField);
       return;
     }
 
@@ -4110,6 +4196,7 @@ export default function App() {
       });
       setAccountToken(data.token || "");
       setSignupForm(initialAccountForm);
+      setSignupFieldErrors(initialSignupFieldErrors);
       setLoginForm(initialLoginForm);
       setAccountState({
         loading: false,
@@ -5091,10 +5178,13 @@ export default function App() {
                 </div>
 
                 <div className="service-form__grid service-form__grid--single auth-form-stack">
-                  <label className="field" data-checkout-field="customerName">
+                  <label className="field">
                     <span>Email address</span>
                     <input
                       type="email"
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={loginForm.email}
                       onChange={(event) =>
                         setLoginForm((previous) => ({ ...previous, email: event.target.value }))
@@ -5103,10 +5193,11 @@ export default function App() {
                     />
                   </label>
 
-                  <label className="field" data-checkout-field="phone">
+                  <label className="field">
                     <span>Password</span>
                     <input
                       type="password"
+                      autoComplete="current-password"
                       value={loginForm.password}
                       onChange={(event) =>
                         setLoginForm((previous) => ({ ...previous, password: event.target.value }))
@@ -5169,41 +5260,44 @@ export default function App() {
                     <span className="eyebrow">Personal details</span>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
-                    <label className="field auth-signup-grid__wide" data-checkout-field="email">
+                    <label className={signupFieldErrors.fullName ? "field auth-signup-grid__wide is-invalid" : "field auth-signup-grid__wide"} data-signup-field="fullName">
                       <span>Full name</span>
                       <input
                         type="text"
+                        autoComplete="name"
                         value={signupForm.fullName}
-                        onChange={(event) =>
-                          setSignupForm((previous) => ({ ...previous, fullName: event.target.value }))
-                        }
+                        onChange={(event) => updateSignupField("fullName", event.target.value)}
+                        onBlur={(event) => validateSignupField("fullName", event.target.value)}
                         placeholder="Your full name"
                       />
+                      {signupFieldErrors.fullName ? <small className="field__error">{signupFieldErrors.fullName}</small> : null}
                     </label>
 
-                    <label className="field" data-checkout-field="scheduledFor">
+                    <label className={signupFieldErrors.phone ? "field is-invalid" : "field"} data-signup-field="phone">
                       <span>Phone number</span>
                       <input
                         type="tel"
+                        autoComplete="tel"
+                        inputMode="tel"
                         value={signupForm.phone}
-                        onChange={(event) =>
-                          setSignupForm((previous) => ({ ...previous, phone: sanitizePhoneInput(event.target.value) }))
-                        }
+                        onChange={(event) => updateSignupField("phone", sanitizePhoneInput(event.target.value))}
+                        onBlur={(event) => validateSignupField("phone", event.target.value)}
                         placeholder="0803 334 5161"
                       />
-                      {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
+                      {signupFieldErrors.phone ? <small className="field__error">{signupFieldErrors.phone}</small> : null}
                     </label>
 
-                    <label className="field">
+                    <label className={signupFieldErrors.birthday ? "field is-invalid" : "field"} data-signup-field="birthday">
                       <span>Birthday</span>
                       <input
                         type="date"
+                        autoComplete="bday"
                         max={new Date().toISOString().slice(0, 10)}
                         value={signupForm.birthday}
-                        onChange={(event) =>
-                          setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
-                        }
+                        onChange={(event) => updateSignupField("birthday", event.target.value)}
+                        onBlur={(event) => validateSignupField("birthday", event.target.value)}
                       />
+                      {signupFieldErrors.birthday ? <small className="field__error">{signupFieldErrors.birthday}</small> : null}
                     </label>
                   </div>
                 </div>
@@ -5213,29 +5307,32 @@ export default function App() {
                     <span className="eyebrow">Account access</span>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
-                    <label className="field auth-signup-grid__wide" data-checkout-field="address">
+                    <label className={signupFieldErrors.email ? "field auth-signup-grid__wide is-invalid" : "field auth-signup-grid__wide"} data-signup-field="email">
                       <span>Email</span>
                       <input
                         type="email"
+                        autoComplete="email"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         value={signupForm.email}
-                        onChange={(event) =>
-                          setSignupForm((previous) => ({ ...previous, email: event.target.value }))
-                        }
+                        onChange={(event) => updateSignupField("email", event.target.value)}
+                        onBlur={(event) => validateSignupField("email", event.target.value)}
                         placeholder="you@example.com"
                       />
+                      {signupFieldErrors.email ? <small className="field__error">{signupFieldErrors.email}</small> : null}
                     </label>
 
-                    <label className="field auth-signup-grid__wide" data-checkout-field="paymentReference">
+                    <label className={signupFieldErrors.password ? "field auth-signup-grid__wide is-invalid" : "field auth-signup-grid__wide"} data-signup-field="password">
                       <span>Password</span>
                       <input
                         type="password"
+                        autoComplete="new-password"
                         value={signupForm.password}
-                        onChange={(event) =>
-                          setSignupForm((previous) => ({ ...previous, password: event.target.value }))
-                        }
-                        placeholder="At least 6 characters"
+                        onChange={(event) => updateSignupField("password", event.target.value)}
+                        onBlur={(event) => validateSignupField("password", event.target.value)}
+                        placeholder="At least 8 characters"
                       />
-                      {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
+                      {signupFieldErrors.password ? <small className="field__error">{signupFieldErrors.password}</small> : null}
                     </label>
                   </div>
                 </div>
@@ -5244,28 +5341,29 @@ export default function App() {
                   <div className="auth-card__section-label">
                     <span className="eyebrow">Delivery</span>
                   </div>
-                  <label className="field auth-signup-grid__wide">
+                  <label className={signupFieldErrors.address ? "field auth-signup-grid__wide is-invalid" : "field auth-signup-grid__wide"} data-signup-field="address">
                     <span>Main delivery address</span>
                     <textarea
                       rows="3"
+                      autoComplete="street-address"
                       value={signupForm.address}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, address: event.target.value }))
-                      }
+                      onChange={(event) => updateSignupField("address", event.target.value)}
+                      onBlur={(event) => validateSignupField("address", event.target.value)}
                       placeholder="Street, area, city"
                     />
+                    {signupFieldErrors.address ? <small className="field__error">{signupFieldErrors.address}</small> : null}
                   </label>
                 </div>
 
                 <div className="auth-card__section auth-card__section--compact">
-                  <label className="field auth-signup-grid__wide" data-checkout-field="promoCode">
+                  <label className="field auth-signup-grid__wide" data-signup-field="referralCode">
                     <span>Referral code</span>
                     <input
                       type="text"
+                      autoCapitalize="characters"
+                      spellCheck={false}
                       value={signupForm.referralCode}
-                      onChange={(event) =>
-                        setSignupForm((previous) => ({ ...previous, referralCode: event.target.value }))
-                      }
+                      onChange={(event) => updateSignupField("referralCode", event.target.value)}
                       placeholder="Optional referral code"
                     />
                   </label>
@@ -5309,6 +5407,9 @@ export default function App() {
                     <span>Email</span>
                     <input
                       type="email"
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={forgotPasswordForm.email}
                       onChange={(event) =>
                         setForgotPasswordForm((previous) => ({ ...previous, email: event.target.value }))
@@ -5321,6 +5422,8 @@ export default function App() {
                     <span>Phone number</span>
                     <input
                       type="tel"
+                      autoComplete="tel"
+                      inputMode="tel"
                       value={forgotPasswordForm.phone}
                       onChange={(event) =>
                         setForgotPasswordForm((previous) => ({ ...previous, phone: event.target.value }))
@@ -5337,6 +5440,8 @@ export default function App() {
                         <span>Recovery reference</span>
                         <input
                           type="text"
+                          autoCapitalize="characters"
+                          spellCheck={false}
                           value={forgotPasswordForm.requestReference}
                           onChange={(event) =>
                             setForgotPasswordForm((previous) => ({ ...previous, requestReference: event.target.value.toUpperCase() }))
@@ -5349,6 +5454,7 @@ export default function App() {
                         <span>Approval code</span>
                         <input
                           type="text"
+                          autoComplete="one-time-code"
                           inputMode="numeric"
                           value={forgotPasswordForm.approvalCode}
                           onChange={(event) =>
@@ -5362,6 +5468,7 @@ export default function App() {
                         <span>New password</span>
                         <input
                           type="password"
+                          autoComplete="new-password"
                           value={forgotPasswordForm.newPassword}
                           onChange={(event) =>
                             setForgotPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))
@@ -5374,6 +5481,7 @@ export default function App() {
                         <span>Confirm new password</span>
                         <input
                           type="password"
+                          autoComplete="new-password"
                           value={forgotPasswordForm.confirmPassword}
                           onChange={(event) =>
                             setForgotPasswordForm((previous) => ({ ...previous, confirmPassword: event.target.value }))
@@ -5446,6 +5554,9 @@ export default function App() {
                     <span>Username</span>
                     <input
                       type="text"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={adminUsername}
                       onChange={(event) => setAdminUsername(event.target.value)}
                       placeholder="owner or manager"
@@ -5456,6 +5567,7 @@ export default function App() {
                     <span>Password</span>
                     <input
                       type="password"
+                      autoComplete="current-password"
                       value={adminPassword}
                       onChange={(event) => setAdminPassword(event.target.value)}
                       placeholder="Your admin password"
@@ -5718,7 +5830,7 @@ export default function App() {
                       onChange={(event) =>
                         setSignupForm((previous) => ({ ...previous, password: event.target.value }))
                       }
-                      placeholder="At least 6 characters"
+                      placeholder="At least 8 characters"
                     />
                   </label>
 
