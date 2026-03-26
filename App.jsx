@@ -530,6 +530,7 @@ const initialCheckout = {
 };
 
 const cardPaymentMethodLabel = "Pay with card";
+const SESSION_COOKIE_SENTINEL = "__cookie_session__";
 
 const checkoutPaymentOptions = [
   { label: cardPaymentMethodLabel, icon: "CARD", hint: "Secure online checkout" },
@@ -746,7 +747,16 @@ const initialForgotPasswordForm = {
 const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "preparing", "ready", "out_for_delivery", "delivered", "cancelled"];
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const isLocalNetworkHost = (() => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return /^(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})$/i.test(
+    window.location.hostname,
+  );
+})();
+const apiBaseUrl = !isLocalNetworkHost ? "" : configuredApiBaseUrl;
 const CACHE_TTL = {
   account: 10 * 60 * 1000,
   deliveryZones: 30 * 60 * 1000,
@@ -1643,6 +1653,7 @@ async function requestJson(url, { method = "GET", payload, headers = {}, retryOn
   try {
     const response = await fetch(apiUrl(url), {
       method,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...headers,
@@ -1850,6 +1861,7 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
   const [adminToken, setAdminToken] = useState("");
+  const [adminHydrated, setAdminHydrated] = useState(false);
   const [adminSession, setAdminSession] = useState(initialAdminSession);
   const [adminLoginState, setAdminLoginState] = useState({ loading: false, error: "" });
   const [adminQuery, setAdminQuery] = useState("");
@@ -2325,51 +2337,21 @@ export default function App() {
   }, [checkoutForm.fulfillmentMethod, isGiftOrder]);
 
   useEffect(() => {
-    const savedAccountToken = window.localStorage.getItem("pem-account-token");
-    if (savedAccountToken) {
-      setAccountToken(savedAccountToken);
-    } else {
-      setAccountHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    const savedAdminToken = window.localStorage.getItem("pem-admin-token");
-    let savedAdminProfile = null;
-    try {
-      savedAdminProfile = JSON.parse(window.localStorage.getItem("pem-admin-profile") || "null");
-    } catch {
-      savedAdminProfile = null;
-    }
-    if (savedAdminToken) {
-      setAdminToken(savedAdminToken);
-    }
-    if (savedAdminProfile) {
-      setAdminSession({ ...initialAdminSession, ...savedAdminProfile });
-    }
+    loadAccount(SESSION_COOKIE_SENTINEL);
+    loadAdminData(SESSION_COOKIE_SENTINEL);
   }, []);
 
   useEffect(() => {
     if (adminToken) {
-      window.localStorage.setItem("pem-admin-token", adminToken);
       loadAdminData(adminToken);
       loadDeliveryZones(adminToken);
       loadMenuCatalog(adminToken);
       loadPublicSettings(adminToken);
-    } else {
-      window.localStorage.removeItem("pem-admin-token");
-      window.localStorage.removeItem("pem-admin-profile");
+    } else if (adminHydrated) {
       setAdminSession(initialAdminSession);
       setAdminState(initialAdminState);
     }
-  }, [adminToken]);
-
-  useEffect(() => {
-    if (!adminToken) {
-      return;
-    }
-    window.localStorage.setItem("pem-admin-profile", JSON.stringify(adminSession));
-  }, [adminSession, adminToken]);
+  }, [adminHydrated, adminToken]);
 
   useEffect(() => {
     if (authView === "forgot") {
@@ -2387,18 +2369,15 @@ export default function App() {
 
   useEffect(() => {
     if (accountToken) {
-      window.localStorage.setItem("pem-account-token", accountToken);
       loadAccount(accountToken);
-    } else {
-      window.localStorage.removeItem("pem-account-token");
+    } else if (accountHydrated) {
       setAccountUser(initialAccountUser);
       setAccountOrders([]);
       setAccountGifts(initialAccountGifts);
       setGiftActionState(initialGiftActionState);
       setProfileForm({ fullName: "", phone: "", birthday: "" });
-      setAccountHydrated(true);
     }
-  }, [accountToken]);
+  }, [accountHydrated, accountToken]);
 
   useEffect(() => {
     loadPublicDeliveryZones();
@@ -3159,7 +3138,15 @@ export default function App() {
   }
 
   function getUserAuthHeaders(tokenOverride = accountToken) {
-    return tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : {};
+    return tokenOverride && tokenOverride !== SESSION_COOKIE_SENTINEL
+      ? { Authorization: `Bearer ${tokenOverride}` }
+      : {};
+  }
+
+  function getAdminAuthHeaders(tokenOverride = adminToken) {
+    return tokenOverride && tokenOverride !== SESSION_COOKIE_SENTINEL
+      ? { Authorization: `Bearer ${tokenOverride}` }
+      : {};
   }
 
   async function loadAccount(tokenOverride = accountToken) {
@@ -3177,6 +3164,9 @@ export default function App() {
         received: Array.isArray(data.receivedGifts) ? data.receivedGifts : [],
         sent: Array.isArray(data.sentGifts) ? data.sentGifts : [],
       };
+      if (tokenOverride === SESSION_COOKIE_SENTINEL && accountToken !== SESSION_COOKIE_SENTINEL) {
+        setAccountToken(SESSION_COOKIE_SENTINEL);
+      }
       setAccountUser(nextUser);
       setAccountOrders(Array.isArray(data.orders) ? data.orders : []);
       setAccountGifts(nextGifts);
@@ -3205,6 +3195,22 @@ export default function App() {
         error: "",
       }));
     } catch (error) {
+      if (error.message === "User login required.") {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("pem-account-cache");
+        }
+        setAccountToken("");
+        setAccountUser(initialAccountUser);
+        setAccountOrders([]);
+        setAccountGifts(initialAccountGifts);
+        setProfileForm({ fullName: "", phone: "", birthday: "" });
+        setAccountState((previous) => ({
+          ...previous,
+          loading: false,
+          error: "",
+        }));
+        return;
+      }
       const cachedAccount = readCachedJson("pem-account-cache", null, CACHE_TTL.account);
       if (cachedAccount?.user) {
         const nextUser = { ...initialAccountUser, ...(cachedAccount.user || {}) };
@@ -3277,11 +3283,7 @@ export default function App() {
         error: "",
       }));
       const data = await requestJson("/api/menu", {
-        headers: tokenOverride
-          ? {
-              Authorization: `Bearer ${tokenOverride}`,
-            }
-          : {},
+        headers: getAdminAuthHeaders(tokenOverride),
       });
       const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
       setMenuCatalog(mergedItems);
@@ -3314,11 +3316,7 @@ export default function App() {
         error: "",
       }));
       const data = await requestJson("/api/settings", {
-        headers: tokenOverride
-          ? {
-              Authorization: `Bearer ${tokenOverride}`,
-            }
-          : {},
+        headers: getAdminAuthHeaders(tokenOverride),
       });
       const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
       const cachedSettingsValue = tokenOverride
@@ -3368,9 +3366,8 @@ export default function App() {
         success: "",
       }));
       const response = await fetch(apiUrl("/api/delivery-zones"), {
-        headers: {
-          Authorization: `Bearer ${tokenOverride}`,
-        },
+        credentials: "include",
+        headers: getAdminAuthHeaders(tokenOverride),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -3419,9 +3416,8 @@ export default function App() {
       }));
 
       const response = await fetch(apiUrl("/api/admin/summary"), {
-        headers: {
-          Authorization: `Bearer ${tokenOverride}`,
-        },
+        credentials: "include",
+        headers: getAdminAuthHeaders(tokenOverride),
       });
       const data = await response.json().catch(() => ({}));
 
@@ -3430,6 +3426,9 @@ export default function App() {
       }
 
       setAdminSession({ ...initialAdminSession, ...(data.admin || {}) });
+      if (tokenOverride === SESSION_COOKIE_SENTINEL && adminToken !== SESSION_COOKIE_SENTINEL) {
+        setAdminToken(SESSION_COOKIE_SENTINEL);
+      }
       writeCachedJson("pem-admin-summary-cache", data);
       setAdminState({
         loading: false,
@@ -3445,6 +3444,9 @@ export default function App() {
       });
     } catch (error) {
       if (error.message === "Admin login required.") {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("pem-admin-summary-cache");
+        }
         setAdminToken("");
       }
       const cachedAdmin = readCachedJson("pem-admin-summary-cache", null, CACHE_TTL.admin);
@@ -3468,6 +3470,8 @@ export default function App() {
         loading: false,
         error: error.message,
       }));
+    } finally {
+      setAdminHydrated(true);
     }
   }
 
@@ -3484,7 +3488,7 @@ export default function App() {
       setAdminPassword("");
       setAdminLoginState({ loading: false, error: "" });
       setAdminSession({ ...initialAdminSession, ...(result.admin || {}) });
-      setAdminToken(result.token);
+      setAdminToken(SESSION_COOKIE_SENTINEL);
     } catch (error) {
       setAdminLoginState({
         loading: false,
@@ -3498,12 +3502,14 @@ export default function App() {
       if (adminToken) {
         await fetch(apiUrl("/api/admin/logout"), {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${adminToken}`,
-          },
+          credentials: "include",
+          headers: getAdminAuthHeaders(),
         });
       }
     } finally {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("pem-admin-summary-cache");
+      }
       setAdminSession(initialAdminSession);
       setAdminToken("");
       setAdminPassword("");
@@ -3518,9 +3524,10 @@ export default function App() {
       setPasswordState({ loading: true, error: "", success: "" });
       const result = await fetch(apiUrl("/api/admin/change-password"), {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify(passwordForm),
       });
@@ -3566,9 +3573,10 @@ export default function App() {
 
       const response = await fetch(apiUrl("/api/admin/delivery-zones"), {
         method: "PUT",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({
           deliveryZones: deliveryZoneAdminState.zones,
@@ -3610,9 +3618,10 @@ export default function App() {
       }));
       const response = await fetch(apiUrl("/api/admin/menu"), {
         method: "PUT",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({
           menuItems: menuAdminState.items,
@@ -3654,9 +3663,10 @@ export default function App() {
 
       const response = await fetch(apiUrl("/api/admin/settings"), {
         method: "PUT",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({
           settings: settingsAdminState.settings,
@@ -3717,9 +3727,10 @@ export default function App() {
 
       const response = await fetch(apiUrl(`/api/admin/orders/${reference}/status`), {
         method: "PATCH",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({ status }),
       });
@@ -3764,9 +3775,10 @@ export default function App() {
       for (const reference of selectedOrderReferences) {
         const response = await fetch(apiUrl(`/api/admin/orders/${reference}/status`), {
           method: "PATCH",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
+            ...getAdminAuthHeaders(),
           },
           body: JSON.stringify({ status: bulkOrderStatus }),
         });
@@ -3802,9 +3814,10 @@ export default function App() {
 
       const response = await fetch(apiUrl(`/api/admin/contacts/${reference}/status`), {
         method: "PATCH",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({ status }),
       });
@@ -3835,9 +3848,10 @@ export default function App() {
 
       const response = await fetch(apiUrl(`/api/admin/catering/${reference}/status`), {
         method: "PATCH",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          ...getAdminAuthHeaders(),
         },
         body: JSON.stringify({ status }),
       });
@@ -3867,9 +3881,8 @@ export default function App() {
       setRecoveryActionState({ loadingRef: reference, error: "", success: "", approvalCode: "", reference: "" });
       const response = await fetch(apiUrl(`/api/admin/password-recovery/${reference}/approve`), {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-        },
+        credentials: "include",
+        headers: getAdminAuthHeaders(),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -3902,9 +3915,8 @@ export default function App() {
       setRecoveryActionState({ loadingRef: reference, error: "", success: "", approvalCode: "", reference: "" });
       const response = await fetch(apiUrl(`/api/admin/password-recovery/${reference}/reject`), {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-        },
+        credentials: "include",
+        headers: getAdminAuthHeaders(),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -4194,7 +4206,7 @@ export default function App() {
         address: normalizedAddress,
         birthday: normalizedBirthday,
       });
-      setAccountToken(data.token || "");
+      setAccountToken(SESSION_COOKIE_SENTINEL);
       setSignupForm(initialAccountForm);
       setSignupFieldErrors(initialSignupFieldErrors);
       setLoginForm(initialLoginForm);
@@ -4217,8 +4229,8 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/login", loginForm);
-      setAccountToken(data.token || "");
+      await postJson("/api/auth/login", loginForm);
+      setAccountToken(SESSION_COOKIE_SENTINEL);
       setLoginForm(initialLoginForm);
       setAccountState({
         loading: false,
@@ -4316,6 +4328,9 @@ export default function App() {
     } catch {
       // Ignore logout request failures and clear local state anyway.
     } finally {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("pem-account-cache");
+      }
       setAccountToken("");
       setAuthView("login");
       setAccountState({ loading: false, error: "", success: "You have signed out." });
@@ -5072,7 +5087,7 @@ export default function App() {
     }
   }
 
-  if (!accountHydrated) {
+  if (!accountHydrated || !adminHydrated) {
     return (
       <div className="auth-shell">
         <ThemeToggle theme={theme} onToggle={toggleTheme} floating />

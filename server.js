@@ -31,6 +31,8 @@ const userSessions = new Map();
 const authAttemptBuckets = new Map();
 const BIRTHDAY_DISCOUNT_PERCENT = 15;
 const OWNER_ADMIN_USERNAME = "owner";
+const USER_SESSION_COOKIE = "pem_user_session";
+const ADMIN_SESSION_COOKIE = "pem_admin_session";
 const PASSWORD_RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
 const USER_SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -145,6 +147,7 @@ app.use(
 
       callback(new Error("CORS origin not allowed."));
     },
+    credentials: true,
   }),
 );
 app.use((request, response, next) => {
@@ -165,6 +168,81 @@ function createAdminToken() {
   return crypto.randomBytes(24).toString("hex");
 }
 
+function serializeCookie(name, value, options = {}) {
+  const segments = [`${name}=${encodeURIComponent(value)}`];
+  if (options.maxAge !== undefined) {
+    segments.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
+  }
+  if (options.expires instanceof Date) {
+    segments.push(`Expires=${options.expires.toUTCString()}`);
+  }
+  segments.push(`Path=${options.path || "/"}`);
+  if (options.httpOnly) {
+    segments.push("HttpOnly");
+  }
+  if (options.secure) {
+    segments.push("Secure");
+  }
+  if (options.sameSite) {
+    segments.push(`SameSite=${options.sameSite}`);
+  }
+  return segments.join("; ");
+}
+
+function parseCookieHeader(request) {
+  const cookieHeader = String(request.headers.cookie || "");
+  return cookieHeader.split(";").reduce((cookies, cookiePart) => {
+    const [rawName, ...rawValueParts] = cookiePart.split("=");
+    const name = String(rawName || "").trim();
+    if (!name) {
+      return cookies;
+    }
+    cookies[name] = decodeURIComponent(rawValueParts.join("=").trim());
+    return cookies;
+  }, {});
+}
+
+function getCookieValue(request, name) {
+  return parseCookieHeader(request)[name] || "";
+}
+
+function isSecureCookieRequest(request) {
+  const origin = String(request.headers.origin || "").trim();
+  if (isLocalDevOrigin(origin)) {
+    return false;
+  }
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").trim().toLowerCase();
+  if (forwardedProto === "https") {
+    return true;
+  }
+  return origin.startsWith("https://");
+}
+
+function buildSessionCookieOptions(request, ttlMs) {
+  return {
+    httpOnly: true,
+    secure: isSecureCookieRequest(request),
+    sameSite: "Lax",
+    path: "/",
+    maxAge: Math.floor(ttlMs / 1000),
+  };
+}
+
+function setSessionCookie(response, request, cookieName, token, ttlMs) {
+  response.append("Set-Cookie", serializeCookie(cookieName, token, buildSessionCookieOptions(request, ttlMs)));
+}
+
+function clearSessionCookie(response, request, cookieName) {
+  response.append(
+    "Set-Cookie",
+    serializeCookie(cookieName, "", {
+      ...buildSessionCookieOptions(request, 0),
+      maxAge: 0,
+      expires: new Date(0),
+    }),
+  );
+}
+
 function getBearerToken(request) {
   const authHeader = request.headers.authorization || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -172,6 +250,10 @@ function getBearerToken(request) {
   }
 
   return authHeader.slice(7);
+}
+
+function getSessionTokenFromRequest(request, cookieName) {
+  return getBearerToken(request) || getCookieValue(request, cookieName);
 }
 
 function getClientAddress(request) {
@@ -257,7 +339,7 @@ function readActiveSession(sessionStore, token, ttlMs) {
 }
 
 function requireAdmin(request, response, next) {
-  const token = getBearerToken(request);
+  const token = getSessionTokenFromRequest(request, ADMIN_SESSION_COOKIE);
   const session = readActiveSession(adminSessions, token, ADMIN_SESSION_TTL_MS);
 
   if (!token || !session) {
@@ -265,6 +347,7 @@ function requireAdmin(request, response, next) {
   }
 
   request.adminSession = session;
+  request.adminSessionToken = token;
   next();
 }
 
@@ -276,7 +359,7 @@ function requireOwnerAdmin(request, response, next) {
 }
 
 function requireUser(request, response, next) {
-  const token = getBearerToken(request);
+  const token = getSessionTokenFromRequest(request, USER_SESSION_COOKIE);
   const session = readActiveSession(userSessions, token, USER_SESSION_TTL_MS);
 
   if (!token || !session?.email) {
@@ -284,16 +367,17 @@ function requireUser(request, response, next) {
   }
 
   request.userSession = session;
+  request.userSessionToken = token;
   next();
 }
 
 function getOptionalUserSession(request) {
-  const token = getBearerToken(request);
+  const token = getSessionTokenFromRequest(request, USER_SESSION_COOKIE);
   return readActiveSession(userSessions, token, USER_SESSION_TTL_MS);
 }
 
 function getOptionalAdminSession(request) {
-  const token = getBearerToken(request);
+  const token = getSessionTokenFromRequest(request, ADMIN_SESSION_COOKIE);
   return readActiveSession(adminSessions, token, ADMIN_SESSION_TTL_MS);
 }
 
@@ -1064,6 +1148,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     createdAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
   });
+  setSessionCookie(response, request, USER_SESSION_COOKIE, token, USER_SESSION_TTL_MS);
 
   response.status(201).json({
     token,
@@ -1095,9 +1180,31 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
     lastSeenAt: new Date().toISOString(),
   });
   clearAttemptBucket("userLogin", request, normalizedEmail);
+  setSessionCookie(response, request, USER_SESSION_COOKIE, token, USER_SESSION_TTL_MS);
 
   response.json({
     token,
+    user: sanitizeUser(activeUser),
+  });
+}));
+
+app.get("/api/auth/session", asyncHandler(async (request, response) => {
+  const session = getOptionalUserSession(request);
+  if (!session?.email) {
+    clearSessionCookie(response, request, USER_SESSION_COOKIE);
+    return response.status(401).json({ error: "User login required." });
+  }
+
+  const user = await storage.getUserByEmail(session.email);
+  if (!user) {
+    userSessions.delete(getSessionTokenFromRequest(request, USER_SESSION_COOKIE));
+    clearSessionCookie(response, request, USER_SESSION_COOKIE);
+    return response.status(401).json({ error: "User login required." });
+  }
+
+  const greetedUser = withBirthdayGreeting(user);
+  const activeUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
+  response.json({
     user: sanitizeUser(activeUser),
   });
 }));
@@ -1215,8 +1322,8 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
 }));
 
 app.post("/api/auth/logout", requireUser, (request, response) => {
-  const token = getBearerToken(request);
-  userSessions.delete(token);
+  userSessions.delete(request.userSessionToken);
+  clearSessionCookie(response, request, USER_SESSION_COOKIE);
   response.json({ ok: true });
 });
 
@@ -1799,6 +1906,7 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
 
   adminSessions.set(token, session);
   clearAttemptBucket("adminLogin", request, normalizedUsername);
+  setSessionCookie(response, request, ADMIN_SESSION_COOKIE, token, ADMIN_SESSION_TTL_MS);
 
   return response.json({
     token,
@@ -1806,9 +1914,21 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
   });
 }));
 
+app.get("/api/admin/session", asyncHandler(async (request, response) => {
+  const session = getOptionalAdminSession(request);
+  if (!session) {
+    clearSessionCookie(response, request, ADMIN_SESSION_COOKIE);
+    return response.status(401).json({ error: "Admin login required." });
+  }
+
+  response.json({
+    admin: session,
+  });
+}));
+
 app.post("/api/admin/logout", requireAdmin, (request, response) => {
-  const token = getBearerToken(request);
-  adminSessions.delete(token);
+  adminSessions.delete(request.adminSessionToken);
+  clearSessionCookie(response, request, ADMIN_SESSION_COOKIE);
   response.json({ ok: true });
 });
 

@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://pem-restaurant.onrender.com/api/$1"
+    }
+  ]
+}
