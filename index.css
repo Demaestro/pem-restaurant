@@ -890,6 +890,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
   margin: 0 4.5rem;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--line);
@@ -931,6 +932,20 @@ button:disabled {
   justify-items: end;
   gap: 0.2rem;
   text-align: right;
+}
+
+.branch-assist {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.branch-assist__message {
+  width: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .pre-menu-tools {
@@ -2246,6 +2261,11 @@ button:disabled {
   border: 1px solid var(--line);
 }
 
+.admin-item--ops {
+  display: grid;
+  gap: 0.8rem;
+}
+
 .admin-item p {
   margin: 0.35rem 0 0;
   color: var(--muted);
@@ -2296,6 +2316,43 @@ button:disabled {
 
 .admin-status-row select {
   min-width: 9.5rem;
+}
+
+.admin-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-ops-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.admin-diagnostics {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.admin-diagnostics__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-diagnostics__item {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.admin-diagnostics__item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .status-pill {
@@ -2490,6 +2547,14 @@ button:disabled {
   color: var(--brand);
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.account-card__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .account-kpis {
@@ -2873,6 +2938,10 @@ button:disabled {
   background: linear-gradient(135deg, color-mix(in srgb, var(--brand-soft) 78%, var(--surface)), var(--surface));
 }
 
+.delivery-zone-card--soft {
+  background: color-mix(in srgb, var(--surface) 84%, var(--brand-soft));
+}
+
 .delivery-zone-card__title {
   margin: 0;
   color: var(--muted);
@@ -2895,6 +2964,44 @@ button:disabled {
 .delivery-zone-card small {
   color: var(--muted);
   line-height: 1.6;
+}
+
+.delivery-zone-card__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+}
+
+.segmented-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--brand-soft));
+  border: 1px solid color-mix(in srgb, var(--brand) 12%, var(--line));
+}
+
+.segmented-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.6rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmented-toggle button.is-active {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
+.segmented-toggle--compact button {
+  padding: 0.52rem 0.78rem;
+  font-size: 0.84rem;
 }
 
 .checkout-address-shortcuts {
@@ -3407,6 +3514,17 @@ button:disabled {
   .account-list__actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .account-card__header-actions,
+  .branch-assist,
+  .delivery-zone-card__actions {
+    justify-content: flex-start;
+  }
+
+  .admin-ops-grid,
+  .admin-diagnostics__grid {
+    grid-template-columns: 1fr;
   }
 
   .mobile-quickbar {

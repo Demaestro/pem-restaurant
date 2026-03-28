@@ -59,6 +59,26 @@ const authAttemptPolicies = {
   },
 };
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const runtimeIncidents = [];
+const MAX_RUNTIME_INCIDENTS = 40;
+const branchGeoPresets = {
+  "owerri-central": {
+    lat: 5.4859,
+    lng: 7.0246,
+    serviceHints: ["wetheral", "works layout", "okigwe road", "control", "douglas", "tetlow"],
+  },
+  "new-owerri": {
+    lat: 5.5087,
+    lng: 7.0326,
+    serviceHints: ["new owerri", "world bank", "concorde", "aladinma", "imsu", "port harcourt road"],
+  },
+  ikenegbu: {
+    lat: 5.4957,
+    lng: 7.0187,
+    serviceHints: ["ikenegbu", "mcc", "area h", "assumpta", "warehouse"],
+  },
+};
+app.disable("x-powered-by");
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
@@ -74,12 +94,11 @@ const defaultSettings = {
   whatsappPhone: "2348033345161",
   supportEmail: "hello@pem.local",
   address: "Abuja, Nigeria",
-  heroHeadline: "Restaurant ordering and catering, designed with a calmer PEM feel.",
-  heroCopy:
-    "Explore local favorites, choose your quantity, add special notes, and place orders through a cleaner, more elegant PEM experience.",
-  promoBanner: "Fresh local dishes, premium catering, and smoother ordering all in one PEM experience.",
-  contactPromise: "Professional meals, local flavors, and catering support for all event sizes.",
-  businessHoursText: "Open daily in Lagos time. PEM confirms exact delivery windows after checkout.",
+  heroHeadline: "Order with PEM.",
+  heroCopy: "Browse the menu and check out.",
+  promoBanner: "Local dishes. Premium service.",
+  contactPromise: "Meals, catering, and support.",
+  businessHoursText: "Open daily in Lagos time.",
   bankName: "PEM Business Account",
   bankAccountName: "Precious Events Makers",
   bankAccountNumber: "0123456789",
@@ -89,7 +108,7 @@ const defaultSettings = {
   staffAdminsText: "manager|PemStaff2026|Floor Manager",
   branchLocationsText:
     "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
-  receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
+  receiptFooter: "Thank you for choosing PEM.",
 };
 const defaultMenuItems = [
   { id: 1, name: "Jollof Rice & Grilled Chicken", category: "Rice", price: 3800, rating: 4.9, reviews: 241, spicy: false, badge: "Popular", description: "Classic Nigerian party jollof with grilled chicken and sweet plantain.", dietaryTags: ["Chicken", "Rice-based", "Mild"], dietaryProfile: "Contains grilled chicken and rice. Mild heat and a balanced, filling profile.", soldOut: false, hidden: false },
@@ -375,14 +394,26 @@ function buildLoyaltyTier(points) {
   return "bronze";
 }
 
-function createNotification(message, type = "general") {
+function createNotification(message, type = "general", metadata = {}) {
   return {
     id: crypto.randomBytes(8).toString("hex"),
     type,
     message,
     createdAt: new Date().toISOString(),
     read: false,
+    ...metadata,
   };
+}
+
+function pushRuntimeIncident(incident) {
+  runtimeIncidents.unshift({
+    id: crypto.randomBytes(8).toString("hex"),
+    createdAt: new Date().toISOString(),
+    ...incident,
+  });
+  if (runtimeIncidents.length > MAX_RUNTIME_INCIDENTS) {
+    runtimeIncidents.length = MAX_RUNTIME_INCIDENTS;
+  }
 }
 
 function createBirthdayNotification(fullName) {
@@ -565,10 +596,11 @@ function parseBranchLocations(rawValue, settings = defaultSettings) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [id, label, address, phone, hours, note] = line.split("|").map((part) => String(part || "").trim());
+      const [id, label, address, phone, hours, note, lat, lng, serviceHintsText] = line.split("|").map((part) => String(part || "").trim());
       if (!id || !label) {
         return null;
       }
+      const preset = branchGeoPresets[String(id || "").trim().toLowerCase()] || {};
       return {
         id: id.toLowerCase(),
         label,
@@ -576,6 +608,11 @@ function parseBranchLocations(rawValue, settings = defaultSettings) {
         phone: phone || settings.phone,
         hours: hours || settings.businessHoursText,
         note: note || `${label} branch support.`,
+        lat: Number.isFinite(Number(lat)) ? Number(lat) : preset.lat ?? null,
+        lng: Number.isFinite(Number(lng)) ? Number(lng) : preset.lng ?? null,
+        serviceHints: (serviceHintsText
+          ? serviceHintsText.split(",").map((item) => item.trim()).filter(Boolean)
+          : preset.serviceHints || []),
       };
     })
     .filter(Boolean);
@@ -592,14 +629,138 @@ function parseBranchLocations(rawValue, settings = defaultSettings) {
       phone: settings.phone,
       hours: settings.businessHoursText,
       note: `${settings.businessName} main branch.`,
+      lat: null,
+      lng: null,
+      serviceHints: [],
     },
   ];
+}
+
+function normalizeSearchableText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getDistanceKm(fromLat, fromLng, toLat, toLng) {
+  const sourceLat = Number(fromLat);
+  const sourceLng = Number(fromLng);
+  const targetLat = Number(toLat);
+  const targetLng = Number(toLng);
+  if (![sourceLat, sourceLng, targetLat, targetLng].every(Number.isFinite)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const toRadians = (value) => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const deltaLat = toRadians(targetLat - sourceLat);
+  const deltaLng = toRadians(targetLng - sourceLng);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(toRadians(sourceLat)) * Math.cos(toRadians(targetLat)) * Math.sin(deltaLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findNearestBranchByCoordinates(branches, latitude, longitude) {
+  const candidates = branches
+    .map((branch) => ({
+      ...branch,
+      distanceKm: getDistanceKm(latitude, longitude, branch.lat, branch.lng),
+    }))
+    .filter((branch) => Number.isFinite(branch.distanceKm))
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+  return candidates[0] || null;
+}
+
+function suggestBranchFromAddress(address, settings = defaultSettings) {
+  const normalizedAddress = normalizeSearchableText(address);
+  if (!normalizedAddress) {
+    return resolveBranchSelection("", settings);
+  }
+  const branches = parseBranchLocations(settings.branchLocationsText, settings);
+  const scoredBranches = branches
+    .map((branch) => {
+      const haystack = [
+        branch.label,
+        branch.address,
+        branch.note,
+        ...(branch.serviceHints || []),
+      ]
+        .map(normalizeSearchableText)
+        .join(" ");
+      const score = (branch.serviceHints || []).reduce((sum, hint) => (
+        normalizedAddress.includes(normalizeSearchableText(hint)) ? sum + 4 : sum
+      ), 0)
+        + (normalizedAddress.includes(normalizeSearchableText(branch.label)) ? 3 : 0)
+        + (normalizedAddress.includes(normalizeSearchableText(branch.address)) ? 2 : 0)
+        + (haystack && normalizedAddress.split(/[,\s/]+/).filter(Boolean).reduce((sum, token) => (
+          haystack.includes(token) ? sum + 0.2 : sum
+        ), 0));
+      return { branch, score };
+    })
+    .sort((left, right) => right.score - left.score);
+  return scoredBranches[0]?.score > 0 ? scoredBranches[0].branch : resolveBranchSelection("", settings);
 }
 
 function resolveBranchSelection(inputBranchId, settings = defaultSettings) {
   const branches = parseBranchLocations(settings.branchLocationsText, settings);
   const normalizedBranchId = String(inputBranchId || "").trim().toLowerCase();
   return branches.find((branch) => branch.id === normalizedBranchId) || branches[0];
+}
+
+function normalizeOrderOperations(input = {}) {
+  const current = input && typeof input === "object" ? input : {};
+  const normalizedRiderPhone = sanitizePhoneInput(current.riderPhone || "");
+  return {
+    kitchenStation: normalizeProfileText(current.kitchenStation, 80),
+    prepEtaMinutes: Math.max(0, Math.min(180, Number(current.prepEtaMinutes) || 0)),
+    riderName: normalizeProfileText(current.riderName, 80),
+    riderPhone: normalizedRiderPhone,
+    dispatchNote: normalizeProfileText(current.dispatchNote, 180),
+    confirmedAt: current.confirmedAt || "",
+    preparingAt: current.preparingAt || "",
+    readyAt: current.readyAt || "",
+    outForDeliveryAt: current.outForDeliveryAt || "",
+    deliveredAt: current.deliveredAt || "",
+    lastUpdatedAt: current.lastUpdatedAt || "",
+  };
+}
+
+function applyOrderStatusTimestamp(operations, status) {
+  const timestamp = new Date().toISOString();
+  const nextOperations = {
+    ...normalizeOrderOperations(operations),
+    lastUpdatedAt: timestamp,
+  };
+  if (status === "confirmed") {
+    nextOperations.confirmedAt = timestamp;
+  } else if (status === "preparing") {
+    nextOperations.preparingAt = timestamp;
+  } else if (status === "ready") {
+    nextOperations.readyAt = timestamp;
+  } else if (status === "out_for_delivery") {
+    nextOperations.outForDeliveryAt = timestamp;
+  } else if (status === "delivered") {
+    nextOperations.deliveredAt = timestamp;
+  }
+  return nextOperations;
+}
+
+function buildOrderStatusNotification(order, status) {
+  const branchLabel = order?.customer?.branchName || "PEM";
+  const reference = order?.reference || "your order";
+  const messages = {
+    received: `${branchLabel} received order ${reference}.`,
+    confirmed: `${branchLabel} confirmed order ${reference}.`,
+    preparing: `${branchLabel} is preparing order ${reference}.`,
+    ready: order?.customer?.fulfillmentMethod === "pickup"
+      ? `Order ${reference} is ready for pickup at ${branchLabel}.`
+      : `Order ${reference} is packed and ready for dispatch from ${branchLabel}.`,
+    out_for_delivery: `Order ${reference} is out for delivery.`,
+    delivered: `Order ${reference} was delivered.`,
+    cancelled: `Order ${reference} was cancelled.`,
+  };
+  return createNotification(messages[status] || `Order ${reference} was updated.`, "order", {
+    orderReference: reference,
+    status,
+  });
 }
 
 function getRecordBranchId(record) {
@@ -915,9 +1076,23 @@ app.get("/api/health", (_request, response) => {
     storageMode: storage.mode,
     aiConfigured: Boolean(process.env.OPENAI_API_KEY),
     paystackConfigured: Boolean(paystackSecretKey),
+    cookieAuth: true,
+    runtimeIncidentCount: runtimeIncidents.length,
     allowedOrigins,
   });
 });
+
+app.post("/api/runtime-incidents", asyncHandler(async (request, response) => {
+  const payload = request.body || {};
+  pushRuntimeIncident({
+    source: normalizeProfileText(payload.source, 40) || "client",
+    message: normalizeProfileText(payload.message, 220) || "Unknown client error",
+    path: normalizeProfileText(payload.path, 200) || "",
+    build: normalizeProfileText(payload.build, 80) || "",
+    userAgent: normalizeProfileText(payload.userAgent, 180) || "",
+  });
+  response.status(202).json({ ok: true });
+}));
 
 app.get("/api/menu", asyncHandler(async (_request, response) => {
   const menuItems = await storage.getMenuItems();
@@ -982,6 +1157,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     return response.status(409).json({ error: "An account with that email already exists." });
   }
   const normalizedReferralCode = String(referralCode || "").trim().toLowerCase();
+  const referrer = normalizedReferralCode ? await storage.getUserByReferralCode(normalizedReferralCode) : null;
   const welcomeNotifications = [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")];
   const birthdayIsToday = isBirthdayToday(normalizedBirthday, now);
   if (birthdayIsToday) {
@@ -998,15 +1174,36 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     savedAddresses: normalizedAddress ? [normalizedAddress] : [],
     orderReferences: [],
     notifications: welcomeNotifications,
-    loyaltyPoints: normalizedReferralCode ? 5 : 0,
+    loyaltyPoints: referrer ? 5 : 0,
     loyaltyTier: "bronze",
     referralCode: createReferralCode(fullName),
-    referredBy: normalizedReferralCode,
+    referredBy: referrer ? normalizedReferralCode : "",
     referralCredits: 0,
     birthdayGreetingYear: birthdayIsToday ? now.year : "",
     birthdayDiscountLastUsedYear: "",
     createdAt: new Date().toISOString(),
   });
+
+  if (referrer && referrer.email !== normalizedEmail) {
+    const rewardPoints = 10;
+    const nextReferralCredits = (Number(referrer.referralCredits) || 0) + 1;
+    const nextLoyaltyPoints = (Number(referrer.loyaltyPoints) || 0) + rewardPoints;
+    await storage.updateUser(referrer.email, {
+      ...referrer,
+      referralCredits: nextReferralCredits,
+      loyaltyPoints: nextLoyaltyPoints,
+      loyaltyTier: buildLoyaltyTier(nextLoyaltyPoints),
+      notifications: [
+        createNotification(
+          `${normalizedFullName} joined PEM with your referral code. You earned ${rewardPoints} points.`,
+          "referral",
+          { referredUserEmail: normalizedEmail },
+        ),
+        ...(referrer.notifications || []),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   const token = createAdminToken();
   userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
@@ -1240,6 +1437,22 @@ app.patch("/api/account/notifications/:id/read", requireUser, asyncHandler(async
   const notifications = (user.notifications || []).map((item) =>
     item.id === request.params.id ? { ...item, read: true } : item,
   );
+  const savedUser = await storage.updateUser(user.email, {
+    ...user,
+    notifications,
+  });
+  response.json({ user: sanitizeUser(savedUser) });
+}));
+
+app.patch("/api/account/notifications/read-all", requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "User account not found." });
+  }
+  const notifications = (user.notifications || []).map((item) => ({
+    ...item,
+    read: true,
+  }));
   const savedUser = await storage.updateUser(user.email, {
     ...user,
     notifications,
@@ -1783,6 +1996,14 @@ app.get("/api/admin/summary", requireAdmin, asyncHandler(async (request, respons
   response.json({
     ...filteredSummary,
     passwordRecoveryRequests: (filteredSummary.passwordRecoveryRequests || []).map(sanitizePasswordRecoveryRequest),
+    runtimeIncidents: runtimeIncidents.slice(0, 12),
+    diagnostics: {
+      cookieAuth: true,
+      storageMode: storage.mode,
+      aiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      paystackConfigured: Boolean(paystackSecretKey),
+      allowedOriginsCount: allowedOrigins.length,
+    },
     admin: request.adminSession,
   });
 }));
@@ -2086,6 +2307,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       branchName: selectedBranch.label,
       branchAddress: selectedBranch.address,
       branchPhone: selectedBranch.phone,
+      operations: normalizeOrderOperations(customer?.operations),
     },
     items,
     pricing: {
@@ -2128,13 +2350,19 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     ].slice(0, 20);
     const notifications = [
       ...(birthdayDiscountApplied
-        ? [createNotification(`Happy Birthday. PEM applied ${BIRTHDAY_DISCOUNT_PERCENT}% off to order ${savedOrder.reference}.`, "birthday")]
+        ? [createNotification(`Happy Birthday. PEM applied ${BIRTHDAY_DISCOUNT_PERCENT}% off to order ${savedOrder.reference}.`, "birthday", { orderReference: savedOrder.reference })]
         : []),
       createNotification(
         awaitingCardPayment
           ? `Order ${savedOrder.reference} is waiting for your card payment before ${selectedBranch.label} confirms it.`
           : `Order ${savedOrder.reference} has been received by ${selectedBranch.label}.`,
         "order",
+        {
+          orderReference: savedOrder.reference,
+          status: savedOrder.status,
+          branchId: selectedBranch.id,
+          branchName: selectedBranch.label,
+        },
       ),
       ...(linkedUser.notifications || []),
     ].slice(0, 15);
@@ -2276,10 +2504,60 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(asyn
   if (!canAccessBranchRecord(request.adminSession, existingOrder)) {
     return response.status(403).json({ error: "You can only update orders assigned to your branch." });
   }
-  const order = await storage.updateOrderStatus(reference, status);
+  const updatedCustomer = {
+    ...(existingOrder.customer || {}),
+    operations: applyOrderStatusTimestamp(existingOrder.customer?.operations, status),
+  };
+  const order = await storage.updateOrder(reference, {
+    ...existingOrder,
+    status,
+    customer: updatedCustomer,
+  });
+
+  const customerEmail = String(order?.customer?.email || "").trim().toLowerCase();
+  const linkedUser = customerEmail ? await storage.getUserByEmail(customerEmail) : null;
+  if (linkedUser) {
+    await storage.updateUser(linkedUser.email, {
+      ...linkedUser,
+      notifications: [
+        buildOrderStatusNotification(order, status),
+        ...(linkedUser.notifications || []),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   return response.json({
     message: "Order status updated.",
+    order,
+  });
+}));
+
+app.patch("/api/admin/orders/:reference/operations", requireAdmin, asyncHandler(async (request, response) => {
+  const { reference } = request.params;
+  const existingOrder = await storage.getOrderByReference(reference);
+  if (!existingOrder) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+  if (!canAccessBranchRecord(request.adminSession, existingOrder)) {
+    return response.status(403).json({ error: "You can only update orders assigned to your branch." });
+  }
+
+  const nextOperations = normalizeOrderOperations({
+    ...(existingOrder.customer?.operations || {}),
+    ...(request.body?.operations || {}),
+    lastUpdatedAt: new Date().toISOString(),
+  });
+  const order = await storage.updateOrder(reference, {
+    ...existingOrder,
+    customer: {
+      ...(existingOrder.customer || {}),
+      operations: nextOperations,
+    },
+  });
+
+  return response.json({
+    message: "Order operations updated.",
     order,
   });
 }));
