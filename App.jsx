@@ -806,7 +806,17 @@ const isLocalNetworkHost = (() => {
     window.location.hostname,
   );
 })();
-const apiBaseUrl = isLocalNetworkHost ? "" : configuredApiBaseUrl || defaultProductionApiBaseUrl;
+const isVercelHostedApp = (() => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return /(?:^|\.)vercel\.app$/i.test(window.location.hostname);
+})();
+// Use the same-origin Vercel rewrite in deployed Vercel environments so httpOnly
+// session cookies stay first-party and survive normal refreshes/reopens.
+const apiBaseUrl = isLocalNetworkHost || isVercelHostedApp
+  ? ""
+  : configuredApiBaseUrl || defaultProductionApiBaseUrl;
 const CACHE_TTL = {
   account: 10 * 60 * 1000,
   deliveryZones: 30 * 60 * 1000,
