@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import logo from "./logo.jpg.jpeg";
 import jollofImage from "./Jollof Rice & Grilled Chicken.jpg";
 import friedRiceImage from "./Fried Rice & Beef Stew.jpg";
@@ -519,6 +519,7 @@ const initialCheckout = {
   orderType: "self",
   recipientEmail: "",
   giftMessage: "",
+  addressSource: "profile",
   address: "",
   landmark: "",
   fulfillmentMethod: "delivery",
@@ -545,6 +546,24 @@ const initialTrackingState = {
   loading: false,
   error: "",
   order: null,
+};
+
+const branchGeoPresets = {
+  "owerri-central": {
+    lat: 5.4859,
+    lng: 7.0246,
+    serviceHints: ["wetheral", "works layout", "okigwe road", "control", "douglas", "tetlow"],
+  },
+  "new-owerri": {
+    lat: 5.5087,
+    lng: 7.0326,
+    serviceHints: ["new owerri", "world bank", "concorde", "aladinma", "imsu", "port harcourt road"],
+  },
+  ikenegbu: {
+    lat: 5.4957,
+    lng: 7.0187,
+    serviceHints: ["ikenegbu", "mcc", "area h", "assumpta", "warehouse"],
+  },
 };
 
 const initialDeliveryZoneAdminState = {
@@ -612,6 +631,14 @@ const initialAdminState = {
     reservations: [],
     reviews: [],
     passwordRecoveryRequests: [],
+    runtimeIncidents: [],
+    diagnostics: {
+      cookieAuth: false,
+      storageMode: "",
+      aiConfigured: false,
+      paystackConfigured: false,
+      allowedOriginsCount: 0,
+    },
   },
 };
 
@@ -641,12 +668,11 @@ const initialBusinessSettings = {
   whatsappPhone: "2348033345161",
   supportEmail: "hello@pem.local",
   address: "Abuja, Nigeria",
-  heroHeadline: "Restaurant ordering and catering, designed with a calmer PEM feel.",
-  heroCopy:
-    "Explore local favorites, choose your quantity, add special notes, and place orders through a cleaner, more elegant PEM experience.",
-  promoBanner: "Fresh local dishes, premium catering, and smoother ordering all in one PEM experience.",
-  contactPromise: "Professional meals, local flavors, and catering support for all event sizes.",
-  businessHoursText: "Open daily in Lagos time. PEM confirms exact delivery windows after checkout.",
+  heroHeadline: "Order with PEM.",
+  heroCopy: "Browse the menu and check out.",
+  promoBanner: "Local dishes. Premium service.",
+  contactPromise: "Meals, catering, and support.",
+  businessHoursText: "Open daily in Lagos time.",
   bankName: "PEM Business Account",
   bankAccountName: "Precious Events Makers",
   bankAccountNumber: "0123456789",
@@ -657,7 +683,7 @@ const initialBusinessSettings = {
   staffAdminsText: "",
   branchLocationsText:
     "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
-  receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
+  receiptFooter: "Thank you for choosing PEM.",
 };
 
 const initialSettingsAdminState = {
@@ -728,6 +754,22 @@ const initialGiftActionState = {
   address: "",
   landmark: "",
   phone: "",
+};
+
+const initialBranchAssistState = {
+  loading: false,
+  error: "",
+  success: "",
+  suggestedId: "",
+  source: "",
+};
+
+const emptyOrderOperationsDraft = {
+  kitchenStation: "",
+  prepEtaMinutes: "",
+  riderName: "",
+  riderPhone: "",
+  dispatchNote: "",
 };
 
 const initialLoginForm = {
@@ -1183,10 +1225,11 @@ function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line, index) => {
-      const [id, label, address, phone, hours, note] = line.split("|").map((part) => String(part || "").trim());
+      const [id, label, address, phone, hours, note, lat, lng, serviceHintsText] = line.split("|").map((part) => String(part || "").trim());
       if (!id || !label) {
         return null;
       }
+      const preset = branchGeoPresets[String(id || "").trim().toLowerCase()] || {};
       return {
         id: id.toLowerCase(),
         label,
@@ -1194,6 +1237,13 @@ function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
         phone: phone || fallbackPhone,
         hours: hours || fallbackHours,
         note: note || `Service support from ${label}.`,
+        lat: Number.isFinite(Number(lat)) ? Number(lat) : preset.lat ?? null,
+        lng: Number.isFinite(Number(lng)) ? Number(lng) : preset.lng ?? null,
+        serviceHints: (
+          serviceHintsText
+            ? serviceHintsText.split(",").map((item) => item.trim()).filter(Boolean)
+            : preset.serviceHints || []
+        ),
         rank: index,
       };
     })
@@ -1211,9 +1261,77 @@ function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
         phone: fallbackPhone,
         hours: fallbackHours,
         note: `${settings.businessName} main branch.`,
+        lat: null,
+        lng: null,
+        serviceHints: [],
         rank: 0,
       },
   ];
+}
+
+function normalizeSearchableText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getDistanceKm(fromLat, fromLng, toLat, toLng) {
+  const sourceLat = Number(fromLat);
+  const sourceLng = Number(fromLng);
+  const targetLat = Number(toLat);
+  const targetLng = Number(toLng);
+  if (![sourceLat, sourceLng, targetLat, targetLng].every(Number.isFinite)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const toRadians = (entry) => (entry * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const deltaLat = toRadians(targetLat - sourceLat);
+  const deltaLng = toRadians(targetLng - sourceLng);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(toRadians(sourceLat)) * Math.cos(toRadians(targetLat)) * Math.sin(deltaLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findNearestBranchByCoordinates(branches, latitude, longitude) {
+  return (branches || [])
+    .map((branch) => ({
+      ...branch,
+      distanceKm: getDistanceKm(latitude, longitude, branch.lat, branch.lng),
+    }))
+    .filter((branch) => Number.isFinite(branch.distanceKm))
+    .sort((left, right) => left.distanceKm - right.distanceKm)[0] || null;
+}
+
+function suggestBranchFromAddress(address, branches = []) {
+  const normalizedAddress = normalizeSearchableText(address);
+  if (!normalizedAddress) {
+    return null;
+  }
+
+  const scoredBranches = (branches || [])
+    .map((branch) => {
+      const haystack = [
+        branch.label,
+        branch.address,
+        branch.note,
+        ...(branch.serviceHints || []),
+      ]
+        .map(normalizeSearchableText)
+        .join(" ");
+      const score = (branch.serviceHints || []).reduce((sum, hint) => (
+        normalizedAddress.includes(normalizeSearchableText(hint)) ? sum + 4 : sum
+      ), 0)
+        + (normalizedAddress.includes(normalizeSearchableText(branch.label)) ? 3 : 0)
+        + (normalizedAddress.includes(normalizeSearchableText(branch.address)) ? 2 : 0)
+        + normalizedAddress
+          .split(/[,\s/]+/)
+          .filter(Boolean)
+          .reduce((sum, token) => (haystack.includes(token) ? sum + 0.2 : sum), 0);
+
+      return { branch, score };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  return scoredBranches[0]?.score > 0 ? scoredBranches[0].branch : null;
 }
 
 function getRecordBranchId(record) {
@@ -1796,6 +1914,7 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [lagosNowTick, setLagosNowTick] = useState(() => Date.now());
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchAssistState, setBranchAssistState] = useState(initialBranchAssistState);
   const [isCompactHeader, setIsCompactHeader] = useState(false);
   const [activePage, setActivePage] = useState(() =>
     typeof window === "undefined" ? "menu" : resolvePageFromHash(window.location.hash),
@@ -1877,6 +1996,7 @@ export default function App() {
   });
   const [passwordState, setPasswordState] = useState({ loading: false, error: "", success: "" });
   const [orderActionState, setOrderActionState] = useState({ loadingRef: "", error: "", success: "" });
+  const [orderOperationsDrafts, setOrderOperationsDrafts] = useState({});
   const [recoveryActionState, setRecoveryActionState] = useState({
     loadingRef: "",
     error: "",
@@ -1888,6 +2008,7 @@ export default function App() {
   const [reviewForm, setReviewForm] = useState(initialReviewForm);
   const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
   const [publicReviews, setPublicReviews] = useState([]);
+  const reportedRuntimeIncidentsRef = useRef(new Set());
   const branchLocations = useMemo(
     () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
     [businessSettings],
@@ -2181,12 +2302,14 @@ export default function App() {
           orderType: savedCheckout.orderType || previous.orderType,
           recipientEmail: savedCheckout.recipientEmail || previous.recipientEmail,
           giftMessage: savedCheckout.giftMessage || previous.giftMessage,
+          addressSource: savedCheckout.addressSource || previous.addressSource,
           address: savedCheckout.address || previous.address,
           deliveryZone: savedCheckout.deliveryZone || previous.deliveryZone,
           fulfillmentMethod: savedCheckout.fulfillmentMethod || previous.fulfillmentMethod,
           landmark: savedCheckout.landmark || previous.landmark,
           scheduledFor: savedCheckout.scheduledFor || previous.scheduledFor,
           paymentMethod: savedCheckout.paymentMethod || previous.paymentMethod,
+          paymentReference: savedCheckout.paymentReference || previous.paymentReference,
           promoCode: savedCheckout.promoCode || previous.promoCode,
         }));
       }
@@ -2266,12 +2389,14 @@ export default function App() {
           orderType: checkoutForm.orderType,
           recipientEmail: checkoutForm.recipientEmail,
           giftMessage: checkoutForm.giftMessage,
+          addressSource: checkoutForm.addressSource,
           address: checkoutForm.address,
           deliveryZone: checkoutForm.deliveryZone,
           fulfillmentMethod: checkoutForm.fulfillmentMethod,
           landmark: checkoutForm.landmark,
           scheduledFor: checkoutForm.scheduledFor,
           paymentMethod: checkoutForm.paymentMethod,
+          paymentReference: checkoutForm.paymentReference,
           promoCode: checkoutForm.promoCode,
         }),
       );
@@ -2286,8 +2411,10 @@ export default function App() {
     checkoutForm.fulfillmentMethod,
     checkoutForm.giftMessage,
     checkoutForm.landmark,
+    checkoutForm.addressSource,
     checkoutForm.orderType,
     checkoutForm.paymentMethod,
+    checkoutForm.paymentReference,
     checkoutForm.phone,
     checkoutForm.promoCode,
     checkoutForm.recipientEmail,
@@ -2350,6 +2477,7 @@ export default function App() {
     } else if (adminHydrated) {
       setAdminSession(initialAdminSession);
       setAdminState(initialAdminState);
+      setOrderOperationsDrafts({});
     }
   }, [adminHydrated, adminToken]);
 
@@ -2403,6 +2531,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function handleRuntimeError(event) {
+      reportRuntimeIncident("window-error", event.message || event.error?.message || "Unhandled client error");
+    }
+
+    function handleRuntimeRejection(event) {
+      const reason = event.reason instanceof Error
+        ? event.reason.message
+        : String(event.reason || "Unhandled promise rejection");
+      reportRuntimeIncident("unhandled-rejection", reason);
+    }
+
+    window.addEventListener("error", handleRuntimeError);
+    window.addEventListener("unhandledrejection", handleRuntimeRejection);
+    return () => {
+      window.removeEventListener("error", handleRuntimeError);
+      window.removeEventListener("unhandledrejection", handleRuntimeRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedBranchId && branchLocations.length > 0) {
       setSelectedBranchId(branchLocations[0].id);
       return;
@@ -2412,6 +2560,70 @@ export default function App() {
       setSelectedBranchId(branchLocations[0]?.id || "");
     }
   }, [branchLocations, selectedBranchId]);
+
+  useEffect(() => {
+    if (isGiftOrder) {
+      return;
+    }
+    if (checkoutForm.addressSource !== "profile") {
+      return;
+    }
+    if (!primarySavedAddress) {
+      setCheckoutForm((previous) => (
+        previous.addressSource === "profile"
+          ? { ...previous, addressSource: "custom" }
+          : previous
+      ));
+      return;
+    }
+    setCheckoutForm((previous) => (
+      previous.address === primarySavedAddress
+        ? previous
+        : {
+            ...previous,
+            address: primarySavedAddress,
+          }
+    ));
+  }, [checkoutForm.addressSource, isGiftOrder, primarySavedAddress]);
+
+  useEffect(() => {
+    if (!suggestedBranch || suggestedBranch.id === selectedBranch?.id) {
+      setBranchAssistState((previous) => (
+        previous.suggestedId || previous.error
+          ? {
+              ...previous,
+              error: "",
+              suggestedId: "",
+              source: "",
+            }
+          : previous
+      ));
+      return;
+    }
+
+    setBranchAssistState((previous) => ({
+      ...previous,
+      error: "",
+      success: "",
+      suggestedId: suggestedBranch.id,
+      source: "address",
+    }));
+  }, [selectedBranch?.id, suggestedBranch]);
+
+  useEffect(() => {
+    if (!branchAssistState.success) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBranchAssistState((previous) => ({
+        ...previous,
+        success: "",
+      }));
+    }, 3200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [branchAssistState.success]);
 
   useEffect(() => {
     if (!deliveryZones.length) {
@@ -2697,6 +2909,16 @@ export default function App() {
     return () => window.clearTimeout(timeoutId);
   }, [checkoutForm.promoCode, subtotal]);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const primarySavedAddress = String(accountUser.savedAddresses?.[0] || "").trim();
+  const checkoutAddressForBranching = String(
+    checkoutForm.addressSource === "profile" && !isGiftOrder
+      ? primarySavedAddress || checkoutForm.address
+      : checkoutForm.address,
+  ).trim();
+  const suggestedBranch = useMemo(
+    () => suggestBranchFromAddress(checkoutAddressForBranching, branchLocations),
+    [branchLocations, checkoutAddressForBranching],
+  );
   const deliveryEtaLabel = checkoutForm.fulfillmentMethod === "pickup"
     ? `Pickup from ${selectedBranch?.label || `${businessSettings.appName} Branch`} will be confirmed by PEM.`
     : `${selectedDeliveryZone.eta} from ${selectedBranch?.label || `${businessSettings.appName} Branch`}.`;
@@ -2841,6 +3063,8 @@ export default function App() {
     : "#";
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
   const pendingReceivedGifts = (accountGifts.received || []).filter((gift) => gift.status === "pending_acceptance");
+  const adminRuntimeIncidents = adminState.data.runtimeIncidents || [];
+  const adminDiagnostics = adminState.data.diagnostics || initialAdminState.data.diagnostics;
   const loyaltyProgress = Math.min(
     100,
     Math.round(
@@ -2922,6 +3146,16 @@ export default function App() {
       previous.filter((reference) => filteredAdminOrders.some((order) => order.reference === reference)),
     );
   }, [filteredAdminOrders]);
+
+  useEffect(() => {
+    const validReferences = new Set(adminState.data.orders.map((order) => order.reference));
+    setOrderOperationsDrafts((previous) => {
+      const nextEntries = Object.fromEntries(
+        Object.entries(previous).filter(([reference]) => validReferences.has(reference)),
+      );
+      return Object.keys(nextEntries).length === Object.keys(previous).length ? previous : nextEntries;
+    });
+  }, [adminState.data.orders]);
 
   const filteredMenuAdminItems = menuAdminState.items.filter((item) => {
     return (
@@ -3119,9 +3353,7 @@ export default function App() {
   }
 
   function handleBranchSelect(branchId) {
-    setSelectedBranchId(branchId);
-    setBranchMenuOpen(false);
-    setShowCart(false);
+    applyBranchSelection(branchId);
   }
 
   function handleBranchMenuScroll(event) {
@@ -3137,6 +3369,101 @@ export default function App() {
     }
   }
 
+  function applyBranchSelection(branchId, source = "") {
+    if (!branchId) {
+      return;
+    }
+    setSelectedBranchId(branchId);
+    setBranchMenuOpen(false);
+    setShowCart(false);
+    setBranchAssistState((previous) => ({
+      ...previous,
+      loading: false,
+      error: "",
+      success: source ? `Using ${branchLocations.find((branch) => branch.id === branchId)?.label || "that branch"}.` : "",
+      suggestedId: branchId,
+      source,
+    }));
+  }
+
+  async function handleUseClosestBranch() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setBranchAssistState({
+        loading: false,
+        error: "Location is not available on this device.",
+        success: "",
+        suggestedId: "",
+        source: "",
+      });
+      return;
+    }
+
+    setBranchAssistState((previous) => ({
+      ...previous,
+      loading: true,
+      error: "",
+      success: "",
+    }));
+
+    const getCurrentPosition = () =>
+      new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 300000,
+        });
+      });
+
+    try {
+      const position = await getCurrentPosition();
+      const nearestBranch = findNearestBranchByCoordinates(
+        branchLocations,
+        position.coords.latitude,
+        position.coords.longitude,
+      );
+
+      if (!nearestBranch) {
+        throw new Error("PEM could not match your location to a branch yet.");
+      }
+
+      applyBranchSelection(nearestBranch.id, "device");
+    } catch (error) {
+      setBranchAssistState({
+        loading: false,
+        error: error.message || "PEM could not use your location just now.",
+        success: "",
+        suggestedId: "",
+        source: "",
+      });
+    }
+  }
+
+  function handleUseSuggestedBranch() {
+    if (!suggestedBranch?.id) {
+      return;
+    }
+    applyBranchSelection(suggestedBranch.id, "address");
+  }
+
+  function handleCheckoutAddressSourceChange(nextSource) {
+    const normalizedSource = nextSource === "custom" ? "custom" : "profile";
+    const savedAddress = primarySavedAddress;
+    setCheckoutForm((previous) => ({
+      ...previous,
+      addressSource: normalizedSource,
+      address:
+        normalizedSource === "profile"
+          ? savedAddress || previous.address
+          : previous.address === savedAddress
+            ? ""
+            : previous.address,
+    }));
+    setCheckoutFieldErrors((previous) => ({
+      ...previous,
+      address: "",
+    }));
+  }
+
   function getUserAuthHeaders(tokenOverride = accountToken) {
     return tokenOverride && tokenOverride !== SESSION_COOKIE_SENTINEL
       ? { Authorization: `Bearer ${tokenOverride}` }
@@ -3147,6 +3474,68 @@ export default function App() {
     return tokenOverride && tokenOverride !== SESSION_COOKIE_SENTINEL
       ? { Authorization: `Bearer ${tokenOverride}` }
       : {};
+  }
+
+  async function reportRuntimeIncident(source, message) {
+    const normalizedMessage = String(message || "").trim();
+    if (!normalizedMessage || typeof window === "undefined") {
+      return;
+    }
+
+    const key = `${source}:${normalizedMessage}`.slice(0, 240);
+    if (reportedRuntimeIncidentsRef.current.has(key)) {
+      return;
+    }
+    reportedRuntimeIncidentsRef.current.add(key);
+    window.setTimeout(() => {
+      reportedRuntimeIncidentsRef.current.delete(key);
+    }, 30000);
+
+    try {
+      await fetch(apiUrl("/api/runtime-incidents"), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source,
+          message: normalizedMessage,
+          path: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+          build: import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA || import.meta.env.MODE || "local",
+          userAgent: window.navigator.userAgent,
+        }),
+        keepalive: true,
+      });
+    } catch {
+      // Ignore diagnostics sync failures.
+    }
+  }
+
+  function getOrderOperationsDraft(order) {
+    const operations = order?.customer?.operations || {};
+    return {
+      kitchenStation: String(operations.kitchenStation || ""),
+      prepEtaMinutes: operations.prepEtaMinutes ? String(operations.prepEtaMinutes) : "",
+      riderName: String(operations.riderName || ""),
+      riderPhone: String(operations.riderPhone || ""),
+      dispatchNote: String(operations.dispatchNote || ""),
+    };
+  }
+
+  function resolveOrderOperationsDraft(order) {
+    return orderOperationsDrafts[order.reference] || getOrderOperationsDraft(order);
+  }
+
+  function updateOrderOperationsDraft(reference, order, field, value) {
+    setOrderOperationsDrafts((previous) => ({
+      ...previous,
+      [reference]: {
+        ...getOrderOperationsDraft(order),
+        ...(previous[reference] || {}),
+        [field]: value,
+      },
+    }));
   }
 
   async function loadAccount(tokenOverride = accountToken) {
@@ -3187,7 +3576,10 @@ export default function App() {
         customerName: previous.customerName || nextUser.fullName || "",
         phone: previous.phone || nextUser.phone || "",
         email: previous.email || nextUser.email || "",
-        address: previous.address || nextUser.savedAddresses?.[0] || "",
+        address:
+          previous.addressSource === "profile"
+            ? nextUser.savedAddresses?.[0] || previous.address || ""
+            : previous.address || nextUser.savedAddresses?.[0] || "",
       }));
       setAccountState((previous) => ({
         ...previous,
@@ -3440,6 +3832,11 @@ export default function App() {
           reservations: Array.isArray(data.reservations) ? data.reservations : [],
           reviews: Array.isArray(data.reviews) ? data.reviews : [],
           passwordRecoveryRequests: Array.isArray(data.passwordRecoveryRequests) ? data.passwordRecoveryRequests : [],
+          runtimeIncidents: Array.isArray(data.runtimeIncidents) ? data.runtimeIncidents : [],
+          diagnostics: {
+            ...initialAdminState.data.diagnostics,
+            ...(data.diagnostics || {}),
+          },
         },
       });
     } catch (error) {
@@ -3461,6 +3858,11 @@ export default function App() {
             reservations: Array.isArray(cachedAdmin.reservations) ? cachedAdmin.reservations : [],
             reviews: Array.isArray(cachedAdmin.reviews) ? cachedAdmin.reviews : [],
             passwordRecoveryRequests: Array.isArray(cachedAdmin.passwordRecoveryRequests) ? cachedAdmin.passwordRecoveryRequests : [],
+            runtimeIncidents: Array.isArray(cachedAdmin.runtimeIncidents) ? cachedAdmin.runtimeIncidents : [],
+            diagnostics: {
+              ...initialAdminState.data.diagnostics,
+              ...(cachedAdmin.diagnostics || {}),
+            },
           },
         });
         return;
@@ -3749,6 +4151,10 @@ export default function App() {
           ),
         },
       }));
+      setOrderOperationsDrafts((previous) => ({
+        ...previous,
+        [reference]: getOrderOperationsDraft(data.order),
+      }));
       setOrderActionState({ loadingRef: "", error: "", success: `Updated ${reference} to ${status}.` });
     } catch (error) {
       setOrderActionState({ loadingRef: "", error: error.message, success: "" });
@@ -3795,6 +4201,10 @@ export default function App() {
             ),
           },
         }));
+        setOrderOperationsDrafts((previous) => ({
+          ...previous,
+          [reference]: getOrderOperationsDraft(data.order),
+        }));
       }
 
       setSelectedOrderReferences([]);
@@ -3803,6 +4213,53 @@ export default function App() {
         error: "",
         success: `Updated ${selectedOrderReferences.length} order(s) to ${bulkOrderStatus}.`,
       });
+    } catch (error) {
+      setOrderActionState({ loadingRef: "", error: error.message, success: "" });
+    }
+  }
+
+  async function handleSaveOrderOperations(order) {
+    const reference = order.reference;
+    const draft = resolveOrderOperationsDraft(order);
+
+    try {
+      setOrderActionState({ loadingRef: `ops-${reference}`, error: "", success: "" });
+
+      const response = await fetch(apiUrl(`/api/admin/orders/${reference}/operations`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAdminAuthHeaders(),
+        },
+        body: JSON.stringify({
+          operations: {
+            kitchenStation: draft.kitchenStation,
+            prepEtaMinutes: draft.prepEtaMinutes,
+            riderName: draft.riderName,
+            riderPhone: sanitizePhoneInput(draft.riderPhone),
+            dispatchNote: draft.dispatchNote,
+          },
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Unable to update order operations.");
+      }
+
+      setAdminState((previous) => ({
+        ...previous,
+        data: {
+          ...previous.data,
+          orders: previous.data.orders.map((item) => (item.reference === reference ? data.order : item)),
+        },
+      }));
+      setOrderOperationsDrafts((previous) => ({
+        ...previous,
+        [reference]: getOrderOperationsDraft(data.order),
+      }));
+      setOrderActionState({ loadingRef: "", error: "", success: `Saved operations for ${reference}.` });
     } catch (error) {
       setOrderActionState({ loadingRef: "", error: error.message, success: "" });
     }
@@ -4434,6 +4891,29 @@ export default function App() {
     } catch {
       // Do not block the rest of the account page if notification sync fails.
     }
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    try {
+      const data = await requestJson("/api/account/notifications/read-all", {
+        method: "PATCH",
+        headers: getUserAuthHeaders(),
+      });
+      if (data.user) {
+        setAccountUser({ ...initialAccountUser, ...data.user });
+      }
+    } catch {
+      // Keep account usage responsive even if notification sync fails.
+    }
+  }
+
+  function openTrackingFromNotification(reference) {
+    const normalizedReference = String(reference || "").trim().toUpperCase();
+    if (!normalizedReference) {
+      return;
+    }
+    setTrackingReference(normalizedReference);
+    navigateToPage("#track");
   }
 
   function handleCheckoutOrderTypeChange(nextType) {
@@ -5154,9 +5634,6 @@ export default function App() {
 
                 <p className="eyebrow">Welcome to PEM</p>
                 {authView !== "signup" ? <h1>Recover your PEM account.</h1> : null}
-                {authView === "forgot" ? (
-                  <p>Use your email and phone number to reset your password and get back into PEM quickly.</p>
-                ) : null}
               </>
             )}
 
@@ -5699,6 +6176,30 @@ export default function App() {
             <span>{selectedBranch?.hours || businessSettings.businessHoursText}</span>
             <strong>{selectedBranch?.phone || businessSettings.phone}</strong>
           </div>
+          <div className="branch-assist">
+            <button
+              type="button"
+              className="button button--ghost button--small"
+              onClick={handleUseClosestBranch}
+              disabled={branchAssistState.loading}
+            >
+              {branchAssistState.loading ? "Checking..." : "Use closest branch"}
+            </button>
+            {suggestedBranch && suggestedBranch.id !== selectedBranch?.id ? (
+              <button
+                type="button"
+                className="button button--ghost button--small"
+                onClick={handleUseSuggestedBranch}
+              >
+                Use {suggestedBranch.label}
+              </button>
+            ) : null}
+          </div>
+          {branchAssistState.error ? (
+            <p className="branch-assist__message">{branchAssistState.error}</p>
+          ) : branchAssistState.success ? (
+            <p className="branch-assist__message">{branchAssistState.success}</p>
+          ) : null}
         </section>
 
         {branchMenuOpen ? (
@@ -5737,13 +6238,11 @@ export default function App() {
               <p>
                 {receiptOrder.status === "awaiting_payment" ? (
                   <>
-                    PEM saved your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>, but it will only be confirmed after your card payment succeeds.
-                    Complete payment to move it into the kitchen queue.
+                    Order saved for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>. Complete payment to confirm it.
                   </>
                 ) : (
                   <>
-                    PEM received your order for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
-                    You can track it below, download the receipt, or continue browsing the menu.
+                    Order received for <strong>{formatPrice(receiptOrder.pricing.total)}</strong>.
                   </>
                 )}
               </p>
@@ -5782,11 +6281,7 @@ export default function App() {
         <section className="account-section" id="account">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Customer Account</p>
-            <h2>Create a PEM account for faster repeat ordering.</h2>
-            <p>
-              Save your details, keep favorite meals across devices, reuse delivery addresses, and
-              follow your order history from one place.
-            </p>
+            <h2>Account</h2>
           </div>
 
           {!accountToken && !adminToken ? (
@@ -5859,7 +6354,6 @@ export default function App() {
                       }
                       placeholder="Street, area, city"
                     />
-                    <small className="cart-help">PEM will save this as your default delivery address.</small>
                   </label>
 
                   <label className="field">
@@ -5872,7 +6366,6 @@ export default function App() {
                         setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
                       }
                     />
-                    <small className="cart-help">PEM will wish you a happy birthday and apply 15% off your first birthday order.</small>
                   </label>
 
                   <label className="field">
@@ -5930,10 +6423,6 @@ export default function App() {
                     />
                   </label>
                 </div>
-
-                <p className="account-helper">
-                  Sign in to sync favorites, addresses, notifications, and order history across devices.
-                </p>
 
                 <button type="submit" className="button button--ghost" disabled={accountState.loading}>
                   {accountState.loading ? "Signing in..." : "Sign In"}
@@ -5998,9 +6487,7 @@ export default function App() {
                   <button type="button" className="button button--ghost button--small" onClick={handleInstallApp}>
                     Install PEM App
                   </button>
-                ) : (
-                  <p className="account-helper">PEM is already installed on this device.</p>
-                )}
+                ) : null}
 
                 <form className="service-form account-card__panel" onSubmit={handleProfileSave}>
                   <div className="service-form__grid">
@@ -6044,13 +6531,13 @@ export default function App() {
                     />
                   </label>
 
-                  {accountUser.birthdayIsToday ? (
-                    <p className="account-helper">
-                      {accountUser.birthdayDiscountEligible
-                        ? `Happy Birthday. PEM will apply ${accountUser.birthdayDiscountPercent || 15}% off to your first birthday order today.`
-                        : "Happy Birthday. Your birthday reward has already been used for this year."}
-                    </p>
-                  ) : null}
+                {accountUser.birthdayIsToday ? (
+                  <p className="account-helper">
+                    {accountUser.birthdayDiscountEligible
+                        ? `Happy Birthday. ${accountUser.birthdayDiscountPercent || 15}% off is ready today.`
+                        : "Happy Birthday. Reward already used this year."}
+                  </p>
+                ) : null}
 
                   <button type="submit" className="button button--primary" disabled={accountState.loading}>
                     {accountState.loading ? "Saving..." : "Save Profile"}
@@ -6074,10 +6561,7 @@ export default function App() {
                   <div className="account-progress__bar">
                     <span style={{ width: `${loyaltyProgress}%` }} />
                   </div>
-                  <p>
-                    Earn points whenever you place an order through your PEM account. Bronze upgrades to
-                    silver at 60 points, then gold at 120 points.
-                  </p>
+                  <p>Silver at 60 pts. Gold at 120 pts.</p>
                 </div>
 
                 <form className="service-form account-card__panel" onSubmit={handleAddAddress}>
@@ -6115,7 +6599,11 @@ export default function App() {
                               type="button"
                               className="button button--ghost button--small"
                               onClick={() =>
-                                setCheckoutForm((previous) => ({ ...previous, address }))
+                                setCheckoutForm((previous) => ({
+                                  ...previous,
+                                  addressSource: "custom",
+                                  address,
+                                }))
                               }
                             >
                               Use in checkout
@@ -6132,7 +6620,7 @@ export default function App() {
                       ))}
                     </div>
                   ) : (
-                    <p className="account-helper">Save your most-used delivery addresses here.</p>
+                    <p className="account-helper">No saved addresses yet.</p>
                   )}
                 </form>
               </article>
@@ -6151,7 +6639,6 @@ export default function App() {
 
                 {(accountGifts.received || []).length > 0 ? (
                   <>
-                    <p className="account-helper">Received gifts</p>
                     <div className="account-list">
                       {accountGifts.received.map((gift) => (
                         <div key={gift.reference} className={gift.status === "pending_acceptance" ? "account-list__item is-unread" : "account-list__item"}>
@@ -6159,7 +6646,6 @@ export default function App() {
                             <strong>{gift.senderName} sent you a meal gift</strong>
                             <p>{gift.reference} • {gift.branchName || businessSettings.appName}</p>
                             {gift.giftMessage ? <p>"{gift.giftMessage}"</p> : null}
-                            <p>{gift.deliveryZone || "Delivery area will be confirmed after acceptance."}</p>
                             <p>Status: {String(gift.status || "pending_acceptance").replaceAll("_", " ")}</p>
                           </div>
                           <div className="account-list__actions">
@@ -6290,7 +6776,18 @@ export default function App() {
                     <p className="eyebrow">Notifications</p>
                     <h3>Order and payment updates</h3>
                   </div>
-                  <span>{unreadNotifications.length} unread</span>
+                  <div className="account-card__header-actions">
+                    <span>{unreadNotifications.length} unread</span>
+                    {unreadNotifications.length > 1 ? (
+                      <button
+                        type="button"
+                        className="button button--ghost button--small"
+                        onClick={handleMarkAllNotificationsRead}
+                      >
+                        Mark all read
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="account-list">
@@ -6304,19 +6801,30 @@ export default function App() {
                           <strong>{notification.message}</strong>
                           <p>{formatDateTime(notification.createdAt)}</p>
                         </div>
-                        {!notification.read ? (
-                          <button
-                            type="button"
-                            className="button button--ghost button--small"
-                            onClick={() => handleNotificationRead(notification.id)}
-                          >
-                            Mark Read
-                          </button>
-                        ) : null}
+                        <div className="account-list__actions">
+                          {notification.orderReference ? (
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => openTrackingFromNotification(notification.orderReference)}
+                            >
+                              Track
+                            </button>
+                          ) : null}
+                          {!notification.read ? (
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => handleNotificationRead(notification.id)}
+                            >
+                              Mark Read
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))
                   ) : (
-                    <p className="account-helper">PEM account updates will show here once you start ordering.</p>
+                    <p className="account-helper">No updates yet.</p>
                   )}
                 </div>
               </article>
@@ -6359,7 +6867,7 @@ export default function App() {
                       </div>
                     ))
                   ) : (
-                    <p className="account-helper">Your placed orders will appear here once you checkout with your PEM account.</p>
+                    <p className="account-helper">No orders yet.</p>
                   )}
                 </div>
               </article>
@@ -7141,7 +7649,6 @@ export default function App() {
           </div>
 
           <form className="service-form service-form--light reveal reveal--up reveal--delay-2" onSubmit={handleCateringSubmit}>
-            <p className="cart-help">Branch handling this request: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
             <div className="service-form__grid">
               <label className="field">
                 <span>Full name</span>
@@ -7239,11 +7746,10 @@ export default function App() {
         <section className="contact-section">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Reservations</p>
-            <h2>Book a table or tasting slot with PEM.</h2>
+            <h2>Book with PEM.</h2>
           </div>
 
           <form className="service-form reveal reveal--up" onSubmit={handleReservationSubmit}>
-            <p className="cart-help">Reservation branch: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
             <div className="service-form__grid">
               <label className="field">
                 <span>Full name</span>
@@ -7310,7 +7816,7 @@ export default function App() {
         <section className="contact-section" id="contact">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Contact</p>
-            <h2>Make ordering easy for customers and inquiries easy for event clients.</h2>
+            <h2>Contact PEM.</h2>
           </div>
 
             <div className="contact-grid">
@@ -7349,7 +7855,6 @@ export default function App() {
           </div>
 
           <form className="service-form reveal reveal--up reveal--delay-2" onSubmit={handleContactSubmit}>
-            <p className="cart-help">Message will go to: <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong></p>
             <div className="service-form__grid service-form__grid--three">
               <label className="field">
                 <span>Full name</span>
@@ -7657,17 +8162,126 @@ export default function App() {
                   ) : (
                     <div className="admin-list">
                       {kitchenBoardOrders.slice(0, 8).map((order) => (
-                        <div key={order.reference} className="admin-item">
+                        <div key={order.reference} className="admin-item admin-item--ops">
                           <div className="admin-item__row">
                             <strong>{order.reference}</strong>
                             <span className={`status-pill status-pill--${order.status}`}>{order.status.replaceAll("_", " ")}</span>
                           </div>
                           <p>{order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")}</p>
                           <p className="admin-item__subtle">{getRecordBranchName(order)}</p>
+                          <div className="admin-ops-grid">
+                            <label className="field">
+                              <span>Station</span>
+                              <input
+                                type="text"
+                                value={resolveOrderOperationsDraft(order).kitchenStation}
+                                onChange={(event) =>
+                                  updateOrderOperationsDraft(order.reference, order, "kitchenStation", event.target.value)
+                                }
+                                placeholder="Hot line"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Prep ETA (mins)</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="180"
+                                value={resolveOrderOperationsDraft(order).prepEtaMinutes}
+                                onChange={(event) =>
+                                  updateOrderOperationsDraft(order.reference, order, "prepEtaMinutes", event.target.value)
+                                }
+                                placeholder="25"
+                              />
+                            </label>
+                          </div>
+                          <div className="admin-status-actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => handleSaveOrderOperations(order)}
+                              disabled={orderActionState.loadingRef === `ops-${order.reference}`}
+                            >
+                              {orderActionState.loadingRef === `ops-${order.reference}` ? "Saving..." : "Save ops"}
+                            </button>
+                            {order.status === "received" ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleOrderStatusChange(order.reference, "confirmed")}
+                                disabled={orderActionState.loadingRef === order.reference}
+                              >
+                                Confirm
+                              </button>
+                            ) : null}
+                            {order.status === "confirmed" ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleOrderStatusChange(order.reference, "preparing")}
+                                disabled={orderActionState.loadingRef === order.reference}
+                              >
+                                Start prep
+                              </button>
+                            ) : null}
+                            {order.status === "preparing" ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleOrderStatusChange(order.reference, "ready")}
+                                disabled={orderActionState.loadingRef === order.reference}
+                              >
+                                Mark ready
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
+                </article>
+
+                <article className="admin-card reveal reveal--up">
+                  <div className="admin-card__header">
+                    <h3>Diagnostics</h3>
+                    <span>{adminRuntimeIncidents.length}</span>
+                  </div>
+                  <div className="admin-diagnostics">
+                    <div className="admin-diagnostics__grid">
+                      <div className="admin-diagnostics__item">
+                        <span>Cookie auth</span>
+                        <strong>{adminDiagnostics.cookieAuth ? "On" : "Off"}</strong>
+                      </div>
+                      <div className="admin-diagnostics__item">
+                        <span>Storage</span>
+                        <strong>{adminDiagnostics.storageMode || "Unknown"}</strong>
+                      </div>
+                      <div className="admin-diagnostics__item">
+                        <span>AI</span>
+                        <strong>{adminDiagnostics.aiConfigured ? "Ready" : "Off"}</strong>
+                      </div>
+                      <div className="admin-diagnostics__item">
+                        <span>Card pay</span>
+                        <strong>{adminDiagnostics.paystackConfigured ? "Ready" : "Off"}</strong>
+                      </div>
+                    </div>
+                    {adminRuntimeIncidents.length > 0 ? (
+                      <div className="admin-list">
+                        {adminRuntimeIncidents.slice(0, 4).map((incident) => (
+                          <div key={incident.id} className="admin-item">
+                            <div className="admin-item__row">
+                              <strong>{incident.source || "client"}</strong>
+                              <span>{formatDateTime(incident.createdAt)}</span>
+                            </div>
+                            <p>{incident.message}</p>
+                            {incident.path ? <p className="admin-item__subtle">{incident.path}</p> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="admin-empty">No runtime incidents captured.</p>
+                    )}
+                  </div>
                 </article>
 
                 <article className="admin-card reveal reveal--up">
@@ -7680,7 +8294,7 @@ export default function App() {
                   ) : (
                     <div className="admin-list">
                       {riderBoardOrders.slice(0, 8).map((order) => (
-                        <div key={order.reference} className="admin-item">
+                        <div key={order.reference} className="admin-item admin-item--ops">
                           <div className="admin-item__row">
                             <strong>{order.customer.customerName}</strong>
                             <span className={`status-pill status-pill--${order.status}`}>{order.status.replaceAll("_", " ")}</span>
@@ -7690,6 +8304,77 @@ export default function App() {
                           <div className="admin-item__row">
                             <span>{order.customer.phone}</span>
                             <strong>{order.reference}</strong>
+                          </div>
+                          <div className="admin-ops-grid">
+                            <label className="field">
+                              <span>Rider</span>
+                              <input
+                                type="text"
+                                value={resolveOrderOperationsDraft(order).riderName}
+                                onChange={(event) =>
+                                  updateOrderOperationsDraft(order.reference, order, "riderName", event.target.value)
+                                }
+                                placeholder="Dispatch rider"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Rider phone</span>
+                              <input
+                                type="tel"
+                                inputMode="tel"
+                                value={resolveOrderOperationsDraft(order).riderPhone}
+                                onChange={(event) =>
+                                  updateOrderOperationsDraft(
+                                    order.reference,
+                                    order,
+                                    "riderPhone",
+                                    sanitizePhoneInput(event.target.value),
+                                  )
+                                }
+                                placeholder="0803..."
+                              />
+                            </label>
+                            <label className="field admin-ops-grid__wide">
+                              <span>Dispatch note</span>
+                              <input
+                                type="text"
+                                value={resolveOrderOperationsDraft(order).dispatchNote}
+                                onChange={(event) =>
+                                  updateOrderOperationsDraft(order.reference, order, "dispatchNote", event.target.value)
+                                }
+                                placeholder="Gate code, building note, call on arrival"
+                              />
+                            </label>
+                          </div>
+                          <div className="admin-status-actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => handleSaveOrderOperations(order)}
+                              disabled={orderActionState.loadingRef === `ops-${order.reference}`}
+                            >
+                              {orderActionState.loadingRef === `ops-${order.reference}` ? "Saving..." : "Save rider info"}
+                            </button>
+                            {order.status === "ready" ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleOrderStatusChange(order.reference, "out_for_delivery")}
+                                disabled={orderActionState.loadingRef === order.reference}
+                              >
+                                Dispatch
+                              </button>
+                            ) : null}
+                            {order.status === "out_for_delivery" ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={() => handleOrderStatusChange(order.reference, "delivered")}
+                                disabled={orderActionState.loadingRef === order.reference}
+                              >
+                                Delivered
+                              </button>
+                            ) : null}
                           </div>
                         </div>
                       ))}
@@ -8611,7 +9296,7 @@ export default function App() {
             {cartItems.length === 0 ? (
               <div className="cart-empty">
                 <strong>No meal added yet.</strong>
-                <p>Select dishes, set the quantity, and leave any special notes you want.</p>
+                <p>Add meals to begin.</p>
               </div>
             ) : (
               <>
@@ -8641,7 +9326,7 @@ export default function App() {
                   <div className="checkout-shell-header">
                     <div>
                       <p className="checkout-fields__title">Checkout</p>
-                      <h3>{isGiftOrder ? "Send this order as a gift" : "Finish this order inside PEM"}</h3>
+                      <h3>{isGiftOrder ? "Gift checkout" : "Checkout"}</h3>
                     </div>
                     <div className="checkout-shell-header__meta">
                       <span>{totalItems} item{totalItems === 1 ? "" : "s"}</span>
@@ -8651,29 +9336,29 @@ export default function App() {
 
                   <div className="checkout-overview">
                     <div className="delivery-zone-card delivery-zone-card--accent">
-                      <p className="delivery-zone-card__title">Estimated handoff</p>
+                      <p className="delivery-zone-card__title">ETA</p>
                       <strong>{deliveryEtaLabel}</strong>
                       <span>
                         {checkoutForm.fulfillmentMethod === "pickup"
-                          ? "PEM will confirm when your meal is ready for collection."
-                          : "Your branch, area, and kitchen volume shape the final timing."}
+                          ? "Pickup time confirmed after checkout."
+                          : "Final timing confirmed after checkout."}
                       </span>
                     </div>
                     <div className="delivery-zone-card">
-                      <p className="delivery-zone-card__title">Order summary</p>
+                      <p className="delivery-zone-card__title">Order</p>
                       <strong>{selectedBranch?.label || `${businessSettings.appName} Branch`}</strong>
                       <span>{checkoutForm.fulfillmentMethod === "pickup" ? "Pickup order" : selectedDeliveryZone.label}</span>
-                      <small>{selectedPaymentOption?.label || "Choose a payment option below"}</small>
+                      {selectedPaymentOption ? <small>{selectedPaymentOption.label}</small> : null}
                     </div>
                   </div>
 
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Contact</strong>
-                      <span>Who PEM should reach for this order</span>
+                      <span>Details for this order</span>
                     </div>
-                    <div className="delivery-zone-card">
-                      <p className="delivery-zone-card__title">Who is this order for?</p>
+                      <div className="delivery-zone-card">
+                        <p className="delivery-zone-card__title">Who is this order for?</p>
                       <div className="segmented-toggle">
                         <button
                           type="button"
@@ -8690,11 +9375,6 @@ export default function App() {
                           Buy for a friend
                         </button>
                       </div>
-                      <small>
-                        {isGiftOrder
-                          ? "PEM will notify your friend in-app so they can accept or decline the gift."
-                          : "Use your own delivery details and complete payment here in PEM."}
-                      </small>
                     </div>
 
                     <div className="checkout-grid checkout-grid--two">
@@ -8752,9 +9432,6 @@ export default function App() {
                         placeholder="you@example.com"
                       />
                       {checkoutFieldErrors.email ? <small className="field__error">{checkoutFieldErrors.email}</small> : null}
-                      {selectedPaymentIsCard && !checkoutFieldErrors.email ? (
-                        <small className="cart-help">PEM uses this email for secure card payment.</small>
-                      ) : null}
                     </label>
 
                     {isGiftOrder ? (
@@ -8776,9 +9453,7 @@ export default function App() {
                           />
                           {checkoutFieldErrors.recipientEmail ? (
                             <small className="field__error">{checkoutFieldErrors.recipientEmail}</small>
-                          ) : (
-                            <small className="cart-help">They must already have a PEM account.</small>
-                          )}
+                          ) : null}
                         </label>
 
                         <label className="field">
@@ -8802,7 +9477,7 @@ export default function App() {
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Delivery</strong>
-                      <span>Choose the handoff style and where PEM should go</span>
+                      <span>Delivery or pickup</span>
                     </div>
                     <div className="checkout-grid checkout-grid--two">
                       <label className="field" data-checkout-field="fulfillmentMethod">
@@ -8863,19 +9538,38 @@ export default function App() {
                       </p>
                       <strong>{checkoutForm.fulfillmentMethod === "pickup" ? "No delivery fee" : formatPrice(selectedDeliveryZone.fee)}</strong>
                       <span>{checkoutForm.fulfillmentMethod === "pickup" ? "PEM will confirm your pickup time." : selectedDeliveryZone.eta}</span>
-                      {checkoutForm.fulfillmentMethod !== "pickup" && (selectedDeliveryZone.id === "owerri" || selectedDeliveryZone.id === "custom") ? (
-                        <small>PEM will confirm the final timing after the order is received.</small>
-                      ) : null}
                     </div>
 
                     {isGiftOrder ? (
                       <div className="delivery-zone-card">
                         <p className="delivery-zone-card__title">Friend delivery flow</p>
                         <strong>They choose the final address</strong>
-                        <small>PEM will notify your friend after payment so they can accept the gift and enter where it should go.</small>
+                        <small>Recipient chooses the final address after accepting.</small>
                       </div>
                     ) : (
                       <>
+                        {accountUser.savedAddresses.length > 0 ? (
+                          <div className="delivery-zone-card delivery-zone-card--soft">
+                            <p className="delivery-zone-card__title">Order location</p>
+                            <div className="segmented-toggle segmented-toggle--compact">
+                              <button
+                                type="button"
+                                className={checkoutForm.addressSource === "profile" ? "is-active" : ""}
+                                onClick={() => handleCheckoutAddressSourceChange("profile")}
+                              >
+                                Same as profile
+                              </button>
+                              <button
+                                type="button"
+                                className={checkoutForm.addressSource === "custom" ? "is-active" : ""}
+                                onClick={() => handleCheckoutAddressSourceChange("custom")}
+                              >
+                                Different for this order
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
                         {accountUser.savedAddresses.length > 0 ? (
                           <div className="checkout-address-shortcuts">
                             <span>Saved places</span>
@@ -8888,6 +9582,7 @@ export default function App() {
                                   onClick={() =>
                                     setCheckoutForm((previous) => ({
                                       ...previous,
+                                      addressSource: "custom",
                                       address: savedAddress,
                                     }))
                                   }
@@ -8908,14 +9603,33 @@ export default function App() {
                             onChange={(event) =>
                               setCheckoutForm((previous) => ({
                                 ...previous,
+                                addressSource: "custom",
                                 address: event.target.value,
                               }))
                             }
+                            readOnly={checkoutForm.addressSource === "profile" && Boolean(primarySavedAddress)}
                             onBlur={(event) => validateCheckoutField("address", event.target.value)}
-                            placeholder="Street, area, city"
+                            placeholder={checkoutForm.addressSource === "profile" && primarySavedAddress ? "Using your saved profile address" : "Street, area, city"}
                           />
                           {checkoutFieldErrors.address ? <small className="field__error">{checkoutFieldErrors.address}</small> : null}
                         </label>
+
+                        {suggestedBranch && suggestedBranch.id !== selectedBranch?.id ? (
+                          <div className="delivery-zone-card delivery-zone-card--soft">
+                            <p className="delivery-zone-card__title">Suggested branch</p>
+                            <strong>{suggestedBranch.label}</strong>
+                            <small>{suggestedBranch.address}</small>
+                            <div className="delivery-zone-card__actions">
+                              <button
+                                type="button"
+                                className="button button--ghost button--small"
+                                onClick={handleUseSuggestedBranch}
+                              >
+                                Use this branch
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
 
                         <label className="field">
                           <span>Nearest landmark</span>
@@ -8938,7 +9652,7 @@ export default function App() {
                   <div className="checkout-group">
                     <div className="checkout-group__header">
                       <strong>Payment</strong>
-                      <span>Choose how you want to complete payment in PEM</span>
+                      <span>How you want to pay</span>
                     </div>
                     {hasAvailableInAppPayment ? (
                       <div className="payment-options" data-checkout-field="paymentMethod">
@@ -8969,10 +9683,6 @@ export default function App() {
                       </div>
                     )}
                     {checkoutFieldErrors.paymentMethod ? <small className="field__error">{checkoutFieldErrors.paymentMethod}</small> : null}
-                    {isGiftOrder && bankTransferReady ? (
-                      <small className="cart-help">Gift orders use bank transfer so the recipient is never asked to pay.</small>
-                    ) : null}
-
                     {checkoutForm.paymentMethod === "Bank transfer" ? (
                       bankTransferReady ? (
                         <div className="delivery-zone-card transfer-card">
@@ -9051,7 +9761,7 @@ export default function App() {
                       <div className="delivery-zone-card">
                         <p className="delivery-zone-card__title">Card payment</p>
                         <strong>Secure online checkout</strong>
-                        <small>PEM will open a secure card payment page as the next step.</small>
+                        <small>Secure card checkout.</small>
                       </div>
                     ) : null}
 
@@ -9092,8 +9802,8 @@ export default function App() {
                       </strong>
                       <small>
                         {accountUser.birthdayDiscountEligible
-                          ? "PEM applies the better discount automatically on your first birthday order."
-                          : "You can still use a promo code or continue with the normal checkout total."}
+                          ? "Applied automatically on your first birthday order."
+                          : "Already used this year."}
                       </small>
                     </div>
                   ) : null}
