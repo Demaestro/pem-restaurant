@@ -797,6 +797,7 @@ const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "prep
 const contactStatuses = ["new", "handled"];
 const cateringStatuses = ["new", "contacted", "booked"];
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const defaultProductionApiBaseUrl = "https://pem-restaurant.onrender.com";
 const isLocalNetworkHost = (() => {
   if (typeof window === "undefined") {
     return false;
@@ -805,7 +806,7 @@ const isLocalNetworkHost = (() => {
     window.location.hostname,
   );
 })();
-const apiBaseUrl = isLocalNetworkHost ? "" : configuredApiBaseUrl;
+const apiBaseUrl = isLocalNetworkHost ? "" : configuredApiBaseUrl || defaultProductionApiBaseUrl;
 const CACHE_TTL = {
   account: 10 * 60 * 1000,
   deliveryZones: 30 * 60 * 1000,
