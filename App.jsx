@@ -2549,7 +2549,10 @@ export default function App() {
   }, [checkoutForm.addressSource, isGiftOrder, primarySavedAddress]);
 
   useEffect(() => {
-    if (!suggestedBranch || suggestedBranch.id === selectedBranch?.id) {
+    const suggestedBranchId = suggestedBranch?.id || "";
+    const selectedId = selectedBranch?.id || "";
+
+    if (!suggestedBranchId || suggestedBranchId === selectedId) {
       setBranchAssistState((previous) => (
         previous.suggestedId || previous.error
           ? {
@@ -2563,14 +2566,18 @@ export default function App() {
       return;
     }
 
-    setBranchAssistState((previous) => ({
-      ...previous,
-      error: "",
-      success: "",
-      suggestedId: suggestedBranch.id,
-      source: "address",
-    }));
-  }, [selectedBranch?.id, suggestedBranch]);
+    setBranchAssistState((previous) => (
+      previous.suggestedId === suggestedBranchId && previous.source === "address" && !previous.error && !previous.success
+        ? previous
+        : {
+            ...previous,
+            error: "",
+            success: "",
+            suggestedId: suggestedBranchId,
+            source: "address",
+          }
+    ));
+  }, [selectedBranch?.id, suggestedBranch?.id]);
 
   useEffect(() => {
     if (!branchAssistState.success) {
@@ -3149,9 +3156,15 @@ export default function App() {
   const recentReviews = branchScopedReviews.slice(0, 6);
 
   useEffect(() => {
-    setSelectedOrderReferences((previous) =>
-      previous.filter((reference) => filteredAdminOrders.some((order) => order.reference === reference)),
-    );
+    setSelectedOrderReferences((previous) => {
+      const nextReferences = previous.filter((reference) =>
+        filteredAdminOrders.some((order) => order.reference === reference),
+      );
+      return nextReferences.length === previous.length &&
+        nextReferences.every((reference, index) => reference === previous[index])
+        ? previous
+        : nextReferences;
+    });
   }, [filteredAdminOrders]);
 
   useEffect(() => {
