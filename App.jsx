@@ -805,7 +805,7 @@ const isLocalNetworkHost = (() => {
     window.location.hostname,
   );
 })();
-const apiBaseUrl = !isLocalNetworkHost ? "" : configuredApiBaseUrl;
+const apiBaseUrl = isLocalNetworkHost ? "" : configuredApiBaseUrl;
 const CACHE_TTL = {
   account: 10 * 60 * 1000,
   deliveryZones: 30 * 60 * 1000,
