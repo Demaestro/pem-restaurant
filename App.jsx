@@ -2026,6 +2026,16 @@ export default function App() {
   const lagosNow = useMemo(() => getLagosNowParts(), [lagosNowTick]);
   const selectedBranch =
     branchLocations.find((branch) => branch.id === selectedBranchId) || branchLocations[0] || null;
+  const primarySavedAddress = String(accountUser.savedAddresses?.[0] || "").trim();
+  const checkoutAddressForBranching = String(
+    checkoutForm.addressSource === "profile" && !isGiftOrder
+      ? primarySavedAddress || checkoutForm.address
+      : checkoutForm.address,
+  ).trim();
+  const suggestedBranch = useMemo(
+    () => suggestBranchFromAddress(checkoutAddressForBranching, branchLocations),
+    [branchLocations, checkoutAddressForBranching],
+  );
   const businessStatus = useMemo(
     () => getBusinessStatus(selectedBranch?.hours || businessSettings.businessHoursText, lagosNow),
     [businessSettings.businessHoursText, lagosNow, selectedBranch?.hours],
@@ -2919,16 +2929,6 @@ export default function App() {
     return () => window.clearTimeout(timeoutId);
   }, [checkoutForm.promoCode, subtotal]);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-  const primarySavedAddress = String(accountUser.savedAddresses?.[0] || "").trim();
-  const checkoutAddressForBranching = String(
-    checkoutForm.addressSource === "profile" && !isGiftOrder
-      ? primarySavedAddress || checkoutForm.address
-      : checkoutForm.address,
-  ).trim();
-  const suggestedBranch = useMemo(
-    () => suggestBranchFromAddress(checkoutAddressForBranching, branchLocations),
-    [branchLocations, checkoutAddressForBranching],
-  );
   const deliveryEtaLabel = checkoutForm.fulfillmentMethod === "pickup"
     ? `Pickup from ${selectedBranch?.label || `${businessSettings.appName} Branch`} will be confirmed by PEM.`
     : `${selectedDeliveryZone.eta} from ${selectedBranch?.label || `${businessSettings.appName} Branch`}.`;
