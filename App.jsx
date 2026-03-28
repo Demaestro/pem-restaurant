@@ -815,9 +815,22 @@ const CACHE_TTL = {
   tracking: 10 * 60 * 1000,
 };
 const ORDER_ITEM_LIMIT = 10;
+const ACCOUNT_SESSION_STORAGE_KEY = "pem-account-session";
+const ADMIN_SESSION_STORAGE_KEY = "pem-admin-session";
 
 function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
+}
+
+function readSessionStorageToken(key) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  try {
+    return String(window.sessionStorage.getItem(key) || "");
+  } catch {
+    return "";
+  }
 }
 
 function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINITY) {
@@ -1942,7 +1955,7 @@ export default function App() {
   const [selectedBranchId, setSelectedBranchId] = useState("");
   const [branchCarts, setBranchCarts] = useState({});
   const [branchCartHydrated, setBranchCartHydrated] = useState(false);
-  const [accountToken, setAccountToken] = useState("");
+  const [accountToken, setAccountToken] = useState(() => readSessionStorageToken(ACCOUNT_SESSION_STORAGE_KEY));
   const [accountUser, setAccountUser] = useState(initialAccountUser);
   const [accountOrders, setAccountOrders] = useState([]);
   const [accountGifts, setAccountGifts] = useState(initialAccountGifts);
@@ -1988,7 +2001,7 @@ export default function App() {
   const [adminState, setAdminState] = useState(initialAdminState);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
-  const [adminToken, setAdminToken] = useState("");
+  const [adminToken, setAdminToken] = useState(() => readSessionStorageToken(ADMIN_SESSION_STORAGE_KEY));
   const [adminHydrated, setAdminHydrated] = useState(false);
   const [adminSession, setAdminSession] = useState(initialAdminSession);
   const [adminLoginState, setAdminLoginState] = useState({ loading: false, error: "" });
@@ -2375,6 +2388,36 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (accountToken) {
+        window.sessionStorage.setItem(ACCOUNT_SESSION_STORAGE_KEY, accountToken);
+      } else {
+        window.sessionStorage.removeItem(ACCOUNT_SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore session storage sync issues.
+    }
+  }, [accountToken]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (adminToken) {
+        window.sessionStorage.setItem(ADMIN_SESSION_STORAGE_KEY, adminToken);
+      } else {
+        window.sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore session storage sync issues.
+    }
+  }, [adminToken]);
+
+  useEffect(() => {
     window.localStorage.setItem("pem-favorites", JSON.stringify(favorites));
   }, [favorites]);
 
@@ -2484,8 +2527,12 @@ export default function App() {
   }, [checkoutForm.fulfillmentMethod, isGiftOrder]);
 
   useEffect(() => {
-    loadAccount(SESSION_COOKIE_SENTINEL);
-    loadAdminData(SESSION_COOKIE_SENTINEL);
+    if (!accountToken) {
+      loadAccount(SESSION_COOKIE_SENTINEL);
+    }
+    if (!adminToken) {
+      loadAdminData(SESSION_COOKIE_SENTINEL);
+    }
   }, []);
 
   useEffect(() => {
@@ -2607,7 +2654,10 @@ export default function App() {
   }, [checkoutForm.addressSource, isGiftOrder, primarySavedAddress]);
 
   useEffect(() => {
-    if (!suggestedBranch || suggestedBranch.id === selectedBranch?.id) {
+    const suggestedBranchId = suggestedBranch?.id || "";
+    const selectedId = selectedBranch?.id || "";
+
+    if (!suggestedBranchId || suggestedBranchId === selectedId) {
       setBranchAssistState((previous) => (
         previous.suggestedId || previous.error
           ? {
@@ -2621,14 +2671,18 @@ export default function App() {
       return;
     }
 
-    setBranchAssistState((previous) => ({
-      ...previous,
-      error: "",
-      success: "",
-      suggestedId: suggestedBranch.id,
-      source: "address",
-    }));
-  }, [selectedBranch?.id, suggestedBranch]);
+    setBranchAssistState((previous) => (
+      previous.suggestedId === suggestedBranchId && previous.source === "address" && !previous.error && !previous.success
+        ? previous
+        : {
+            ...previous,
+            error: "",
+            success: "",
+            suggestedId: suggestedBranchId,
+            source: "address",
+          }
+    ));
+  }, [selectedBranch?.id, suggestedBranch?.id]);
 
   useEffect(() => {
     if (!branchAssistState.success) {
@@ -3207,9 +3261,15 @@ export default function App() {
   const recentReviews = branchScopedReviews.slice(0, 6);
 
   useEffect(() => {
-    setSelectedOrderReferences((previous) =>
-      previous.filter((reference) => filteredAdminOrders.some((order) => order.reference === reference)),
-    );
+    setSelectedOrderReferences((previous) => {
+      const nextReferences = previous.filter((reference) =>
+        filteredAdminOrders.some((order) => order.reference === reference),
+      );
+      return nextReferences.length === previous.length &&
+        nextReferences.every((reference, index) => reference === previous[index])
+        ? previous
+        : nextReferences;
+    });
   }, [filteredAdminOrders]);
 
   useEffect(() => {
@@ -3955,7 +4015,7 @@ export default function App() {
       setAdminPassword("");
       setAdminLoginState({ loading: false, error: "" });
       setAdminSession({ ...initialAdminSession, ...(result.admin || {}) });
-      setAdminToken(SESSION_COOKIE_SENTINEL);
+      setAdminToken(result.token || SESSION_COOKIE_SENTINEL);
     } catch (error) {
       setAdminLoginState({
         loading: false,
@@ -4728,7 +4788,8 @@ export default function App() {
         address: normalizedAddress,
         birthday: normalizedBirthday,
       });
-      setAccountToken(SESSION_COOKIE_SENTINEL);
+      setAccountUser({ ...initialAccountUser, ...(data.user || {}) });
+      setAccountToken(data.token || SESSION_COOKIE_SENTINEL);
       setSignupForm(initialAccountForm);
       setSignupFieldErrors(initialSignupFieldErrors);
       setLoginForm(initialLoginForm);
@@ -4751,8 +4812,9 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      await postJson("/api/auth/login", loginForm);
-      setAccountToken(SESSION_COOKIE_SENTINEL);
+      const data = await postJson("/api/auth/login", loginForm);
+      setAccountUser({ ...initialAccountUser, ...(data.user || {}) });
+      setAccountToken(data.token || SESSION_COOKIE_SENTINEL);
       setLoginForm(initialLoginForm);
       setAccountState({
         loading: false,
