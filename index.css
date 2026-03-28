@@ -1312,6 +1312,109 @@ button:disabled {
   margin-bottom: 1rem;
 }
 
+.menu-guide-card,
+.menu-discovery {
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.menu-guide-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.menu-guide-card h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.15rem;
+}
+
+.menu-guide-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.menu-discovery {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.menu-discovery .menu-section__header,
+.menu-discovery .category-row,
+.menu-discovery .menu-summary {
+  margin-bottom: 0;
+}
+
+.menu-discovery .menu-structure {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  scrollbar-width: none;
+}
+
+.menu-discovery .menu-structure::-webkit-scrollbar,
+.menu-shortcuts::-webkit-scrollbar {
+  display: none;
+}
+
+.menu-discovery--sticky {
+  position: sticky;
+  top: 9.15rem;
+  z-index: 35;
+  backdrop-filter: blur(16px);
+}
+
+.menu-discovery__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.menu-discovery__tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.menu-discovery__search {
+  margin: 0;
+}
+
+.menu-shortcuts {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.menu-shortcut {
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.72rem 0.95rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.menu-shortcut:hover,
+.menu-shortcut.is-active {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: var(--brand-soft);
+  color: var(--brand);
+  transform: translateY(-1px);
+}
+
 .menu-structure {
   display: flex;
   gap: 0.75rem;
@@ -1328,6 +1431,10 @@ button:disabled {
 .controls {
   grid-template-columns: 1.5fr repeat(3, minmax(0, 0.7fr));
   margin-bottom: 1.15rem;
+}
+
+.controls--discovery {
+  margin-bottom: 0;
 }
 
 .field--toggle {
@@ -3210,6 +3317,19 @@ button:disabled {
   .dietary-assistant {
     grid-template-columns: 1fr;
   }
+
+  .menu-discovery__top {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .menu-discovery__tools {
+    justify-content: flex-start;
+  }
+
+  .menu-discovery--sticky {
+    top: 8.8rem;
+  }
 }
 
 @media (max-width: 860px) {
@@ -3289,6 +3409,22 @@ button:disabled {
     position: static;
     margin-top: 0.65rem;
     max-height: min(18rem, calc(100vh - 14rem));
+  }
+
+  .menu-guide-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .menu-discovery--sticky {
+    top: 5.2rem;
+  }
+
+  .menu-shortcuts {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+    scrollbar-width: none;
   }
 
   .cart-suggestion {
