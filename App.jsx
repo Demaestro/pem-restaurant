@@ -455,6 +455,13 @@ const menuSections = [
   { id: "sides", label: "Sides", categories: ["All", "Sides", "Starters"] },
   { id: "drinks", label: "Drinks & Desserts", categories: ["All", "Drinks", "Drinks & Desserts"] },
 ];
+const menuQuickShortcuts = [
+  { id: "top-rated", label: "Top Rated", section: "all", category: "All", minimumRating: 4.5 },
+  { id: "rice", label: "Rice", section: "mains", category: "Rice", minimumRating: 0 },
+  { id: "soups", label: "Soups", section: "soups", category: "Soup", minimumRating: 0 },
+  { id: "drinks", label: "Drinks", section: "drinks", category: "Drinks", minimumRating: 0 },
+  { id: "local", label: "Local", section: "mains", category: "Local Special", minimumRating: 0 },
+];
 const drinkCount = menuItems.filter((item) => item.category.includes("Drink")).length;
 const localDishCount = menuItems.filter(
   (item) => item.category === "Soup" || item.category === "Local Special",
@@ -1921,6 +1928,8 @@ export default function App() {
   );
   const [activeMenuSection, setActiveMenuSection] = useState("all");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [showMealGuide, setShowMealGuide] = useState(false);
+  const [showMenuFilters, setShowMenuFilters] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState("reviews");
   const [minimumRating, setMinimumRating] = useState(0);
@@ -2009,6 +2018,7 @@ export default function App() {
   const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
   const [publicReviews, setPublicReviews] = useState([]);
   const reportedRuntimeIncidentsRef = useRef(new Set());
+  const menuResultsRef = useRef(null);
   const branchLocations = useMemo(
     () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
     [businessSettings],
@@ -2938,6 +2948,22 @@ export default function App() {
       .filter((item) => item && !item.hidden && !item.soldOut && isMenuItemScheduledNow(item, lagosNow))
       .slice(0, 4);
   }, [accountOrders, lagosNow, menuCatalog]);
+  const activeMenuFilterCount =
+    (minimumRating > 0 ? 1 : 0)
+    + (priceRange !== "all" ? 1 : 0)
+    + (showFavoritesOnly ? 1 : 0)
+    + (sortBy !== "reviews" ? 1 : 0)
+    + (showDietaryMatchesOnly ? 1 : 0);
+  const hasMenuRefinements =
+    activeMenuSection !== "all"
+    || activeCategory !== "All"
+    || minimumRating > 0
+    || priceRange !== "all"
+    || showFavoritesOnly
+    || sortBy !== "reviews"
+    || showDietaryMatchesOnly
+    || Boolean(search.trim());
+  const menuFilterButtonLabel = activeMenuFilterCount > 0 ? `Refine (${activeMenuFilterCount})` : "Refine";
   const lowStockMenuItems = useMemo(
     () =>
       menuAdminState.items
@@ -2960,6 +2986,45 @@ export default function App() {
       text: "Customers can move from the app to WhatsApp support without losing their order context.",
     },
   ];
+  const scrollMenuResultsIntoView = (behavior = "smooth") => {
+    if (typeof window === "undefined" || !menuResultsRef.current) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const offset = window.innerWidth <= 720 ? 112 : 170;
+      const nextTop = menuResultsRef.current.getBoundingClientRect().top + window.scrollY - offset;
+      window.scrollTo({ top: Math.max(nextTop, 0), behavior });
+    });
+  };
+  const applyMenuShortcut = ({ section = "all", category = "All", minimumRating: nextMinimumRating = 0 }) => {
+    setActiveMenuSection(section);
+    setActiveCategory(category);
+    setMinimumRating(nextMinimumRating);
+    setPriceRange("all");
+    setSortBy("reviews");
+    setShowFavoritesOnly(false);
+    setShowDietaryMatchesOnly(false);
+    setShowMenuFilters(false);
+    scrollMenuResultsIntoView();
+  };
+  const clearMenuRefinements = () => {
+    setActiveCategory("All");
+    setActiveMenuSection("all");
+    setPriceRange("all");
+    setMinimumRating(0);
+    setShowFavoritesOnly(false);
+    setShowDietaryMatchesOnly(false);
+    setSortBy("reviews");
+    setSearchInput("");
+    setSearch("");
+    setShowMenuFilters(false);
+    scrollMenuResultsIntoView();
+  };
+  const openMealGuide = () => {
+    setShowMealGuide(true);
+    scrollMenuResultsIntoView();
+  };
   const receiptEtaCountdown = receiptOrder ? getEtaCountdown(receiptOrder, deliveryZones) : "";
   const trackingEtaCountdown = trackingState.order ? getEtaCountdown(trackingState.order, deliveryZones) : "";
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item, lagosNow));
@@ -5584,8 +5649,8 @@ export default function App() {
           </div>
           <div className="auth-loading-card">
             <p className="eyebrow">Loading account access</p>
-            <h1>Preparing your PEM experience.</h1>
-            <p>Please wait a moment while we check your sign-in session.</p>
+            <h1>Loading PEM.</h1>
+            <p>Checking your sign-in.</p>
           </div>
         </section>
       </div>
@@ -5633,7 +5698,7 @@ export default function App() {
                 </div>
 
                 <p className="eyebrow">Welcome to PEM</p>
-                {authView !== "signup" ? <h1>Recover your PEM account.</h1> : null}
+                {authView !== "signup" ? <h1>Recover account.</h1> : null}
               </>
             )}
 
@@ -6454,7 +6519,7 @@ export default function App() {
                   </div>
                   <div>
                     <strong>{favorites.length}</strong>
-                    <span>Saved meals</span>
+                      <span>Saved</span>
                   </div>
                   <div>
                     <strong>{accountUser.savedAddresses.length}</strong>
@@ -6561,7 +6626,7 @@ export default function App() {
                   <div className="account-progress__bar">
                     <span style={{ width: `${loyaltyProgress}%` }} />
                   </div>
-                  <p>Silver at 60 pts. Gold at 120 pts.</p>
+                  <p>Silver 60 pts • Gold 120 pts.</p>
                 </div>
 
                 <form className="service-form account-card__panel" onSubmit={handleAddAddress}>
@@ -6629,7 +6694,7 @@ export default function App() {
                 <div className="account-card__header">
                   <div>
                     <p className="eyebrow">Gift meals</p>
-                    <h3>Send and receive food gifts</h3>
+                    <h3>Send and receive gifts</h3>
                   </div>
                   <span>{pendingReceivedGifts.length} pending</span>
                 </div>
@@ -6694,26 +6759,26 @@ export default function App() {
                               }}
                             >
                               <label className="field">
-                                <span>Current delivery address</span>
+                                <span>Delivery address</span>
                                 <input
                                   type="text"
                                   value={giftActionState.address}
                                   onChange={(event) =>
                                     setGiftActionState((previous) => ({ ...previous, address: event.target.value }))
                                   }
-                                  placeholder="Where PEM should bring this gift"
+                                  placeholder="Delivery address"
                                 />
                               </label>
 
                               <label className="field">
-                                <span>Nearest landmark</span>
+                                <span>Landmark</span>
                                 <input
                                   type="text"
                                   value={giftActionState.landmark}
                                   onChange={(event) =>
                                     setGiftActionState((previous) => ({ ...previous, landmark: event.target.value }))
                                   }
-                                  placeholder="Bus stop, gate, popular shop"
+                                  placeholder="Bus stop, gate, shop"
                                 />
                               </label>
 
@@ -6746,7 +6811,7 @@ export default function App() {
                     </div>
                   </>
                 ) : (
-                  <p className="account-helper">When another PEM user buys food for you, it will appear here for acceptance.</p>
+                  <p className="account-helper">Incoming gifts appear here.</p>
                 )}
 
                 {(accountGifts.sent || []).length > 0 ? (
@@ -6774,7 +6839,7 @@ export default function App() {
                 <div className="account-card__header">
                   <div>
                     <p className="eyebrow">Notifications</p>
-                    <h3>Order and payment updates</h3>
+                    <h3>Notifications</h3>
                   </div>
                   <div className="account-card__header-actions">
                     <span>{unreadNotifications.length} unread</span>
@@ -6833,7 +6898,7 @@ export default function App() {
                 <div className="account-card__header">
                   <div>
                     <p className="eyebrow">Order history</p>
-                    <h3>Quick reorder and receipts</h3>
+                    <h3>Orders & receipts</h3>
                   </div>
                   <span>{accountOrders.length}</span>
                 </div>
@@ -6914,7 +6979,7 @@ export default function App() {
         <section className="tracking-section" id="track">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Order Tracking</p>
-            <h2>Check the status of your PEM order with your reference.</h2>
+            <h2>Track your order.</h2>
           </div>
 
           <div className="tracking-grid">
@@ -7050,7 +7115,7 @@ export default function App() {
                   {trackingState.order.status === "delivered" ? (
                     <form className="service-form account-card__panel" onSubmit={handleReviewSubmit}>
                       <label className="field">
-                        <span>Tap the stars to rate this order</span>
+                        <span>Rate this order</span>
                         <CleanStarRatingInput
                           value={reviewForm.rating}
                           onChange={(nextRating) =>
@@ -7064,7 +7129,7 @@ export default function App() {
                           rows="3"
                           value={reviewForm.comment}
                           onChange={(event) => setReviewForm((previous) => ({ ...previous, comment: event.target.value }))}
-                          placeholder="Tell PEM how the meal and delivery went."
+                          placeholder="How was it?"
                         />
                       </label>
                       {reviewState.error ? <p className="form-message form-message--error">{reviewState.error}</p> : null}
@@ -7078,10 +7143,8 @@ export default function App() {
               ) : (
                 <>
                   <p className="eyebrow">How it works</p>
-                  <h3>Enter your order reference to see whether PEM has received, prepared, or delivered it.</h3>
-                  <p>
-                    After checkout, PEM gives you a reference code. Save that code and use it here anytime.
-                  </p>
+                  <h3>Enter your order reference.</h3>
+                  <p>Use your PEM code here anytime.</p>
                 </>
               )}
             </div>
@@ -7141,7 +7204,7 @@ export default function App() {
         <section className="combo-section">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Quick Combos</p>
-            <h2>Start faster with PEM bundle suggestions.</h2>
+              <h2>Bundle suggestions.</h2>
           </div>
           <div className="combo-grid">
             {comboBundles.map((combo) => (
@@ -7200,15 +7263,85 @@ export default function App() {
             </section>
           ) : null}
 
+          <section className="menu-guide-card reveal reveal--up reveal--delay-1" aria-label="Meal guide quick access">
+            <div>
+              <p className="eyebrow">Meal Guide</p>
+              <h3>Need help choosing?</h3>
+            </div>
+            <div className="menu-guide-card__actions">
+              <button type="button" className="button button--ghost" onClick={() => setShowMealGuide((previous) => !previous)}>
+                {showMealGuide ? "Hide guide" : "Open guide"}
+              </button>
+            </div>
+          </section>
+
+          <section className="menu-discovery reveal reveal--up reveal--delay-1" aria-label="Menu discovery">
+            <div className="menu-discovery__top">
+              <label className="search-field menu-discovery__search">
+                <span>Search meals</span>
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Egusi, drinks, spicy soups..."
+                />
+                {searchInput && searchInput !== search ? <small className="cart-help">Searching...</small> : null}
+              </label>
+
+              <div className="menu-discovery__tools">
+                <button
+                  type="button"
+                  className={showMealGuide ? "category-pill is-active" : "category-pill"}
+                  onClick={() => setShowMealGuide((previous) => !previous)}
+                >
+                  {showMealGuide ? "Guide open" : "Meal guide"}
+                </button>
+                <button
+                  type="button"
+                  className={showMenuFilters ? "category-pill is-active" : "category-pill"}
+                  onClick={() => setShowMenuFilters((previous) => !previous)}
+                >
+                  {menuFilterButtonLabel}
+                </button>
+                {hasMenuRefinements ? (
+                  <button type="button" className="button button--ghost button--small" onClick={clearMenuRefinements}>
+                    Reset
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="menu-shortcuts" aria-label="Quick menu shortcuts">
+              {menuQuickShortcuts.map((shortcut) => (
+                <button
+                  key={shortcut.id}
+                  type="button"
+                  className="menu-shortcut"
+                  onClick={() => applyMenuShortcut(shortcut)}
+                >
+                  {shortcut.label}
+                </button>
+              ))}
+              {favorites.length > 0 ? (
+                <button
+                  type="button"
+                  className={showFavoritesOnly ? "menu-shortcut is-active" : "menu-shortcut"}
+                  onClick={() => {
+                    setShowFavoritesOnly((previous) => !previous);
+                    scrollMenuResultsIntoView();
+                  }}
+                >
+                  Saved
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          {showMealGuide ? (
           <section className="dietary-assistant reveal reveal--up reveal--delay-1" aria-label="Dietary meal assistant">
             <div className="dietary-assistant__intro">
               <p className="eyebrow">PEM Meal Guide</p>
-              <h2>Find meals that fit your dietary needs.</h2>
-              <p>
-                Tell PEM what you prefer or avoid, and the assistant will recommend the closest
-                dishes from the current menu.
-              </p>
-
+              <h2>Find the right meal.</h2>
               <div className="dietary-assistant__chips">
                 {dietaryPrompts.map((prompt) => (
                   <button
@@ -7230,7 +7363,7 @@ export default function App() {
                   rows="4"
                   value={dietaryNeeds}
                   onChange={(event) => setDietaryNeeds(event.target.value)}
-                  placeholder="Example: I want something less spicy, no beef, and more local."
+                  placeholder="Less spicy, no beef, more local..."
                 />
               </label>
 
@@ -7314,15 +7447,20 @@ export default function App() {
               ) : null}
             </form>
           </section>
+          ) : null}
 
-          <div className="menu-section__header reveal reveal--up reveal--delay-1">
+          <section className="menu-discovery menu-discovery--sticky reveal reveal--up reveal--delay-1">
+          <div className="menu-section__header">
             <div className="menu-structure" aria-label="Menu sections">
               {menuSections.map((section) => (
                 <button
                   key={section.id}
                   type="button"
                   className={section.id === activeMenuSection ? "category-pill is-active" : "category-pill"}
-                  onClick={() => setActiveMenuSection(section.id)}
+                  onClick={() => {
+                    setActiveMenuSection(section.id);
+                    scrollMenuResultsIntoView();
+                  }}
                 >
                   {section.label}
                 </button>
@@ -7330,18 +7468,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="controls reveal reveal--up reveal--delay-1">
-            <label className="search-field">
-              <span>Search meals</span>
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Egusi, budget meals, drinks, spicy soups..."
-              />
-              {searchInput && searchInput !== search ? <small className="cart-help">Searching...</small> : null}
-            </label>
-
+          {showMenuFilters ? (
+          <div className="controls controls--discovery">
             <label className="field">
               <span>Sort by</span>
               <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
@@ -7379,34 +7507,42 @@ export default function App() {
               <button
                 type="button"
                 className={showFavoritesOnly ? "category-pill is-active" : "category-pill"}
-                onClick={() => setShowFavoritesOnly((previous) => !previous)}
+                onClick={() => {
+                  setShowFavoritesOnly((previous) => !previous);
+                  scrollMenuResultsIntoView();
+                }}
               >
                 {showFavoritesOnly ? "Showing favorites" : "Show favorites only"}
               </button>
             </label>
           </div>
+          ) : null}
 
-          <div className="category-row reveal reveal--up reveal--delay-2" aria-label="Meal categories">
+          <div className="category-row" aria-label="Meal categories">
             {visibleCategories.map((category) => (
               <button
                 key={category}
                 type="button"
                 className={category === activeCategory ? "category-pill is-active" : "category-pill"}
-                onClick={() => setActiveCategory(category)}
+                onClick={() => {
+                  setActiveCategory(category);
+                  scrollMenuResultsIntoView();
+                }}
                 >
                   {category}
                 </button>
               ))}
           </div>
 
-          <div className="menu-summary reveal reveal--up reveal--delay-2">
+          <div className="menu-summary">
             <span>{filteredItems.length} items showing</span>
             <span>
               {menuSections.find((section) => section.id === activeMenuSection)?.label || "Everything"}
             </span>
           </div>
-          <p className="menu-search-helper reveal reveal--up reveal--delay-2">
-            Search by dish name, budget, spice level, category, drink, local soup, or what is available today.
+          </section>
+          <p ref={menuResultsRef} className="menu-search-helper reveal reveal--up reveal--delay-2">
+            Search by dish, drink, or budget.
           </p>
 
           {menuAdminState.loading ? (
@@ -7426,20 +7562,16 @@ export default function App() {
             <div className="empty-state reveal reveal--up">
               <div className="empty-state__icon" aria-hidden="true">🍽</div>
               <h3>No meals matched that search yet.</h3>
-              <p>Try another category, clear your filters, or use the dietary assistant for guided suggestions.</p>
+              <p>Try another category, clear your filters, or use the meal guide.</p>
               <div className="empty-state__actions">
-                <button type="button" className="button button--ghost" onClick={() => {
-                  setActiveCategory("All");
-                  setActiveMenuSection("all");
-                  setPriceRange("all");
-                  setMinimumRating(0);
-                  setSearchInput("");
-                  setSearch("");
-                }}>
+                <button type="button" className="button button--ghost" onClick={clearMenuRefinements}>
                   Clear Filters
                 </button>
-                <button type="button" className="button button--ghost" onClick={() => setDietaryNeeds("Show me local dishes available today")}>
-                  Try Dietary Guide
+                <button type="button" className="button button--ghost" onClick={() => {
+                  setDietaryNeeds("Show me local dishes available today");
+                  openMealGuide();
+                }}>
+                  Open Meal Guide
                 </button>
               </div>
             </div>
@@ -7591,8 +7723,7 @@ export default function App() {
           <section className="reviews-section">
             <div className="section-heading section-heading--compact reveal reveal--up">
               <p className="eyebrow">Customer Reviews</p>
-              <h2>Trusted by customers across PEM branches.</h2>
-              <p>Recent feedback from delivered orders helps new customers choose with more confidence.</p>
+              <h2>Recent customer reviews.</h2>
             </div>
             <div className="combo-grid">
               {publicReviews.map((review) => (
@@ -7616,7 +7747,7 @@ export default function App() {
         <section className="trust-section">
           <div className="section-heading section-heading--compact reveal reveal--up">
             <p className="eyebrow">Why Customers Trust PEM</p>
-            <h2>Clear ordering, local taste, and branch-based support.</h2>
+            <h2>Local food, clear delivery.</h2>
           </div>
           <div className="combo-grid">
             {trustHighlights.map((item) => (
@@ -7635,7 +7766,7 @@ export default function App() {
         <section className="catering-section" id="catering">
           <div className="section-heading section-heading--light reveal reveal--up">
             <p className="eyebrow">Catering Service</p>
-            <h2>PEM also serves events, celebrations, and business gatherings.</h2>
+            <h2>PEM caters events.</h2>
           </div>
 
           <div className="catering-grid">
@@ -7706,7 +7837,7 @@ export default function App() {
                   onChange={(event) =>
                     setCateringForm((previous) => ({ ...previous, eventType: event.target.value }))
                   }
-                  placeholder="Wedding, office event..."
+                placeholder="Wedding, office event"
                 />
               </label>
             </div>
@@ -7719,7 +7850,7 @@ export default function App() {
                 onChange={(event) =>
                   setCateringForm((previous) => ({ ...previous, details: event.target.value }))
                 }
-                placeholder="Tell PEM the menu, location, and any special requests."
+                placeholder="Menu, location, special requests"
               />
             </label>
 
@@ -7802,7 +7933,7 @@ export default function App() {
                 rows="3"
                 value={reservationForm.notes}
                 onChange={(event) => setReservationForm((previous) => ({ ...previous, notes: event.target.value }))}
-                placeholder="Birthday dinner, tasting session, or special seating request."
+                placeholder="Occasion or seating note"
               />
             </label>
             {reservationState.error ? <p className="form-message form-message--error">{reservationState.error}</p> : null}
@@ -7889,7 +8020,7 @@ export default function App() {
                 onChange={(event) =>
                   setContactForm((previous) => ({ ...previous, message: event.target.value }))
                 }
-                placeholder="Tell PEM what you need help with."
+                placeholder="How can PEM help?"
               />
             </label>
 
@@ -7916,17 +8047,16 @@ export default function App() {
         <section className="admin-section" id="admin">
           <div className="section-heading reveal reveal--up">
             <p className="eyebrow">Admin</p>
-            <h2>Track orders, messages, and catering requests in one place.</h2>
+            <h2>Manage PEM.</h2>
           </div>
 
           {!adminToken ? (
             <form className="service-form admin-login reveal reveal--up reveal--delay-1" onSubmit={handleAdminLogin}>
               <div className="admin-login__copy">
                 <h3>Admin sign in</h3>
-                <p>Enter your PEM admin username and password to unlock orders, contact messages, and catering records.</p>
+                <p>Use your admin username and password.</p>
                 <p className="admin-login__hint">
-                  Forgot the password? Open your local <code>.env</code> file and set a new
-                  <code> ADMIN_PASSWORD</code> value, then restart the app.
+                  Reset <code>ADMIN_PASSWORD</code> in <code>.env</code> if needed.
                 </p>
               </div>
 
@@ -7936,7 +8066,7 @@ export default function App() {
                   type="text"
                   value={adminUsername}
                   onChange={(event) => setAdminUsername(event.target.value)}
-                  placeholder="owner or assigned staff username"
+                  placeholder="Admin username"
                 />
               </label>
 
@@ -8342,7 +8472,7 @@ export default function App() {
                                 onChange={(event) =>
                                   updateOrderOperationsDraft(order.reference, order, "dispatchNote", event.target.value)
                                 }
-                                placeholder="Gate code, building note, call on arrival"
+                                placeholder="Gate code or arrival note"
                               />
                             </label>
                           </div>
@@ -8397,7 +8527,7 @@ export default function App() {
                     ) : null}
                     {recoveryActionState.approvalCode ? (
                       <div className="delivery-zone-card delivery-zone-card--accent">
-                        <p className="delivery-zone-card__title">Share this recovery code now</p>
+                        <p className="delivery-zone-card__title">Recovery code</p>
                         <strong>{recoveryActionState.approvalCode}</strong>
                         <small>Reference: {recoveryActionState.reference}</small>
                       </div>
@@ -9031,7 +9161,7 @@ export default function App() {
                             <span>{item.stockQuantity} left</span>
                           </div>
                           <p className="admin-item__subtle">{item.category}</p>
-                          <p>Flag this item in Menu Manager before it runs out completely.</p>
+                          <p>Update this in Menu Manager.</p>
                         </div>
                       ))}
                     </div>
@@ -9543,8 +9673,8 @@ export default function App() {
                     {isGiftOrder ? (
                       <div className="delivery-zone-card">
                         <p className="delivery-zone-card__title">Friend delivery flow</p>
-                        <strong>They choose the final address</strong>
-                        <small>Recipient chooses the final address after accepting.</small>
+                        <strong>Recipient chooses delivery</strong>
+                        <small>After accepting.</small>
                       </div>
                     ) : (
                       <>
@@ -9642,7 +9772,7 @@ export default function App() {
                                 landmark: event.target.value,
                               }))
                             }
-                            placeholder="Bus stop, estate gate, popular shop"
+                            placeholder="Bus stop, estate gate, shop"
                           />
                         </label>
                       </>
@@ -9678,8 +9808,8 @@ export default function App() {
                     ) : (
                       <div className="delivery-zone-card">
                         <p className="delivery-zone-card__title">Payment setup</p>
-                        <strong>No payment option is ready yet</strong>
-                        <small>PEM is updating in-app payment methods. Please try again shortly.</small>
+                            <strong>No payment option is ready</strong>
+                            <small>Try again shortly.</small>
                       </div>
                     )}
                     {checkoutFieldErrors.paymentMethod ? <small className="field__error">{checkoutFieldErrors.paymentMethod}</small> : null}
@@ -9743,7 +9873,7 @@ export default function App() {
                                   paymentReference: event.target.value,
                                 }))
                               }
-                              placeholder="Paste your transfer reference"
+                              placeholder="Transfer reference"
                             />
                             {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
                           </label>
@@ -9751,8 +9881,8 @@ export default function App() {
                       ) : (
                         <div className="delivery-zone-card">
                           <p className="delivery-zone-card__title">Bank transfer details</p>
-                          <strong>Bank transfer is not ready yet</strong>
-                          <small>PEM still needs active bank details before transfer checkout can continue.</small>
+                          <strong>Bank transfer is not ready</strong>
+                          <small>Bank details still need to be added.</small>
                         </div>
                       )
                     ) : null}
@@ -9813,7 +9943,7 @@ export default function App() {
                   <div className="cart-suggestions">
                     <div className="cart-suggestions__header">
                       <p className="eyebrow">Suggested Add-ons</p>
-                      <h3>Complete this order with one tap.</h3>
+                      <h3>Complete this order.</h3>
                     </div>
                     <div className="cart-suggestions__list">
                       {smartCartSuggestions.map((item) => (
