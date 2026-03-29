@@ -367,6 +367,30 @@ button:disabled {
   min-width: 12rem;
 }
 
+.auth-recovery-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 72%, var(--surface));
+}
+
+.auth-recovery-hint strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1rem;
+}
+
+.auth-recovery-hint span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .auth-card__actions--signup .button--primary {
   min-width: 14rem;
 }
@@ -2023,6 +2047,14 @@ button:disabled {
   gap: 0.8rem;
 }
 
+.meal-card__order-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .qty-control {
   display: inline-flex;
   align-items: center;
@@ -2868,6 +2900,131 @@ button:disabled {
   pointer-events: none;
 }
 
+.quick-add-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  pointer-events: none;
+}
+
+.quick-add-sheet.is-open {
+  pointer-events: auto;
+}
+
+.quick-add-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(25, 14, 13, 0.4);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.quick-add-sheet__panel {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(27rem, calc(100% - 2rem));
+  border-radius: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
+  background: color-mix(in srgb, var(--surface-strong) 95%, transparent);
+  box-shadow: 0 24px 60px rgba(20, 10, 10, 0.22);
+  transform: translateY(105%);
+  transition: transform 0.25s ease;
+  overflow: hidden;
+}
+
+.quick-add-sheet.is-open .quick-add-sheet__backdrop {
+  opacity: 1;
+}
+
+.quick-add-sheet.is-open .quick-add-sheet__panel {
+  transform: translateY(0);
+}
+
+.quick-add-sheet__header,
+.quick-add-sheet__body {
+  padding: 1.2rem;
+}
+
+.quick-add-sheet__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.quick-add-sheet__header h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.35rem;
+}
+
+.quick-add-sheet__body {
+  display: grid;
+  gap: 1rem;
+}
+
+.quick-add-sheet__media {
+  border-radius: 1.15rem;
+  overflow: hidden;
+  aspect-ratio: 1.7 / 1;
+}
+
+.quick-add-sheet__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.quick-add-sheet__details {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.quick-add-sheet__details p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.quick-add-sheet__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.quick-add-sheet__meta span {
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.quick-add-sheet__meta strong {
+  color: var(--brand);
+  font-size: 1.15rem;
+}
+
+.quick-add-sheet__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.quick-add-sheet__controls .button {
+  min-width: 11rem;
+}
+
+.quick-add-sheet__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .cart-drawer.is-open {
   pointer-events: auto;
 }
@@ -3564,6 +3721,11 @@ button:disabled {
     padding: 0.9rem;
   }
 
+  .auth-recovery-hint {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .auth-card__actions--signup {
     align-items: flex-start;
   }
@@ -3599,6 +3761,11 @@ button:disabled {
     min-height: 13rem;
   }
 
+  .meal-card__order-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .meal-card__body,
   .service-form,
   .account-card,
@@ -3609,6 +3776,17 @@ button:disabled {
   }
 
   .cart-drawer__panel {
+    width: 100%;
+  }
+
+  .quick-add-sheet__panel {
+    right: 0.75rem;
+    left: 0.75rem;
+    bottom: 0.75rem;
+    width: auto;
+  }
+
+  .quick-add-sheet__controls .button {
     width: 100%;
   }
 

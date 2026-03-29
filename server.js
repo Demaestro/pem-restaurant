@@ -446,6 +446,90 @@ function getBirthdayDiscountAmount(user, subtotal, now = getLagosDateParts()) {
   return Math.max(0, Math.round((Number(subtotal) || 0) * (BIRTHDAY_DISCOUNT_PERCENT / 100)));
 }
 
+async function recoverGuestOrdersForUser(user) {
+  if (!user) {
+    return { user: null, recoveredOrders: [] };
+  }
+
+  const normalizedEmail = normalizeEmail(user.email);
+  const normalizedPhone = normalizePhoneDigits(user.phone);
+  if (!normalizedEmail && !normalizedPhone) {
+    return { user, recoveredOrders: [] };
+  }
+
+  const matchedOrders = await storage.getOrdersByGuestIdentity({
+    email: normalizedEmail,
+    phone: normalizedPhone,
+  });
+  const eligibleOrders = matchedOrders.filter((order) => {
+    const orderEmail = normalizeEmail(order.customer?.email);
+    const orderPhone = normalizePhoneDigits(order.customer?.phone);
+
+    if (normalizedEmail && orderEmail) {
+      return orderEmail === normalizedEmail;
+    }
+
+    if (!orderEmail && normalizedPhone && orderPhone) {
+      return orderPhone === normalizedPhone;
+    }
+
+    return false;
+  });
+
+  const existingReferences = new Set(
+    (user.orderReferences || []).map((reference) => String(reference || "").trim().toUpperCase()),
+  );
+  const recoveredOrders = eligibleOrders.filter(
+    (order) => !existingReferences.has(String(order.reference || "").trim().toUpperCase()),
+  );
+
+  if (recoveredOrders.length === 0) {
+    return { user, recoveredOrders: [] };
+  }
+
+  const nextOrderReferences = [
+    ...eligibleOrders.map((order) => order.reference),
+    ...(user.orderReferences || []),
+  ].filter((reference, index, items) => reference && items.indexOf(reference) === index).slice(0, 20);
+
+  const nextSavedAddresses = [
+    ...(user.savedAddresses || []),
+    ...eligibleOrders
+      .map((order) => String(order.customer?.address || "").trim())
+      .filter(Boolean),
+  ].filter((address, index, items) => address && items.indexOf(address) === index).slice(0, 5);
+
+  const recoveredPhone = eligibleOrders
+    .map((order) => sanitizePhoneInput(order.customer?.phone))
+    .find((value) => normalizePhoneDigits(value).length >= 10);
+
+  const updatedUser = await storage.updateUser(user.email, {
+    ...user,
+    phone: user.phone || recoveredPhone || "",
+    savedAddresses: nextSavedAddresses,
+    orderReferences: nextOrderReferences,
+    notifications: [
+      createNotification(
+        `PEM restored ${recoveredOrders.length} earlier order${recoveredOrders.length === 1 ? "" : "s"} to your account.`,
+        "account",
+        { recoveredOrderCount: recoveredOrders.length },
+      ),
+      ...(user.notifications || []),
+    ].slice(0, 15),
+    updatedAt: new Date().toISOString(),
+  });
+
+  return {
+    user: updatedUser || {
+      ...user,
+      phone: user.phone || recoveredPhone || "",
+      savedAddresses: nextSavedAddresses,
+      orderReferences: nextOrderReferences,
+    },
+    recoveredOrders,
+  };
+}
+
 function parsePromoCodes(rawValue) {
   return String(rawValue || "")
     .split("\n")
@@ -496,6 +580,17 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
 
 function normalizePhoneDigits(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeProfileText(value, maxLength = 120) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function sanitizePhoneInput(value) {
@@ -1135,7 +1230,7 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
 
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   const { fullName, email, password, phone, address, birthday, referralCode } = request.body || {};
-  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
   const normalizedAddress = String(address || "").trim();
   const normalizedBirthday = normalizeBirthday(birthday);
   const now = getLagosDateParts();
@@ -1183,6 +1278,8 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     birthdayDiscountLastUsedYear: "",
     createdAt: new Date().toISOString(),
   });
+  const recoveryResult = await recoverGuestOrdersForUser(user);
+  const activeUser = recoveryResult.user || user;
 
   if (referrer && referrer.email !== normalizedEmail) {
     const rewardPoints = 10;
@@ -1206,17 +1303,18 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   }
 
   const token = createAdminToken();
-  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+  userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
 
   response.status(201).json({
     token,
-    user: sanitizeUser(user),
+    user: sanitizeUser(activeUser),
+    recoveredOrderCount: recoveryResult.recoveredOrders.length,
   });
 }));
 
 app.post("/api/auth/login", asyncHandler(async (request, response) => {
   const { email, password } = request.body || {};
-  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
   const attemptLimitError = getAttemptLimitError("userLogin", request, normalizedEmail);
   if (attemptLimitError) {
     return response.status(429).json({ error: attemptLimitError });
@@ -1229,7 +1327,9 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   }
 
   const greetedUser = withBirthdayGreeting(user);
-  const activeUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
+  const birthdayAwareUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
+  const recoveryResult = await recoverGuestOrdersForUser(birthdayAwareUser);
+  const activeUser = recoveryResult.user || birthdayAwareUser;
 
   const token = createAdminToken();
   userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
@@ -1238,6 +1338,7 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   response.json({
     token,
     user: sanitizeUser(activeUser),
+    recoveredOrderCount: recoveryResult.recoveredOrders.length,
   });
 }));
 
@@ -1362,7 +1463,9 @@ app.post("/api/auth/logout", requireUser, (request, response) => {
 app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
   const user = await storage.getUserByEmail(request.userSession.email);
   const greetedUser = user ? withBirthdayGreeting(user) : null;
-  const activeUser = greetedUser && greetedUser !== user ? await storage.updateUser(user.email, greetedUser) : user;
+  const birthdayAwareUser = greetedUser && greetedUser !== user ? await storage.updateUser(user.email, greetedUser) : user;
+  const recoveryResult = await recoverGuestOrdersForUser(birthdayAwareUser);
+  const activeUser = recoveryResult.user || birthdayAwareUser;
   const [orders, receivedGifts, sentGifts] = await Promise.all([
     storage.getOrdersByReferences(activeUser?.orderReferences || []),
     storage.getReceivedGiftsByEmail(request.userSession.email),
@@ -1373,6 +1476,7 @@ app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
     orders,
     receivedGifts,
     sentGifts,
+    recoveredOrderCount: recoveryResult.recoveredOrders.length,
   });
 }));
 

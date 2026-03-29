@@ -793,8 +793,10 @@ const CACHE_TTL = {
   settings: 15 * 60 * 1000,
   admin: 2 * 60 * 1000,
   tracking: 10 * 60 * 1000,
+  guestProfile: 30 * 24 * 60 * 60 * 1000,
 };
 const ORDER_ITEM_LIMIT = 10;
+const GUEST_PROFILE_KEY = "pem-guest-profile";
 
 function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
@@ -855,6 +857,32 @@ function writeCachedJson(key, value) {
   } catch {
     // Ignore cache write failures.
   }
+}
+
+function normalizeGuestProfile(rawValue) {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  const normalizedEmail = String(rawValue.email || "").trim().toLowerCase();
+  const normalizedPhone = sanitizePhoneInput(rawValue.phone || "");
+  const normalizedAddress = String(rawValue.address || "").trim();
+  const normalizedFullName = String(rawValue.fullName || "").trim();
+  const normalizedReferences = Array.isArray(rawValue.orderReferences)
+    ? rawValue.orderReferences.filter(Boolean).map((reference) => String(reference).trim().toUpperCase()).slice(0, 8)
+    : [];
+
+  if (!normalizedEmail && !normalizedPhone && !normalizedAddress && !normalizedFullName && normalizedReferences.length === 0) {
+    return null;
+  }
+
+  return {
+    fullName: normalizedFullName,
+    email: normalizedEmail,
+    phone: normalizedPhone,
+    address: normalizedAddress,
+    orderReferences: normalizedReferences,
+  };
 }
 
 function formatPrice(value) {
@@ -1897,6 +1925,8 @@ export default function App() {
   const [accountHydrated, setAccountHydrated] = useState(false);
   const [authView, setAuthView] = useState("login");
   const [signupForm, setSignupForm] = useState(initialAccountForm);
+  const [signupFieldErrors, setSignupFieldErrors] = useState({});
+  const [guestRecoveryHint, setGuestRecoveryHint] = useState(null);
   const [loginForm, setLoginForm] = useState(initialLoginForm);
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [forgotPasswordStage, setForgotPasswordStage] = useState("request");
@@ -1907,6 +1937,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [priceRange, setPriceRange] = useState("all");
   const [showCart, setShowCart] = useState(false);
+  const [quickAddItemId, setQuickAddItemId] = useState(null);
   const [orderPlaced, setOrderPlaced] = useState("");
   const [lastAddedItemId, setLastAddedItemId] = useState(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
@@ -2009,6 +2040,11 @@ export default function App() {
   const hasAvailableInAppPayment = availableCheckoutPaymentOptions.length > 0;
   const recommendedItemIds = dietaryState.matches.map((match) => match.itemId);
   const visibleMenuItems = menuCatalog.filter((item) => !item.hidden && isMenuItemScheduledNow(item, lagosNow));
+  const quickAddItem = quickAddItemId
+    ? menuCatalog.find((item) => Number(item.id) === Number(quickAddItemId)) || null
+    : null;
+  const quickAddQuantity = quickAddItem ? cart[quickAddItem.id] || 0 : 0;
+  const quickAddNote = quickAddItem ? notes[quickAddItem.id] || "" : "";
   const toggleTheme = () => setTheme((current) => (current === "light" ? "dark" : "light"));
 
   function validateCheckoutField(field, value) {
@@ -2069,8 +2105,54 @@ export default function App() {
     focusCheckoutField(focusField);
   }
 
+  function clearGuestRecoveryHint() {
+    setGuestRecoveryHint(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(GUEST_PROFILE_KEY);
+    }
+  }
+
   function trackView(itemId) {
     setRecentlyViewed((previous) => [itemId, ...previous.filter((id) => id !== itemId)].slice(0, 6));
+  }
+
+  function rememberGuestProfileFromOrder(order) {
+    if (accountToken || !order?.customer) {
+      return;
+    }
+
+    const nextProfile = normalizeGuestProfile({
+      fullName: order.customer.customerName,
+      email: order.customer.email,
+      phone: order.customer.phone,
+      address: order.customer.address,
+      orderReferences: [
+        order.reference,
+        ...(guestRecoveryHint?.orderReferences || []),
+      ],
+    });
+
+    if (!nextProfile) {
+      return;
+    }
+
+    setGuestRecoveryHint(nextProfile);
+    writeCachedJson(GUEST_PROFILE_KEY, nextProfile);
+  }
+
+  function applyGuestRecoveryHint() {
+    if (!guestRecoveryHint) {
+      return;
+    }
+
+    setSignupForm((previous) => ({
+      ...previous,
+      fullName: guestRecoveryHint.fullName || previous.fullName,
+      email: guestRecoveryHint.email || previous.email,
+      phone: guestRecoveryHint.phone || previous.phone,
+      address: guestRecoveryHint.address || previous.address,
+    }));
+    setSignupFieldErrors({});
   }
 
   function rememberPlacedOrderLocally(order) {
@@ -2088,6 +2170,7 @@ export default function App() {
     }
 
     if (!accountToken) {
+      rememberGuestProfileFromOrder(order);
       return;
     }
 
@@ -2117,6 +2200,29 @@ export default function App() {
       orders: nextAccountOrders,
       gifts: accountGifts,
     });
+  }
+
+  function openQuickAdd(itemId) {
+    const item = menuCatalog.find((menuItem) => Number(menuItem.id) === Number(itemId));
+    if (!item || item.hidden) {
+      return;
+    }
+    trackView(item.id);
+    setQuickAddItemId(item.id);
+  }
+
+  function closeQuickAdd() {
+    setQuickAddItemId(null);
+  }
+
+  function handleQuickAddConfirm() {
+    if (!quickAddItem) {
+      return;
+    }
+    if ((cart[quickAddItem.id] || 0) === 0) {
+      setQuantity(quickAddItem.id, 1);
+    }
+    setQuickAddItemId(null);
   }
 
   function resetCheckoutAfterOrder() {
@@ -2260,6 +2366,9 @@ export default function App() {
       const storedBranchId = window.localStorage.getItem("pem-selected-branch") || "";
       const storedBranchCarts = JSON.parse(window.localStorage.getItem("pem-branch-carts") || "{}");
       const storedRecentlyViewed = JSON.parse(window.localStorage.getItem("pem-recently-viewed") || "[]");
+      const storedGuestProfile = normalizeGuestProfile(
+        readCachedJson(GUEST_PROFILE_KEY, null, CACHE_TTL.guestProfile),
+      );
       if (Array.isArray(storedFavorites)) {
         setFavorites(storedFavorites);
       }
@@ -2275,11 +2384,15 @@ export default function App() {
       if (Array.isArray(storedRecentlyViewed)) {
         setRecentlyViewed(storedRecentlyViewed);
       }
+      if (storedGuestProfile) {
+        setGuestRecoveryHint(storedGuestProfile);
+      }
     } catch {
       setFavorites([]);
       setSavedReferences([]);
       setBranchCarts({});
       setRecentlyViewed([]);
+      setGuestRecoveryHint(null);
     }
     setBranchCartHydrated(true);
   }, []);
@@ -2300,6 +2413,30 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("pem-order-history", JSON.stringify(savedReferences));
   }, [savedReferences]);
+
+  useEffect(() => {
+    if (!quickAddItemId) {
+      return;
+    }
+    if (!quickAddItem || quickAddItem.hidden) {
+      setQuickAddItemId(null);
+    }
+  }, [quickAddItem, quickAddItemId]);
+
+  useEffect(() => {
+    if (!quickAddItemId) {
+      return;
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setQuickAddItemId(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [quickAddItemId]);
 
   useEffect(() => {
     if (!accountToken) {
@@ -3580,6 +3717,15 @@ export default function App() {
         orders: Array.isArray(data.orders) ? data.orders : [],
         gifts: nextGifts,
       });
+      if (
+        guestRecoveryHint &&
+        (
+          String(guestRecoveryHint.email || "").trim().toLowerCase() === String(nextUser.email || "").trim().toLowerCase() ||
+          normalizePhoneDigits(guestRecoveryHint.phone) === normalizePhoneDigits(nextUser.phone)
+        )
+      ) {
+        clearGuestRecoveryHint();
+      }
       setCheckoutForm((previous) => ({
         ...previous,
         customerName: previous.customerName || nextUser.fullName || "",
@@ -3612,6 +3758,15 @@ export default function App() {
         });
         setFavorites(Array.isArray(nextUser.favoriteItemIds) ? nextUser.favoriteItemIds : []);
         setSavedReferences(Array.isArray(nextUser.orderReferences) ? nextUser.orderReferences.slice(0, 5) : []);
+        if (
+          guestRecoveryHint &&
+          (
+            String(guestRecoveryHint.email || "").trim().toLowerCase() === String(nextUser.email || "").trim().toLowerCase() ||
+            normalizePhoneDigits(guestRecoveryHint.phone) === normalizePhoneDigits(nextUser.phone)
+          )
+        ) {
+          clearGuestRecoveryHint();
+        }
       }
       setAccountState((previous) => ({
         ...previous,
@@ -4614,20 +4769,37 @@ export default function App() {
     const normalizedPhone = sanitizePhoneInput(signupForm.phone);
     const normalizedAddress = String(signupForm.address || "").trim();
     const normalizedBirthday = normalizeBirthdayInput(signupForm.birthday);
+    const nextSignupErrors = {};
+
+    if (normalizedFullName.length < 2) {
+      nextSignupErrors.fullName = "Enter your full name";
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      nextSignupErrors.email = "Enter a valid email";
+    }
+
+    if (normalizePhoneDigits(normalizedPhone).length < 10) {
+      nextSignupErrors.phone = "Enter a valid phone number";
+    }
+
+    if (String(signupForm.password || "").length < 6) {
+      nextSignupErrors.password = "Use at least 6 characters";
+    }
 
     if (!normalizedAddress || normalizedAddress.length < 5) {
-      setAccountState({
-        loading: false,
-        error: "Add the delivery address you use most often.",
-        success: "",
-      });
-      return;
+      nextSignupErrors.address = "Enter your main address";
     }
 
     if (!normalizedBirthday) {
+      nextSignupErrors.birthday = "Add your birthday";
+    }
+
+    if (Object.keys(nextSignupErrors).length > 0) {
+      setSignupFieldErrors(nextSignupErrors);
       setAccountState({
         loading: false,
-        error: "Add your birthday so PEM can celebrate you properly.",
+        error: "A few details still need your attention.",
         success: "",
       });
       return;
@@ -4635,6 +4807,7 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
+      setSignupFieldErrors({});
       const data = await postJson("/api/auth/signup", {
         ...signupForm,
         fullName: normalizedFullName,
@@ -4646,10 +4819,21 @@ export default function App() {
       setAccountToken(data.token || "");
       setSignupForm(initialAccountForm);
       setLoginForm(initialLoginForm);
+      if (
+        guestRecoveryHint &&
+        (
+          String(guestRecoveryHint.email || "").trim().toLowerCase() === normalizedEmail.toLowerCase() ||
+          normalizePhoneDigits(guestRecoveryHint.phone) === normalizePhoneDigits(normalizedPhone)
+        )
+      ) {
+        clearGuestRecoveryHint();
+      }
       setAccountState({
         loading: false,
         error: "",
-        success: "Your PEM account is ready. You can now save meals, addresses, and order history.",
+        success: data.recoveredOrderCount
+          ? `${data.recoveredOrderCount} earlier order${data.recoveredOrderCount === 1 ? "" : "s"} restored.`
+          : "Your PEM account is ready.",
       });
     } catch (error) {
       setAccountState({
@@ -5719,12 +5903,29 @@ export default function App() {
                   </div>
                 </div>
 
+                {guestRecoveryHint ? (
+                  <div className="auth-recovery-hint">
+                    <div>
+                      <p className="eyebrow">Recent order</p>
+                      <strong>Restore earlier orders</strong>
+                      <span>
+                        {guestRecoveryHint.orderReferences.length > 0
+                          ? `${guestRecoveryHint.orderReferences.length} order${guestRecoveryHint.orderReferences.length === 1 ? "" : "s"} ready to claim`
+                          : guestRecoveryHint.email || guestRecoveryHint.phone}
+                      </span>
+                    </div>
+                    <button type="button" className="button button--ghost button--small" onClick={applyGuestRecoveryHint}>
+                      Use last details
+                    </button>
+                  </div>
+                ) : null}
+
                 <div className="auth-card__section">
                   <div className="auth-card__section-label">
                     <span className="eyebrow">Personal details</span>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
-                    <label className="field auth-signup-grid__wide" data-checkout-field="email">
+                    <label className="field auth-signup-grid__wide">
                       <span>Full name</span>
                       <input
                         type="text"
@@ -5734,9 +5935,10 @@ export default function App() {
                         }
                         placeholder="Your full name"
                       />
+                      {signupFieldErrors.fullName ? <small className="field__error">{signupFieldErrors.fullName}</small> : null}
                     </label>
 
-                    <label className="field" data-checkout-field="scheduledFor">
+                    <label className="field">
                       <span>Phone number</span>
                       <input
                         type="tel"
@@ -5746,7 +5948,7 @@ export default function App() {
                         }
                         placeholder="0803 334 5161"
                       />
-                      {checkoutFieldErrors.scheduledFor ? <small className="field__error">{checkoutFieldErrors.scheduledFor}</small> : null}
+                      {signupFieldErrors.phone ? <small className="field__error">{signupFieldErrors.phone}</small> : null}
                     </label>
 
                     <label className="field">
@@ -5759,6 +5961,7 @@ export default function App() {
                           setSignupForm((previous) => ({ ...previous, birthday: event.target.value }))
                         }
                       />
+                      {signupFieldErrors.birthday ? <small className="field__error">{signupFieldErrors.birthday}</small> : null}
                     </label>
                   </div>
                 </div>
@@ -5768,7 +5971,7 @@ export default function App() {
                     <span className="eyebrow">Account access</span>
                   </div>
                   <div className="service-form__grid auth-signup-grid">
-                    <label className="field auth-signup-grid__wide" data-checkout-field="address">
+                    <label className="field auth-signup-grid__wide">
                       <span>Email</span>
                       <input
                         type="email"
@@ -5778,9 +5981,10 @@ export default function App() {
                         }
                         placeholder="you@example.com"
                       />
+                      {signupFieldErrors.email ? <small className="field__error">{signupFieldErrors.email}</small> : null}
                     </label>
 
-                    <label className="field auth-signup-grid__wide" data-checkout-field="paymentReference">
+                    <label className="field auth-signup-grid__wide">
                       <span>Password</span>
                       <input
                         type="password"
@@ -5790,7 +5994,7 @@ export default function App() {
                         }
                         placeholder="At least 6 characters"
                       />
-                      {checkoutFieldErrors.paymentReference ? <small className="field__error">{checkoutFieldErrors.paymentReference}</small> : null}
+                      {signupFieldErrors.password ? <small className="field__error">{signupFieldErrors.password}</small> : null}
                     </label>
                   </div>
                 </div>
@@ -5809,6 +6013,7 @@ export default function App() {
                       }
                       placeholder="Street, area, city"
                     />
+                    {signupFieldErrors.address ? <small className="field__error">{signupFieldErrors.address}</small> : null}
                   </label>
                 </div>
 
@@ -7574,14 +7779,24 @@ export default function App() {
                         disabled={item.soldOut}
                       />
 
-                      <button
-                        type="button"
-                        className="button button--primary button--small"
-                        onClick={() => setQuantity(item.id, quantity === 0 ? 1 : 0)}
-                        disabled={item.soldOut}
-                      >
-                        {item.soldOut ? "Unavailable" : lastAddedItemId === item.id ? "Added" : quantity === 0 ? "Add meal" : "Reset"}
-                      </button>
+                      <div className="meal-card__order-actions">
+                        <button
+                          type="button"
+                          className="button button--ghost button--small"
+                          onClick={() => openQuickAdd(item.id)}
+                          disabled={item.soldOut}
+                        >
+                          Quick add
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--primary button--small"
+                          onClick={() => setQuantity(item.id, quantity === 0 ? 1 : 0)}
+                          disabled={item.soldOut}
+                        >
+                          {item.soldOut ? "Unavailable" : lastAddedItemId === item.id ? "Added" : quantity === 0 ? "Add meal" : "Reset"}
+                        </button>
+                      </div>
                     </div>
 
                     <label className="note-field">
@@ -9294,6 +9509,85 @@ export default function App() {
           Account
         </button>
       </div>
+
+      <aside className={quickAddItem ? "quick-add-sheet is-open" : "quick-add-sheet"} aria-hidden={!quickAddItem}>
+        <div className="quick-add-sheet__backdrop" onClick={closeQuickAdd} />
+        <div className="quick-add-sheet__panel">
+          {quickAddItem ? (
+            <>
+              <div className="quick-add-sheet__header">
+                <div>
+                  <p className="eyebrow">Quick Add</p>
+                  <h3>{quickAddItem.name}</h3>
+                </div>
+                <button type="button" className="cart-close" onClick={closeQuickAdd}>
+                  x
+                </button>
+              </div>
+
+              <div className="quick-add-sheet__body">
+                <div className="quick-add-sheet__media">
+                  <img src={quickAddItem.imageUrl || quickAddItem.image} alt={quickAddItem.name} />
+                </div>
+
+                <div className="quick-add-sheet__details">
+                  <div className="quick-add-sheet__meta">
+                    <span>{quickAddItem.category}</span>
+                    <strong>{formatPrice(quickAddItem.price)}</strong>
+                  </div>
+                  <p>{quickAddItem.description}</p>
+                </div>
+
+                <div className="quick-add-sheet__controls">
+                  <QuantityControl
+                    value={quickAddQuantity}
+                    onDecrease={() => updateQuantity(quickAddItem.id, -1)}
+                    onIncrease={() => updateQuantity(quickAddItem.id, 1)}
+                    disabled={quickAddItem.soldOut}
+                  />
+
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={handleQuickAddConfirm}
+                    disabled={quickAddItem.soldOut}
+                  >
+                    {quickAddItem.soldOut
+                      ? "Unavailable"
+                      : quickAddQuantity > 0
+                        ? "Update order"
+                        : "Add to order"}
+                  </button>
+                </div>
+
+                <label className="field">
+                  <span>Order note</span>
+                  <textarea
+                    rows="3"
+                    value={quickAddNote}
+                    onChange={(event) => updateNote(quickAddItem.id, event.target.value)}
+                    placeholder="No onions, extra spicy..."
+                    disabled={quickAddItem.soldOut}
+                  />
+                </label>
+
+                <div className="quick-add-sheet__footer">
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => {
+                      handleQuickAddConfirm();
+                      setShowCart(true);
+                    }}
+                  >
+                    Open cart
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </aside>
 
       <aside className={showCart ? "cart-drawer is-open" : "cart-drawer"} aria-hidden={!showCart}>
         <div className="cart-drawer__backdrop" onClick={() => setShowCart(false)} />
