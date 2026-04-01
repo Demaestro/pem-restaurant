@@ -61,6 +61,7 @@ const authAttemptPolicies = {
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const runtimeIncidents = [];
 const MAX_RUNTIME_INCIDENTS = 40;
+const ORDER_EDIT_WINDOW_MS = 5 * 60 * 1000;
 const branchGeoPresets = {
   "owerri-central": {
     lat: 5.4859,
@@ -855,6 +856,62 @@ function buildOrderStatusNotification(order, status) {
   return createNotification(messages[status] || `Order ${reference} was updated.`, "order", {
     orderReference: reference,
     status,
+  });
+}
+
+function canEditOrderCustomerWindow(order) {
+  const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : NaN;
+  const status = String(order?.status || "").trim();
+  if (!Number.isFinite(createdAt)) {
+    return false;
+  }
+  if (!["awaiting_payment", "received", "confirmed"].includes(status)) {
+    return false;
+  }
+  return Date.now() - createdAt <= ORDER_EDIT_WINDOW_MS;
+}
+
+function buildOrderEditNotification(order) {
+  const reference = order?.reference || "your order";
+  return createNotification(`Order ${reference} details were updated.`, "order", {
+    orderReference: reference,
+    status: order?.status || "",
+    orderUpdate: "customer_edit",
+  });
+}
+
+function buildOrderOperationsNotification(order, previousOperations = {}, nextOperations = {}) {
+  const reference = order?.reference || "your order";
+  const changes = [];
+  const previousPrepEta = Number(previousOperations.prepEtaMinutes || 0);
+  const nextPrepEta = Number(nextOperations.prepEtaMinutes || 0);
+  const previousRiderName = String(previousOperations.riderName || "").trim();
+  const nextRiderName = String(nextOperations.riderName || "").trim();
+  const previousRiderPhone = String(previousOperations.riderPhone || "").trim();
+  const nextRiderPhone = String(nextOperations.riderPhone || "").trim();
+  const previousDispatchNote = String(previousOperations.dispatchNote || "").trim();
+  const nextDispatchNote = String(nextOperations.dispatchNote || "").trim();
+
+  if (nextPrepEta > 0 && nextPrepEta !== previousPrepEta) {
+    changes.push(`Prep time for order ${reference} is now about ${nextPrepEta} mins.`);
+  }
+  if (nextRiderName && nextRiderName !== previousRiderName) {
+    changes.push(`${nextRiderName} is handling order ${reference}.`);
+  } else if (nextRiderPhone && nextRiderPhone !== previousRiderPhone) {
+    changes.push(`Rider contact was updated for order ${reference}.`);
+  }
+  if (nextDispatchNote && nextDispatchNote !== previousDispatchNote) {
+    changes.push(`PEM added a delivery note for order ${reference}.`);
+  }
+
+  if (changes.length === 0) {
+    return null;
+  }
+
+  return createNotification(changes[0], "order", {
+    orderReference: reference,
+    status: order?.status || "",
+    orderUpdate: "operations",
   });
 }
 
@@ -2592,6 +2649,83 @@ app.get("/api/orders/:reference", asyncHandler(async (request, response) => {
   });
 }));
 
+app.patch("/api/orders/:reference/customer-edit", asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim();
+  const existingOrder = await storage.getOrderByReference(reference);
+  if (!existingOrder) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  if (!canEditOrderCustomerWindow(existingOrder)) {
+    return response.status(400).json({ error: "This order can no longer be edited in PEM." });
+  }
+
+  const optionalSession = getOptionalUserSession(request);
+  const sessionEmail = normalizeEmail(optionalSession?.email || "");
+  const orderEmail = normalizeEmail(existingOrder.customer?.email || "");
+  const verificationPhone = sanitizePhoneInput(request.body?.verificationPhone || "");
+  const verifiedBySession = Boolean(sessionEmail && orderEmail && sessionEmail === orderEmail);
+  const verifiedByPhone =
+    normalizePhoneDigits(verificationPhone).length >= 10 &&
+    normalizePhoneDigits(verificationPhone) === normalizePhoneDigits(existingOrder.customer?.phone || "");
+
+  if (!verifiedBySession && !verifiedByPhone) {
+    return response.status(403).json({ error: "PEM could not verify this order edit request." });
+  }
+
+  const normalizedPhone = sanitizePhoneInput(request.body?.phone || existingOrder.customer?.phone || "");
+  const normalizedAddress = normalizeProfileText(request.body?.address || existingOrder.customer?.address || "", 220);
+  const normalizedLandmark = normalizeProfileText(request.body?.landmark || existingOrder.customer?.landmark || "", 120);
+  const normalizedDeliveryNote = normalizeProfileText(request.body?.deliveryNote || existingOrder.customer?.deliveryNote || "", 180);
+  const fulfillmentMethod = String(existingOrder.customer?.fulfillmentMethod || "delivery").trim().toLowerCase();
+
+  if (normalizePhoneDigits(normalizedPhone).length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number." });
+  }
+  if (fulfillmentMethod !== "pickup" && normalizedAddress.length < 5) {
+    return response.status(400).json({ error: "Delivery address is required for this update." });
+  }
+
+  const updatedCustomer = {
+    ...(existingOrder.customer || {}),
+    phone: normalizedPhone,
+    address: fulfillmentMethod === "pickup" ? "" : normalizedAddress,
+    landmark: fulfillmentMethod === "pickup" ? "" : normalizedLandmark,
+    deliveryNote: normalizedDeliveryNote,
+  };
+
+  const order = await storage.updateOrder(reference, {
+    ...existingOrder,
+    customer: updatedCustomer,
+  });
+
+  const linkedUser = orderEmail ? await storage.getUserByEmail(orderEmail) : null;
+  if (linkedUser) {
+    const nextSavedAddresses =
+      updatedCustomer.address && fulfillmentMethod !== "pickup"
+        ? [
+            updatedCustomer.address,
+            ...(linkedUser.savedAddresses || []).filter((item) => item !== updatedCustomer.address),
+          ].slice(0, 5)
+        : linkedUser.savedAddresses || [];
+    await storage.updateUser(linkedUser.email, {
+      ...linkedUser,
+      phone: normalizedPhone,
+      savedAddresses: nextSavedAddresses,
+      notifications: [
+        buildOrderEditNotification(order),
+        ...(linkedUser.notifications || []),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return response.json({
+    message: "Order details updated.",
+    order,
+  });
+}));
+
 app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
@@ -2647,8 +2781,9 @@ app.patch("/api/admin/orders/:reference/operations", requireAdmin, asyncHandler(
     return response.status(403).json({ error: "You can only update orders assigned to your branch." });
   }
 
+  const previousOperations = normalizeOrderOperations(existingOrder.customer?.operations || {});
   const nextOperations = normalizeOrderOperations({
-    ...(existingOrder.customer?.operations || {}),
+    ...previousOperations,
     ...(request.body?.operations || {}),
     lastUpdatedAt: new Date().toISOString(),
   });
@@ -2659,6 +2794,22 @@ app.patch("/api/admin/orders/:reference/operations", requireAdmin, asyncHandler(
       operations: nextOperations,
     },
   });
+
+  const customerEmail = normalizeEmail(order?.customer?.email || "");
+  const linkedUser = customerEmail ? await storage.getUserByEmail(customerEmail) : null;
+  const operationsNotification = linkedUser
+    ? buildOrderOperationsNotification(order, previousOperations, nextOperations)
+    : null;
+  if (linkedUser && operationsNotification) {
+    await storage.updateUser(linkedUser.email, {
+      ...linkedUser,
+      notifications: [
+        operationsNotification,
+        ...(linkedUser.notifications || []),
+      ].slice(0, 20),
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   return response.json({
     message: "Order operations updated.",

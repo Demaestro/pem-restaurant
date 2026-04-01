@@ -758,6 +758,7 @@ const initialBranchAssistState = {
   success: "",
   suggestedId: "",
   source: "",
+  distanceKm: null,
 };
 
 const emptyOrderOperationsDraft = {
@@ -766,6 +767,18 @@ const emptyOrderOperationsDraft = {
   riderName: "",
   riderPhone: "",
   dispatchNote: "",
+};
+
+const initialOrderEditState = {
+  openRef: "",
+  loading: false,
+  error: "",
+  success: "",
+  phone: "",
+  address: "",
+  landmark: "",
+  deliveryNote: "",
+  verificationPhone: "",
 };
 
 const initialLoginForm = {
@@ -796,7 +809,10 @@ const CACHE_TTL = {
   guestProfile: 30 * 24 * 60 * 60 * 1000,
 };
 const ORDER_ITEM_LIMIT = 10;
+const ORDER_EDIT_WINDOW_MS = 5 * 60 * 1000;
 const GUEST_PROFILE_KEY = "pem-guest-profile";
+const MANUAL_BRANCH_SELECTION_KEY = "pem-manual-branch-selection";
+const AUTO_BRANCH_DETECTION_KEY = "pem-auto-branch-detected-v1";
 
 function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
@@ -1594,6 +1610,47 @@ function getEtaCountdown(order, deliveryZones) {
   return `${remainingMinutes} min remaining in the current delivery window.`;
 }
 
+function getOrderEditRemainingMs(order) {
+  const createdAt = order?.createdAt ? new Date(order.createdAt).getTime() : NaN;
+  const status = String(order?.status || "").trim();
+  if (!Number.isFinite(createdAt)) {
+    return 0;
+  }
+  if (!["awaiting_payment", "received", "confirmed"].includes(status)) {
+    return 0;
+  }
+  return Math.max(0, ORDER_EDIT_WINDOW_MS - (Date.now() - createdAt));
+}
+
+function canEditOrder(order) {
+  return getOrderEditRemainingMs(order) > 0;
+}
+
+function getOrderEditWindowLabel(order) {
+  const remainingMs = getOrderEditRemainingMs(order);
+  if (remainingMs <= 0) {
+    return "";
+  }
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  return `Update details within ${remainingMinutes} min.`;
+}
+
+function formatDistanceLabel(distanceKm) {
+  const numericDistance = Number(distanceKm);
+  if (!Number.isFinite(numericDistance)) {
+    return "";
+  }
+  if (numericDistance < 1) {
+    return `${Math.max(100, Math.round(numericDistance * 1000))} m away`;
+  }
+  return `${numericDistance.toFixed(numericDistance < 10 ? 1 : 0)} km away`;
+}
+
+function getMapsSearchUrl(address, branchName = "PEM") {
+  const query = String(address || "").trim() || branchName;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
 function formatScheduleLabel(item) {
   const days = normalizeScheduleDays(item.availableDays);
   const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
@@ -1931,6 +1988,7 @@ export default function App() {
   const [forgotPasswordForm, setForgotPasswordForm] = useState(initialForgotPasswordForm);
   const [forgotPasswordStage, setForgotPasswordStage] = useState("request");
   const [giftActionState, setGiftActionState] = useState(initialGiftActionState);
+  const [orderEditState, setOrderEditState] = useState(initialOrderEditState);
   const [profileForm, setProfileForm] = useState({ fullName: "", phone: "", birthday: "" });
   const [addressDraft, setAddressDraft] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -1971,6 +2029,8 @@ export default function App() {
   const [adminQuery, setAdminQuery] = useState("");
   const [menuAdminQuery, setMenuAdminQuery] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [kitchenBoardFilter, setKitchenBoardFilter] = useState("all");
+  const [dispatchBoardFilter, setDispatchBoardFilter] = useState("all");
   const [selectedOrderReferences, setSelectedOrderReferences] = useState([]);
   const [bulkOrderStatus, setBulkOrderStatus] = useState("received");
   const [adminBranchFilter, setAdminBranchFilter] = useState("all");
@@ -1993,7 +2053,11 @@ export default function App() {
   const [reviewForm, setReviewForm] = useState(initialReviewForm);
   const [reviewState, setReviewState] = useState({ loading: false, success: "", error: "" });
   const [publicReviews, setPublicReviews] = useState([]);
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState(() => (
+    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported"
+  ));
   const reportedRuntimeIncidentsRef = useRef(new Set());
+  const shownBrowserNotificationIdsRef = useRef(new Set());
   const menuResultsRef = useRef(null);
   const branchLocations = useMemo(
     () => parseBranchLocations(businessSettings.branchLocationsText, businessSettings),
@@ -2732,6 +2796,69 @@ export default function App() {
   }, [branchAssistState.success]);
 
   useEffect(() => {
+    syncBrowserNotificationPermission();
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+    const handleVisibility = () => syncBrowserNotificationPermission();
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || branchLocations.length === 0) {
+      return undefined;
+    }
+    if (window.localStorage.getItem(MANUAL_BRANCH_SELECTION_KEY) === "1") {
+      return undefined;
+    }
+    if (window.localStorage.getItem(AUTO_BRANCH_DETECTION_KEY) === "1") {
+      return undefined;
+    }
+    if (typeof navigator === "undefined" || !navigator.permissions?.query || !navigator.geolocation) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((permissionStatus) => {
+        if (cancelled || permissionStatus.state !== "granted") {
+          return;
+        }
+        window.localStorage.setItem(AUTO_BRANCH_DETECTION_KEY, "1");
+        handleUseClosestBranch({ auto: true });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchLocations]);
+
+  useEffect(() => {
+    if (!accountToken || browserNotificationPermission !== "granted" || typeof document === "undefined") {
+      return;
+    }
+    if (document.visibilityState === "visible") {
+      return;
+    }
+
+    const nextUnreadNotifications = (accountUser.notifications || []).filter((notification) => !notification.read);
+    nextUnreadNotifications.forEach((notification) => {
+      if (shownBrowserNotificationIdsRef.current.has(notification.id)) {
+        return;
+      }
+      shownBrowserNotificationIdsRef.current.add(notification.id);
+      showBrowserNotification(notification);
+    });
+  }, [accountToken, accountUser.notifications, browserNotificationPermission]);
+
+  useEffect(() => {
     if (!deliveryZones.length) {
       return;
     }
@@ -3113,6 +3240,12 @@ export default function App() {
   };
   const receiptEtaCountdown = receiptOrder ? getEtaCountdown(receiptOrder, deliveryZones) : "";
   const trackingEtaCountdown = trackingState.order ? getEtaCountdown(trackingState.order, deliveryZones) : "";
+  const activeOrderEditRecord =
+    (orderEditState.openRef && (
+      accountOrders.find((order) => order.reference === orderEditState.openRef) ||
+      (trackingState.order?.reference === orderEditState.openRef ? trackingState.order : null) ||
+      (receiptOrder?.reference === orderEditState.openRef ? receiptOrder : null)
+    )) || null;
   const unavailableCartItem = cartItems.find((item) => item.soldOut || item.hidden || !isMenuItemScheduledNow(item, lagosNow));
   const overStockCartItem = cartItems.find((item) => Number(item.stockQuantity || 0) > 0 && item.quantity > Number(item.stockQuantity || 0));
   const normalizedAdminQuery = adminQuery.trim().toLowerCase();
@@ -3177,6 +3310,24 @@ export default function App() {
   const riderBoardOrders = branchScopedOrders.filter((order) =>
     ["ready", "out_for_delivery"].includes(order.status),
   );
+  const kitchenLaneCounts = {
+    all: kitchenBoardOrders.length,
+    received: kitchenBoardOrders.filter((order) => order.status === "received").length,
+    confirmed: kitchenBoardOrders.filter((order) => order.status === "confirmed").length,
+    preparing: kitchenBoardOrders.filter((order) => order.status === "preparing").length,
+    ready: kitchenBoardOrders.filter((order) => order.status === "ready").length,
+  };
+  const filteredKitchenBoardOrders = kitchenBoardFilter === "all"
+    ? kitchenBoardOrders
+    : kitchenBoardOrders.filter((order) => order.status === kitchenBoardFilter);
+  const dispatchLaneCounts = {
+    all: riderBoardOrders.length,
+    ready: riderBoardOrders.filter((order) => order.status === "ready").length,
+    out_for_delivery: riderBoardOrders.filter((order) => order.status === "out_for_delivery").length,
+  };
+  const filteredRiderBoardOrders = dispatchBoardFilter === "all"
+    ? riderBoardOrders
+    : riderBoardOrders.filter((order) => order.status === dispatchBoardFilter);
   const statusChart = orderStatuses
     .filter((status) => status !== "all")
     .map((status) => ({
@@ -3213,6 +3364,7 @@ export default function App() {
       )}`
     : "#";
   const unreadNotifications = (accountUser.notifications || []).filter((item) => !item.read);
+  const notificationsSupported = browserNotificationPermission !== "unsupported";
   const pendingReceivedGifts = (accountGifts.received || []).filter((gift) => gift.status === "pending_acceptance");
   const adminRuntimeIncidents = adminState.data.runtimeIncidents || [];
   const adminDiagnostics = adminState.data.diagnostics || initialAdminState.data.diagnostics;
@@ -3510,7 +3662,7 @@ export default function App() {
   }
 
   function handleBranchSelect(branchId) {
-    applyBranchSelection(branchId);
+    applyBranchSelection(branchId, "manual");
   }
 
   function handleBranchMenuScroll(event) {
@@ -3526,41 +3678,58 @@ export default function App() {
     }
   }
 
-  function applyBranchSelection(branchId, source = "") {
+  function applyBranchSelection(branchId, source = "", metadata = {}) {
     if (!branchId) {
       return;
     }
+    const branchLabel = branchLocations.find((branch) => branch.id === branchId)?.label || "that branch";
     setSelectedBranchId(branchId);
     setBranchMenuOpen(false);
     setShowCart(false);
+    if (typeof window !== "undefined") {
+      if (source === "manual" || source === "address" || source === "device") {
+        window.localStorage.setItem(MANUAL_BRANCH_SELECTION_KEY, "1");
+      }
+      if (source === "device" || source === "device-auto") {
+        window.localStorage.setItem(AUTO_BRANCH_DETECTION_KEY, "1");
+      }
+    }
     setBranchAssistState((previous) => ({
       ...previous,
       loading: false,
       error: "",
-      success: source ? `Using ${branchLocations.find((branch) => branch.id === branchId)?.label || "that branch"}.` : "",
+      success: source
+        ? `Using ${branchLabel}${Number.isFinite(Number(metadata.distanceKm)) ? ` · ${formatDistanceLabel(metadata.distanceKm)}` : ""}.`
+        : "",
       suggestedId: branchId,
       source,
+      distanceKm: Number.isFinite(Number(metadata.distanceKm)) ? Number(metadata.distanceKm) : null,
     }));
   }
 
-  async function handleUseClosestBranch() {
+  async function handleUseClosestBranch({ auto = false } = {}) {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setBranchAssistState({
-        loading: false,
-        error: "Location is not available on this device.",
-        success: "",
-        suggestedId: "",
-        source: "",
-      });
+      if (!auto) {
+        setBranchAssistState({
+          loading: false,
+          error: "Location is not available on this device.",
+          success: "",
+          suggestedId: "",
+          source: "",
+          distanceKm: null,
+        });
+      }
       return;
     }
 
-    setBranchAssistState((previous) => ({
-      ...previous,
-      loading: true,
-      error: "",
-      success: "",
-    }));
+    if (!auto) {
+      setBranchAssistState((previous) => ({
+        ...previous,
+        loading: true,
+        error: "",
+        success: "",
+      }));
+    }
 
     const getCurrentPosition = () =>
       new Promise((resolve, reject) => {
@@ -3583,15 +3752,20 @@ export default function App() {
         throw new Error("PEM could not match your location to a branch yet.");
       }
 
-      applyBranchSelection(nearestBranch.id, "device");
-    } catch (error) {
-      setBranchAssistState({
-        loading: false,
-        error: error.message || "PEM could not use your location just now.",
-        success: "",
-        suggestedId: "",
-        source: "",
+      applyBranchSelection(nearestBranch.id, auto ? "device-auto" : "device", {
+        distanceKm: nearestBranch.distanceKm,
       });
+    } catch (error) {
+      if (!auto) {
+        setBranchAssistState({
+          loading: false,
+          error: error.message || "PEM could not use your location just now.",
+          success: "",
+          suggestedId: "",
+          source: "",
+          distanceKm: null,
+        });
+      }
     }
   }
 
@@ -3623,6 +3797,194 @@ export default function App() {
 
   function getUserAuthHeaders(tokenOverride = accountToken) {
     return tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : {};
+  }
+
+  function syncBrowserNotificationPermission() {
+    setBrowserNotificationPermission(
+      typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported",
+    );
+  }
+
+  async function requestBrowserNotifications() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setOrderPlaced("Device alerts are not available on this browser.");
+      window.setTimeout(() => setOrderPlaced(""), 2600);
+      return;
+    }
+
+    try {
+      const permission = await window.Notification.requestPermission();
+      setBrowserNotificationPermission(permission);
+      setOrderPlaced(permission === "granted" ? "Device alerts enabled." : "Device alerts were not enabled.");
+    } catch {
+      setOrderPlaced("PEM could not enable device alerts right now.");
+    }
+
+    window.setTimeout(() => setOrderPlaced(""), 2600);
+  }
+
+  async function showBrowserNotification(notification) {
+    if (typeof window === "undefined" || browserNotificationPermission !== "granted" || !notification?.id) {
+      return;
+    }
+
+    const titleByType = {
+      order: "Order update",
+      gift: "Gift update",
+      birthday: "Birthday reward",
+      payment: "Payment update",
+      security: "Security update",
+    };
+    const title = titleByType[notification.type] || "PEM update";
+    const notificationOptions = {
+      body: notification.message,
+      icon: "/pem-icon.jpeg",
+      badge: "/pem-icon.jpeg",
+      tag: notification.id,
+      data: {
+        url: notification.orderReference ? "/#track" : "/#account",
+      },
+    };
+
+    try {
+      if ("serviceWorker" in navigator) {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration?.showNotification) {
+          await registration.showNotification(title, notificationOptions);
+          return;
+        }
+      }
+      if ("Notification" in window) {
+        const browserNotice = new window.Notification(title, notificationOptions);
+        browserNotice.onclick = () => {
+          window.focus();
+          navigateToPage(notification.orderReference ? "track" : "account");
+          if (notification.orderReference) {
+            setTrackingReference(notification.orderReference);
+          }
+          browserNotice.close();
+        };
+      }
+    } catch {
+      // Keep PEM usable even if the browser blocks system notifications.
+    }
+  }
+
+  function syncUpdatedOrderAcrossUi(updatedOrder) {
+    if (!updatedOrder?.reference) {
+      return;
+    }
+    setTrackingState((previous) => (
+      previous.order?.reference === updatedOrder.reference
+        ? { ...previous, order: updatedOrder }
+        : previous
+    ));
+    setReceiptOrder((previous) => (
+      previous?.reference === updatedOrder.reference ? updatedOrder : previous
+    ));
+    setAccountOrders((previous) => previous.map((order) => (
+      order.reference === updatedOrder.reference ? updatedOrder : order
+    )));
+    rememberPlacedOrderLocally(updatedOrder);
+  }
+
+  function openOrderEdit(order) {
+    if (!order?.reference) {
+      return;
+    }
+    setOrderEditState({
+      openRef: order.reference,
+      loading: false,
+      error: "",
+      success: "",
+      phone: order.customer?.phone || "",
+      address: order.customer?.address || "",
+      landmark: order.customer?.landmark || "",
+      deliveryNote: order.customer?.deliveryNote || "",
+      verificationPhone: order.customer?.phone || "",
+    });
+  }
+
+  function closeOrderEdit() {
+    setOrderEditState(initialOrderEditState);
+  }
+
+  async function handleOrderEditSubmit(event) {
+    event.preventDefault();
+
+    if (!activeOrderEditRecord?.reference) {
+      return;
+    }
+
+    const normalizedPhone = sanitizePhoneInput(orderEditState.phone);
+    const normalizedAddress = String(orderEditState.address || "").trim();
+    const normalizedLandmark = String(orderEditState.landmark || "").trim();
+    const normalizedDeliveryNote = String(orderEditState.deliveryNote || "").trim();
+    const verificationPhone = sanitizePhoneInput(orderEditState.verificationPhone);
+
+    if ((activeOrderEditRecord.customer?.fulfillmentMethod || "delivery") !== "pickup" && normalizedAddress.length < 5) {
+      setOrderEditState((previous) => ({
+        ...previous,
+        error: "Enter the new delivery address first.",
+      }));
+      return;
+    }
+
+    if (normalizePhoneDigits(normalizedPhone).length < 10) {
+      setOrderEditState((previous) => ({
+        ...previous,
+        error: "Enter a valid phone number first.",
+      }));
+      return;
+    }
+
+    if (!accountToken && normalizePhoneDigits(verificationPhone).length < 10) {
+      setOrderEditState((previous) => ({
+        ...previous,
+        error: "Confirm with the order phone number to continue.",
+      }));
+      return;
+    }
+
+    try {
+      setOrderEditState((previous) => ({
+        ...previous,
+        loading: true,
+        error: "",
+        success: "",
+      }));
+      const data = await requestJson(`/api/orders/${encodeURIComponent(activeOrderEditRecord.reference)}/customer-edit`, {
+        method: "PATCH",
+        payload: {
+          phone: normalizedPhone,
+          address: normalizedAddress,
+          landmark: normalizedLandmark,
+          deliveryNote: normalizedDeliveryNote,
+          verificationPhone,
+        },
+        headers: getUserAuthHeaders(),
+      });
+      syncUpdatedOrderAcrossUi(data.order);
+      if (accountToken) {
+        loadAccount();
+      }
+      setOrderEditState((previous) => ({
+        ...previous,
+        loading: false,
+        success: "Order details updated.",
+      }));
+      window.setTimeout(() => {
+        setOrderEditState((previous) => (
+          previous.openRef === data.order.reference ? { ...initialOrderEditState } : previous
+        ));
+      }, 1400);
+    } catch (error) {
+      setOrderEditState((previous) => ({
+        ...previous,
+        loading: false,
+        error: error.message || "PEM could not update this order right now.",
+      }));
+    }
   }
 
   async function reportRuntimeIncident(source, message) {
@@ -6408,27 +6770,22 @@ export default function App() {
                 <button type="button" className="button button--primary" onClick={() => downloadOrderReceipt(receiptOrder)}>
                   Download Receipt
                 </button>
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  onClick={() => {
-                    setCheckoutForm((previous) => ({
-                      ...previous,
-                      customerName: receiptOrder.customer?.customerName || previous.customerName,
-                      phone: receiptOrder.customer?.phone || previous.phone,
-                      address: receiptOrder.customer?.address || previous.address,
-                      landmark: receiptOrder.customer?.landmark || previous.landmark,
-                      deliveryZone: deliveryZones.find((zone) => zone.label === receiptOrder.customer?.deliveryZone)?.id || previous.deliveryZone,
-                    }));
-                    setShowCart(true);
-                  }}
-                >
-                  Edit Order Details
-                </button>
+                {canEditOrder(receiptOrder) ? (
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => openOrderEdit(receiptOrder)}
+                  >
+                    Edit Details
+                  </button>
+                ) : null}
                 <button type="button" className="button button--ghost" onClick={() => setReceiptOrder(null)}>
                   Dismiss
                 </button>
               </div>
+              {canEditOrder(receiptOrder) ? (
+                <p className="cart-help">{getOrderEditWindowLabel(receiptOrder)}</p>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -6934,6 +7291,15 @@ export default function App() {
                   </div>
                   <div className="account-card__header-actions">
                     <span>{unreadNotifications.length} unread</span>
+                    {notificationsSupported && browserNotificationPermission !== "granted" ? (
+                      <button
+                        type="button"
+                        className="button button--ghost button--small"
+                        onClick={requestBrowserNotifications}
+                      >
+                        Enable alerts
+                      </button>
+                    ) : null}
                     {unreadNotifications.length > 1 ? (
                       <button
                         type="button"
@@ -7019,6 +7385,15 @@ export default function App() {
                           >
                             Receipt
                           </button>
+                          {canEditOrder(order) ? (
+                            <button
+                              type="button"
+                              className="button button--ghost button--small"
+                              onClick={() => openOrderEdit(order)}
+                            >
+                              Edit
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ))
@@ -7184,6 +7559,26 @@ export default function App() {
                   {trackingState.order.customer.landmark ? (
                     <p>Landmark: <strong>{trackingState.order.customer.landmark}</strong></p>
                   ) : null}
+                  {trackingState.order.customer.deliveryNote ? (
+                    <p>Delivery note: <strong>{trackingState.order.customer.deliveryNote}</strong></p>
+                  ) : null}
+                  {trackingState.order.customer.operations?.prepEtaMinutes ? (
+                    <p>Kitchen ETA: <strong>{trackingState.order.customer.operations.prepEtaMinutes} mins</strong></p>
+                  ) : null}
+                  {trackingState.order.customer.operations?.riderName || trackingState.order.customer.operations?.riderPhone ? (
+                    <p>
+                      Rider:{" "}
+                        <strong>
+                          {trackingState.order.customer.operations?.riderName || "Assigned rider"}
+                          {trackingState.order.customer.operations?.riderPhone
+                          ? ` - ${trackingState.order.customer.operations.riderPhone}`
+                          : ""}
+                        </strong>
+                    </p>
+                  ) : null}
+                  {trackingState.order.customer.operations?.dispatchNote ? (
+                    <p className="tracking-card__hint">{trackingState.order.customer.operations.dispatchNote}</p>
+                  ) : null}
                   {trackingState.order.status === "awaiting_payment" ? (
                     <p className="tracking-card__hint">
                       PEM is waiting for payment confirmation before the kitchen starts preparing this order.
@@ -7203,6 +7598,18 @@ export default function App() {
                   >
                     Add These Items To Cart
                   </button>
+                  {canEditOrder(trackingState.order) ? (
+                    <>
+                      <button
+                        type="button"
+                        className="button button--ghost"
+                        onClick={() => openOrderEdit(trackingState.order)}
+                      >
+                        Edit Delivery Details
+                      </button>
+                      <p className="tracking-card__hint">{getOrderEditWindowLabel(trackingState.order)}</p>
+                    </>
+                  ) : null}
                   {trackingState.order.status === "delivered" ? (
                     <form className="service-form account-card__panel" onSubmit={handleReviewSubmit}>
                       <label className="field">
@@ -8388,11 +8795,50 @@ export default function App() {
                     <h3>Kitchen Board</h3>
                     <span>{kitchenBoardOrders.length}</span>
                   </div>
+                  {kitchenBoardOrders.length > 0 ? (
+                    <div className="segmented-toggle segmented-toggle--compact admin-board-filters">
+                      <button
+                        type="button"
+                        className={kitchenBoardFilter === "all" ? "is-active" : ""}
+                        onClick={() => setKitchenBoardFilter("all")}
+                      >
+                        All {kitchenBoardOrders.length}
+                      </button>
+                      <button
+                        type="button"
+                        className={kitchenBoardFilter === "received" ? "is-active" : ""}
+                        onClick={() => setKitchenBoardFilter("received")}
+                      >
+                        Received {kitchenLaneCounts.received}
+                      </button>
+                      <button
+                        type="button"
+                        className={kitchenBoardFilter === "confirmed" ? "is-active" : ""}
+                        onClick={() => setKitchenBoardFilter("confirmed")}
+                      >
+                        Confirmed {kitchenLaneCounts.confirmed}
+                      </button>
+                      <button
+                        type="button"
+                        className={kitchenBoardFilter === "preparing" ? "is-active" : ""}
+                        onClick={() => setKitchenBoardFilter("preparing")}
+                      >
+                        Preparing {kitchenLaneCounts.preparing}
+                      </button>
+                      <button
+                        type="button"
+                        className={kitchenBoardFilter === "ready" ? "is-active" : ""}
+                        onClick={() => setKitchenBoardFilter("ready")}
+                      >
+                        Ready {kitchenLaneCounts.ready}
+                      </button>
+                    </div>
+                  ) : null}
                   {kitchenBoardOrders.length === 0 ? (
                     <p className="admin-empty">No active kitchen orders right now.</p>
                   ) : (
                     <div className="admin-list">
-                      {kitchenBoardOrders.slice(0, 8).map((order) => (
+                      {filteredKitchenBoardOrders.slice(0, 8).map((order) => (
                         <div key={order.reference} className="admin-item admin-item--ops">
                           <div className="admin-item__row">
                             <strong>{order.reference}</strong>
@@ -8400,6 +8846,9 @@ export default function App() {
                           </div>
                           <p>{order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")}</p>
                           <p className="admin-item__subtle">{getRecordBranchName(order)}</p>
+                          {order.customer?.deliveryNote ? (
+                            <p className="admin-item__subtle">Customer note: {order.customer.deliveryNote}</p>
+                          ) : null}
                           <div className="admin-ops-grid">
                             <label className="field">
                               <span>Station</span>
@@ -8520,11 +8969,36 @@ export default function App() {
                     <h3>Rider Dispatch</h3>
                     <span>{riderBoardOrders.length}</span>
                   </div>
+                  {riderBoardOrders.length > 0 ? (
+                    <div className="segmented-toggle segmented-toggle--compact admin-board-filters">
+                      <button
+                        type="button"
+                        className={dispatchBoardFilter === "all" ? "is-active" : ""}
+                        onClick={() => setDispatchBoardFilter("all")}
+                      >
+                        All {riderBoardOrders.length}
+                      </button>
+                      <button
+                        type="button"
+                        className={dispatchBoardFilter === "ready" ? "is-active" : ""}
+                        onClick={() => setDispatchBoardFilter("ready")}
+                      >
+                        Ready {dispatchLaneCounts.ready}
+                      </button>
+                      <button
+                        type="button"
+                        className={dispatchBoardFilter === "out_for_delivery" ? "is-active" : ""}
+                        onClick={() => setDispatchBoardFilter("out_for_delivery")}
+                      >
+                        Out {dispatchLaneCounts.out_for_delivery}
+                      </button>
+                    </div>
+                  ) : null}
                   {riderBoardOrders.length === 0 ? (
                     <p className="admin-empty">No ready or in-transit deliveries yet.</p>
                   ) : (
                     <div className="admin-list">
-                      {riderBoardOrders.slice(0, 8).map((order) => (
+                      {filteredRiderBoardOrders.slice(0, 8).map((order) => (
                         <div key={order.reference} className="admin-item admin-item--ops">
                           <div className="admin-item__row">
                             <strong>{order.customer.customerName}</strong>
@@ -8532,6 +9006,7 @@ export default function App() {
                           </div>
                           <p>{order.customer.address}</p>
                           {order.customer.landmark ? <p>Landmark: {order.customer.landmark}</p> : null}
+                          {order.customer.deliveryNote ? <p>Delivery note: {order.customer.deliveryNote}</p> : null}
                           <div className="admin-item__row">
                             <span>{order.customer.phone}</span>
                             <strong>{order.reference}</strong>
@@ -8578,6 +9053,32 @@ export default function App() {
                             </label>
                           </div>
                           <div className="admin-status-actions">
+                            {order.customer.phone ? (
+                              <a
+                                className="button button--ghost button--small"
+                                href={`tel:${order.customer.phone}`}
+                              >
+                                Call customer
+                              </a>
+                            ) : null}
+                            {order.customer.address ? (
+                              <a
+                                className="button button--ghost button--small"
+                                href={getMapsSearchUrl(order.customer.address, order.customer.branchName)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open map
+                              </a>
+                            ) : null}
+                            {resolveOrderOperationsDraft(order).riderPhone ? (
+                              <a
+                                className="button button--ghost button--small"
+                                href={`tel:${resolveOrderOperationsDraft(order).riderPhone}`}
+                              >
+                                Call rider
+                              </a>
+                            ) : null}
                             <button
                               type="button"
                               className="button button--ghost button--small"
@@ -9491,6 +9992,138 @@ export default function App() {
         </section>
         ) : null}
       </main>
+
+      <aside className={orderEditState.openRef ? "quick-add-sheet is-open order-edit-sheet" : "quick-add-sheet order-edit-sheet"} aria-hidden={!orderEditState.openRef}>
+        <div className="quick-add-sheet__backdrop" onClick={closeOrderEdit} />
+        <div className="quick-add-sheet__panel">
+          {activeOrderEditRecord ? (
+            <>
+              <div className="quick-add-sheet__header">
+                <div>
+                  <p className="eyebrow">Order details</p>
+                  <h3>{activeOrderEditRecord.reference}</h3>
+                </div>
+                <button type="button" className="cart-close" onClick={closeOrderEdit}>
+                  x
+                </button>
+              </div>
+
+              <div className="quick-add-sheet__body">
+                <div className="delivery-zone-card delivery-zone-card--soft">
+                  <p className="delivery-zone-card__title">Edit window</p>
+                  <strong>{getOrderEditWindowLabel(activeOrderEditRecord) || "Window closed"}</strong>
+                  <small>
+                    {activeOrderEditRecord.customer?.branchName || selectedBranch?.label || `${businessSettings.appName} Branch`}
+                  </small>
+                </div>
+
+                <form className="service-form service-form--light order-edit-form" onSubmit={handleOrderEditSubmit}>
+                  <div className="service-form__grid">
+                    <label className="field">
+                      <span>Phone number</span>
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={orderEditState.phone}
+                        onChange={(event) =>
+                          setOrderEditState((previous) => ({
+                            ...previous,
+                            phone: sanitizePhoneInput(event.target.value),
+                          }))
+                        }
+                        placeholder="0803 334 5161"
+                      />
+                    </label>
+
+                    {accountToken ? null : (
+                      <label className="field">
+                        <span>Order phone to confirm</span>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          value={orderEditState.verificationPhone}
+                          onChange={(event) =>
+                            setOrderEditState((previous) => ({
+                              ...previous,
+                              verificationPhone: sanitizePhoneInput(event.target.value),
+                            }))
+                          }
+                          placeholder="Original order phone"
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  {String(activeOrderEditRecord.customer?.fulfillmentMethod || "delivery") !== "pickup" ? (
+                    <>
+                      <label className="field">
+                        <span>Delivery address</span>
+                        <textarea
+                          rows="3"
+                          value={orderEditState.address}
+                          onChange={(event) =>
+                            setOrderEditState((previous) => ({
+                              ...previous,
+                              address: event.target.value,
+                            }))
+                          }
+                          placeholder="Street, area, city"
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>Landmark</span>
+                        <input
+                          type="text"
+                          value={orderEditState.landmark}
+                          onChange={(event) =>
+                            setOrderEditState((previous) => ({
+                              ...previous,
+                              landmark: event.target.value,
+                            }))
+                          }
+                          placeholder="Bus stop, gate, shop"
+                        />
+                      </label>
+                    </>
+                  ) : null}
+
+                  <label className="field">
+                    <span>Delivery note</span>
+                    <textarea
+                      rows="3"
+                      value={orderEditState.deliveryNote}
+                      onChange={(event) =>
+                        setOrderEditState((previous) => ({
+                          ...previous,
+                          deliveryNote: event.target.value,
+                        }))
+                      }
+                      placeholder="Gate code, receiver note"
+                    />
+                  </label>
+
+                  {orderEditState.error ? <p className="form-message form-message--error">{orderEditState.error}</p> : null}
+                  {orderEditState.success ? <p className="form-message form-message--success">{orderEditState.success}</p> : null}
+
+                  <div className="quick-add-sheet__footer">
+                    <button type="button" className="button button--ghost" onClick={closeOrderEdit}>
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="button button--primary"
+                      disabled={orderEditState.loading || !canEditOrder(activeOrderEditRecord)}
+                    >
+                      {orderEditState.loading ? "Saving..." : "Save changes"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </aside>
 
       <div className="mobile-quickbar">
         <button type="button" className={activePage === "menu" ? "is-active" : ""} onClick={() => navigateToPage("menu")}>

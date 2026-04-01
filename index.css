@@ -2388,6 +2388,10 @@ button:disabled {
   font-weight: 800;
 }
 
+.admin-board-filters {
+  margin-bottom: 1rem;
+}
+
 .admin-list {
   display: grid;
   gap: 0.8rem;
@@ -3023,6 +3027,18 @@ button:disabled {
 .quick-add-sheet__footer {
   display: flex;
   justify-content: flex-end;
+}
+
+.order-edit-sheet .quick-add-sheet__panel {
+  width: min(31rem, calc(100% - 2rem));
+}
+
+.order-edit-sheet .quick-add-sheet__footer {
+  justify-content: space-between;
+}
+
+.order-edit-sheet .service-form {
+  margin: 0;
 }
 
 .cart-drawer.is-open {
