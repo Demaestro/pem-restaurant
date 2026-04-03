@@ -6,6 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { parse as parseCookieHeader, serialize as serializeCookie } from "cookie";
 import { createStorage } from "./lib/storage.js";
 
 dotenv.config();
@@ -28,14 +31,38 @@ const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS ||
   .filter(Boolean);
 const adminSessions = new Map();
 const userSessions = new Map();
+const userRefreshSessions = new Map();
+const adminRefreshSessions = new Map();
 const authAttemptBuckets = new Map();
+const accessTokenBlacklist = new Map();
+const userLockouts = new Map();
 const BIRTHDAY_DISCOUNT_PERCENT = 15;
 const OWNER_ADMIN_USERNAME = "owner";
 const PASSWORD_RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
+const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_FAILED_SIGNIN_ATTEMPTS = 10;
+const USER_ACCESS_COOKIE = "pem_user_access";
+const USER_REFRESH_COOKIE = "pem_user_refresh";
+const ADMIN_ACCESS_COOKIE = "pem_admin_access";
+const ADMIN_REFRESH_COOKIE = "pem_admin_refresh";
+const AUTH_COOKIE_PATH = "/";
+const AUTH_ISSUER = "pem-restaurant";
+const AUTH_AUDIENCE = "pem-app";
+const authJwtSecret =
+  process.env.AUTH_JWT_SECRET
+  || process.env.JWT_SECRET
+  || crypto.createHash("sha256").update(`${adminPassword}|${frontendUrl}|pem-auth`).digest("hex");
 const authAttemptPolicies = {
+  userSignup: {
+    windowMs: 15 * 60 * 1000,
+    maxAttempts: 5,
+    blockMs: 15 * 60 * 1000,
+    error: "Too many sign-up attempts. Please wait 15 minutes and try again.",
+  },
   userLogin: {
-    windowMs: 10 * 60 * 1000,
-    maxAttempts: 6,
+    windowMs: 15 * 60 * 1000,
+    maxAttempts: 5,
     blockMs: 15 * 60 * 1000,
     error: "Too many sign-in attempts. Please wait 15 minutes and try again.",
   },
@@ -80,6 +107,7 @@ const branchGeoPresets = {
   },
 };
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
@@ -153,6 +181,7 @@ function isLocalDevOrigin(origin) {
 
 app.use(
   cors({
+    credentials: true,
     origin(origin, callback) {
       if (!origin || allowedOrigins.includes(origin) || isLocalDevOrigin(origin)) {
         callback(null, true);
@@ -163,7 +192,7 @@ app.use(
     },
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "300kb" }));
 
 function makeReference(prefix) {
   const random = Math.floor(1000 + Math.random() * 9000);
@@ -181,6 +210,82 @@ function getBearerToken(request) {
   }
 
   return authHeader.slice(7);
+}
+
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function validatePasswordInput(value, minimumLength = 8) {
+  return String(value || "").length >= minimumLength;
+}
+
+function validateFullNameInput(value) {
+  const normalized = normalizeProfileText(value, 80);
+  return normalized.length >= 2 ? normalized : "";
+}
+
+function validateAddressInput(value) {
+  const normalized = normalizeProfileText(value, 180);
+  return normalized.length >= 6 ? normalized : "";
+}
+
+function validatePhoneInput(value, required = false) {
+  const normalized = sanitizePhoneInput(value);
+  const digits = normalizePhoneDigits(normalized);
+  if (!digits) {
+    return required ? "" : normalized;
+  }
+  if (digits.length < 10 || digits.length > 15) {
+    return "";
+  }
+  return normalized;
+}
+
+function cleanupLockouts(now = Date.now()) {
+  for (const [email, state] of userLockouts.entries()) {
+    if (!state?.lockedUntil) {
+      continue;
+    }
+    if (state.lockedUntil <= now) {
+      userLockouts.delete(email);
+    }
+  }
+}
+
+function getUserLockoutState(email) {
+  cleanupLockouts();
+  return userLockouts.get(String(email || "").trim().toLowerCase()) || null;
+}
+
+function registerUserCredentialFailure(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return null;
+  }
+  const now = Date.now();
+  const current = getUserLockoutState(normalizedEmail) || { failedCount: 0, lockedUntil: 0 };
+  const nextFailedCount = Number(current.failedCount || 0) + 1;
+  const nextState = {
+    failedCount: nextFailedCount,
+    lockedUntil: nextFailedCount >= MAX_FAILED_SIGNIN_ATTEMPTS ? now + PASSWORD_RECOVERY_CODE_TTL_MS : 0,
+  };
+  userLockouts.set(normalizedEmail, nextState);
+  return nextState.lockedUntil ? "Too many unsuccessful sign-ins. Start password recovery to unlock this account." : "";
+}
+
+function clearUserCredentialFailures(email) {
+  userLockouts.delete(String(email || "").trim().toLowerCase());
+}
+
+function getAccessTokenFromRequest(request, cookieName) {
+  const cookies = parseCookies(request);
+  return String(cookies[cookieName] || "").trim() || getBearerToken(request);
+}
+
+function getRefreshTokenFromRequest(request, cookieName) {
+  const cookies = parseCookies(request);
+  return String(cookies[cookieName] || "").trim();
 }
 
 function getClientAddress(request) {
@@ -244,14 +349,77 @@ function clearAttemptBucket(scope, request, identifier = "") {
   authAttemptBuckets.delete(buildAttemptKey(scope, request, identifier));
 }
 
-function requireAdmin(request, response, next) {
-  const token = getBearerToken(request);
+function issueUserAuth(response, request, session) {
+  const accessToken = createAccessToken("user", session.email);
+  const refreshToken = issueRefreshToken(userRefreshSessions, "user", session.email, {
+    email: session.email,
+  });
+  setUserAuthCookies(response, request, accessToken, refreshToken);
+  return { accessToken, refreshToken };
+}
 
-  if (!token || !adminSessions.has(token)) {
+function issueAdminAuth(response, request, session) {
+  const accessToken = createAccessToken("admin", session.username, {
+    branchId: session.branchId || "",
+    isOwner: Boolean(session.isOwner),
+    label: session.label || "Owner",
+  });
+  const refreshToken = issueRefreshToken(adminRefreshSessions, "admin", session.username, {
+    branchId: session.branchId || "",
+    isOwner: Boolean(session.isOwner),
+    label: session.label || "Owner",
+    username: session.username,
+  });
+  setAdminAuthCookies(response, request, accessToken, refreshToken);
+  return { accessToken, refreshToken };
+}
+
+function getUserSessionFromAccessToken(request) {
+  cleanupExpiringEntries(accessTokenBlacklist);
+  const token = getAccessTokenFromRequest(request, USER_ACCESS_COOKIE);
+  const decoded = token ? decodeAccessToken(token) : null;
+
+  if (decoded?.scope === "user" && decoded?.sub && !accessTokenBlacklist.has(decoded.jti)) {
+    return {
+      email: String(decoded.sub || "").trim().toLowerCase(),
+      createdAt: decoded.iat ? new Date(Number(decoded.iat) * 1000).toISOString() : new Date().toISOString(),
+      tokenSource: "cookie",
+    };
+  }
+
+  const legacyToken = getBearerToken(request);
+  const legacySession = legacyToken ? userSessions.get(legacyToken) : null;
+  return legacySession ? { ...legacySession, tokenSource: "bearer" } : null;
+}
+
+function getAdminSessionFromAccessToken(request) {
+  cleanupExpiringEntries(accessTokenBlacklist);
+  const token = getAccessTokenFromRequest(request, ADMIN_ACCESS_COOKIE);
+  const decoded = token ? decodeAccessToken(token) : null;
+
+  if (decoded?.scope === "admin" && decoded?.sub && !accessTokenBlacklist.has(decoded.jti)) {
+    return {
+      createdAt: decoded.iat ? new Date(Number(decoded.iat) * 1000).toISOString() : new Date().toISOString(),
+      username: String(decoded.sub || "").trim().toLowerCase(),
+      label: String(decoded.label || "").trim() || "Owner",
+      branchId: String(decoded.branchId || "").trim(),
+      isOwner: Boolean(decoded.isOwner),
+      tokenSource: "cookie",
+    };
+  }
+
+  const legacyToken = getBearerToken(request);
+  const legacySession = legacyToken ? adminSessions.get(legacyToken) : null;
+  return legacySession ? { ...legacySession, tokenSource: "bearer" } : null;
+}
+
+function requireAdmin(request, response, next) {
+  const session = getAdminSessionFromAccessToken(request);
+  if (!session) {
     return response.status(401).json({ error: "Admin login required." });
   }
 
-  request.adminSession = adminSessions.get(token);
+  request.adminSession = session;
   next();
 }
 
@@ -263,10 +431,8 @@ function requireOwnerAdmin(request, response, next) {
 }
 
 function requireUser(request, response, next) {
-  const token = getBearerToken(request);
-  const session = userSessions.get(token);
-
-  if (!token || !session?.email) {
+  const session = getUserSessionFromAccessToken(request);
+  if (!session?.email) {
     return response.status(401).json({ error: "User login required." });
   }
 
@@ -275,13 +441,11 @@ function requireUser(request, response, next) {
 }
 
 function getOptionalUserSession(request) {
-  const token = getBearerToken(request);
-  return token ? userSessions.get(token) || null : null;
+  return getUserSessionFromAccessToken(request);
 }
 
 function getOptionalAdminSession(request) {
-  const token = getBearerToken(request);
-  return token ? adminSessions.get(token) || null : null;
+  return getAdminSessionFromAccessToken(request);
 }
 
 function asyncHandler(handler) {
@@ -290,18 +454,178 @@ function asyncHandler(handler) {
   };
 }
 
-function createPasswordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
+function cleanupExpiringEntries(store, now = Date.now()) {
+  for (const [key, value] of store.entries()) {
+    if (!value || Number(value.expiresAt || 0) <= now) {
+      store.delete(key);
+    }
+  }
+}
+
+function parseCookies(request) {
+  return parseCookieHeader(String(request.headers.cookie || ""));
+}
+
+function shouldUseSecureCookies(request) {
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  return process.env.NODE_ENV === "production" || request.secure || forwardedProto === "https";
+}
+
+function buildAuthCookie(name, value, request, maxAgeMs) {
+  return serializeCookie(name, value, {
+    httpOnly: true,
+    secure: shouldUseSecureCookies(request),
+    sameSite: "strict",
+    path: AUTH_COOKIE_PATH,
+    maxAge: Math.max(0, Math.floor(maxAgeMs / 1000)),
+  });
+}
+
+function clearAuthCookie(name, request) {
+  return serializeCookie(name, "", {
+    httpOnly: true,
+    secure: shouldUseSecureCookies(request),
+    sameSite: "strict",
+    path: AUTH_COOKIE_PATH,
+    maxAge: 0,
+    expires: new Date(0),
+  });
+}
+
+function appendSetCookie(response, cookies) {
+  const existing = response.getHeader("Set-Cookie");
+  const current = Array.isArray(existing) ? existing : existing ? [existing] : [];
+  response.setHeader("Set-Cookie", [...current, ...cookies]);
+}
+
+function createAccessToken(scope, subject, claims = {}) {
+  const expiresAt = Date.now() + ACCESS_TOKEN_TTL_MS;
+  const jti = crypto.randomBytes(16).toString("hex");
+  const token = jwt.sign(
+    {
+      scope,
+      ...claims,
+    },
+    authJwtSecret,
+    {
+      algorithm: "HS256",
+      audience: AUTH_AUDIENCE,
+      expiresIn: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
+      issuer: AUTH_ISSUER,
+      jwtid: jti,
+      subject,
+    },
+  );
+  return { token, expiresAt, jti };
+}
+
+function decodeAccessToken(token) {
+  try {
+    return jwt.verify(token, authJwtSecret, {
+      algorithms: ["HS256"],
+      audience: AUTH_AUDIENCE,
+      issuer: AUTH_ISSUER,
+    });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function blacklistAccessToken(token) {
+  const decoded = decodeAccessToken(token);
+  if (!decoded?.jti || !decoded?.exp) {
+    return;
+  }
+  accessTokenBlacklist.set(decoded.jti, {
+    expiresAt: Number(decoded.exp) * 1000,
+  });
+}
+
+function issueRefreshToken(store, scope, subject, session = {}) {
+  cleanupExpiringEntries(store);
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = Date.now() + REFRESH_TOKEN_TTL_MS;
+  store.set(token, {
+    ...session,
+    expiresAt,
+    issuedAt: new Date().toISOString(),
+    scope,
+    subject,
+  });
+  return { token, expiresAt };
+}
+
+function consumeRefreshToken(store, token, expectedScope) {
+  cleanupExpiringEntries(store);
+  const session = store.get(token);
+  if (!session || session.scope !== expectedScope || Number(session.expiresAt || 0) <= Date.now()) {
+    if (session) {
+      store.delete(token);
+    }
+    return null;
+  }
+  store.delete(token);
+  return session;
+}
+
+function setUserAuthCookies(response, request, accessToken, refreshToken) {
+  appendSetCookie(response, [
+    buildAuthCookie(USER_ACCESS_COOKIE, accessToken.token, request, ACCESS_TOKEN_TTL_MS),
+    buildAuthCookie(USER_REFRESH_COOKIE, refreshToken.token, request, REFRESH_TOKEN_TTL_MS),
+  ]);
+}
+
+function clearUserAuthCookies(response, request) {
+  appendSetCookie(response, [
+    clearAuthCookie(USER_ACCESS_COOKIE, request),
+    clearAuthCookie(USER_REFRESH_COOKIE, request),
+  ]);
+}
+
+function setAdminAuthCookies(response, request, accessToken, refreshToken) {
+  appendSetCookie(response, [
+    buildAuthCookie(ADMIN_ACCESS_COOKIE, accessToken.token, request, ACCESS_TOKEN_TTL_MS),
+    buildAuthCookie(ADMIN_REFRESH_COOKIE, refreshToken.token, request, REFRESH_TOKEN_TTL_MS),
+  ]);
+}
+
+function clearAdminAuthCookies(response, request) {
+  appendSetCookie(response, [
+    clearAuthCookie(ADMIN_ACCESS_COOKIE, request),
+    clearAuthCookie(ADMIN_REFRESH_COOKIE, request),
+  ]);
+}
+
+function isBcryptHash(storedHash) {
+  return /^\$2[aby]\$\d{2}\$/.test(String(storedHash || ""));
+}
+
+function createPasswordHash(password) {
+  return bcrypt.hashSync(String(password || ""), 12);
 }
 
 function verifyPassword(password, storedHash) {
-  const [salt, hash] = String(storedHash || "").split(":");
+  const normalizedStoredHash = String(storedHash || "");
+  if (!normalizedStoredHash) {
+    return { ok: false, needsUpgrade: false };
+  }
+
+  if (isBcryptHash(normalizedStoredHash)) {
+    return {
+      ok: bcrypt.compareSync(String(password || ""), normalizedStoredHash),
+      needsUpgrade: false,
+    };
+  }
+
+  const [salt, hash] = normalizedStoredHash.split(":");
   if (!salt || !hash) {
-    return false;
+    return { ok: false, needsUpgrade: false };
   }
   const comparison = crypto.scryptSync(password, salt, 64).toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(comparison, "hex"));
+  return {
+    ok: crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(comparison, "hex")),
+    needsUpgrade: true,
+  };
 }
 
 function isCardPaymentMethod(method) {
@@ -1285,42 +1609,88 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
   response.json({ promo });
 }));
 
+app.post("/api/auth/refresh", asyncHandler(async (request, response) => {
+  const refreshToken = getRefreshTokenFromRequest(request, USER_REFRESH_COOKIE);
+  if (!refreshToken) {
+    clearUserAuthCookies(response, request);
+    return response.status(401).json({ error: "Your sign-in session has expired. Please sign in again." });
+  }
+
+  const refreshSession = consumeRefreshToken(userRefreshSessions, refreshToken, "user");
+  if (!refreshSession?.email) {
+    clearUserAuthCookies(response, request);
+    return response.status(401).json({ error: "Your sign-in session has expired. Please sign in again." });
+  }
+
+  const user = await storage.getUserByEmail(refreshSession.email);
+  if (!user) {
+    clearUserAuthCookies(response, request);
+    return response.status(401).json({ error: "Your sign-in session has expired. Please sign in again." });
+  }
+
+  issueUserAuth(response, request, {
+    email: user.email,
+    createdAt: new Date().toISOString(),
+  });
+  response.json({ user: sanitizeUser(user) });
+}));
+
 app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   const { fullName, email, password, phone, address, birthday, referralCode } = request.body || {};
   const normalizedEmail = normalizeEmail(email);
-  const normalizedAddress = String(address || "").trim();
+  const normalizedFullName = validateFullNameInput(fullName);
+  const normalizedAddress = validateAddressInput(address);
   const normalizedBirthday = normalizeBirthday(birthday);
+  const normalizedPhone = validatePhoneInput(phone);
   const now = getLagosDateParts();
+  const attemptLimitError = getAttemptLimitError("userSignup", request, normalizedEmail || "anon");
+  if (attemptLimitError) {
+    return response.status(429).json({ error: attemptLimitError });
+  }
 
-  if (!fullName || !normalizedEmail || !password) {
-    return response.status(400).json({ error: "Full name, email, and password are required." });
+  if (!normalizedFullName || !normalizedEmail || !password || !isValidEmailAddress(normalizedEmail)) {
+    registerFailedAttempt("userSignup", request, normalizedEmail || "anon");
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
   }
 
   if (!normalizedBirthday) {
-    return response.status(400).json({ error: "A valid birthday is required to create your PEM account." });
+    registerFailedAttempt("userSignup", request, normalizedEmail);
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
   }
 
-  if (String(password).length < 6) {
-    return response.status(400).json({ error: "Password must be at least 6 characters long." });
+  if (!validatePasswordInput(password, 8)) {
+    registerFailedAttempt("userSignup", request, normalizedEmail);
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
+  }
+
+  if (String(phone || "").trim() && !normalizedPhone) {
+    registerFailedAttempt("userSignup", request, normalizedEmail);
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
+  }
+
+  if (String(address || "").trim() && !normalizedAddress) {
+    registerFailedAttempt("userSignup", request, normalizedEmail);
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
   }
 
   const existingUser = await storage.getUserByEmail(normalizedEmail);
   if (existingUser) {
-    return response.status(409).json({ error: "An account with that email already exists." });
+    registerFailedAttempt("userSignup", request, normalizedEmail);
+    return response.status(400).json({ error: "PEM could not create the account with those details." });
   }
   const normalizedReferralCode = String(referralCode || "").trim().toLowerCase();
   const referrer = normalizedReferralCode ? await storage.getUserByReferralCode(normalizedReferralCode) : null;
   const welcomeNotifications = [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")];
   const birthdayIsToday = isBirthdayToday(normalizedBirthday, now);
   if (birthdayIsToday) {
-    welcomeNotifications.unshift(createBirthdayNotification(fullName));
+    welcomeNotifications.unshift(createBirthdayNotification(normalizedFullName));
   }
 
   const user = await storage.createUser({
     email: normalizedEmail,
     passwordHash: createPasswordHash(password),
-    fullName: String(fullName).trim(),
-    phone: String(phone || "").trim(),
+    fullName: normalizedFullName,
+    phone: normalizedPhone,
     birthday: normalizedBirthday,
     favoriteItemIds: [],
     savedAddresses: normalizedAddress ? [normalizedAddress] : [],
@@ -1360,7 +1730,11 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   }
 
   const token = createAdminToken();
-  userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
+  const session = { email: activeUser.email, createdAt: new Date().toISOString() };
+  userSessions.set(token, session);
+  issueUserAuth(response, request, session);
+  clearAttemptBucket("userSignup", request, normalizedEmail);
+  clearUserCredentialFailures(normalizedEmail);
 
   response.status(201).json({
     token,
@@ -1376,11 +1750,27 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   if (attemptLimitError) {
     return response.status(429).json({ error: attemptLimitError });
   }
-  const user = await storage.getUserByEmail(normalizedEmail);
 
-  if (!user || !verifyPassword(String(password || ""), user.passwordHash)) {
+  const lockoutState = getUserLockoutState(normalizedEmail);
+  if (lockoutState?.lockedUntil && lockoutState.lockedUntil > Date.now()) {
+    return response.status(423).json({ error: "Too many unsuccessful sign-ins. Start password recovery to unlock this account." });
+  }
+
+  const user = await storage.getUserByEmail(normalizedEmail);
+  const passwordCheck = verifyPassword(String(password || ""), user?.passwordHash);
+
+  if (!normalizedEmail || !isValidEmailAddress(normalizedEmail) || !validatePasswordInput(password, 1) || !user || !passwordCheck.ok) {
     const blockedError = registerFailedAttempt("userLogin", request, normalizedEmail);
-    return response.status(blockedError ? 429 : 401).json({ error: blockedError || "Incorrect email or password." });
+    const lockoutError = registerUserCredentialFailure(normalizedEmail);
+    return response.status(blockedError ? 429 : lockoutError ? 423 : 401).json({
+      error: blockedError || lockoutError || "Incorrect email or password.",
+    });
+  }
+
+  if (passwordCheck.needsUpgrade) {
+    user.passwordHash = createPasswordHash(password);
+    user.updatedAt = new Date().toISOString();
+    await storage.updateUser(user.email, user);
   }
 
   const greetedUser = withBirthdayGreeting(user);
@@ -1389,8 +1779,11 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   const activeUser = recoveryResult.user || birthdayAwareUser;
 
   const token = createAdminToken();
-  userSessions.set(token, { email: activeUser.email, createdAt: new Date().toISOString() });
+  const session = { email: activeUser.email, createdAt: new Date().toISOString() };
+  userSessions.set(token, session);
+  issueUserAuth(response, request, session);
   clearAttemptBucket("userLogin", request, normalizedEmail);
+  clearUserCredentialFailures(normalizedEmail);
 
   response.json({
     token,
@@ -1402,8 +1795,8 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
 app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => {
   const { email, phone } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  const normalizedPhone = String(phone || "").replace(/\D/g, "");
-  if (!normalizedEmail || !normalizedPhone) {
+  const normalizedPhone = normalizePhoneDigits(phone);
+  if (!normalizedEmail || !normalizedPhone || !isValidEmailAddress(normalizedEmail)) {
     return response.status(400).json({ error: "Email and phone number are required." });
   }
 
@@ -1453,7 +1846,7 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Email, recovery reference, approval code, and new password are required." });
   }
 
-  if (String(newPassword).length < 8) {
+  if (!validatePasswordInput(newPassword, 8)) {
     return response.status(400).json({ error: "New password must be at least 8 characters long." });
   }
 
@@ -1480,7 +1873,7 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
     !recoveryRequest.approvalCodeHash ||
     !recoveryRequest.approvalCodeExpiresAt ||
     new Date(recoveryRequest.approvalCodeExpiresAt).getTime() <= Date.now() ||
-    !verifyPassword(normalizedApprovalCode, recoveryRequest.approvalCodeHash)
+    !verifyPassword(normalizedApprovalCode, recoveryRequest.approvalCodeHash).ok
   ) {
     const blockedError = registerFailedAttempt("passwordReset", request, normalizedEmail);
     return response.status(blockedError ? 429 : 401).json({ error: blockedError || invalidResetError });
@@ -1505,6 +1898,7 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
     updatedAt: new Date().toISOString(),
   });
   clearAttemptBucket("passwordReset", request, normalizedEmail);
+  clearUserCredentialFailures(normalizedEmail);
 
   response.json({
     message: "Password updated successfully. You can now log in.",
@@ -1513,7 +1907,18 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
 
 app.post("/api/auth/logout", requireUser, (request, response) => {
   const token = getBearerToken(request);
-  userSessions.delete(token);
+  const accessToken = getAccessTokenFromRequest(request, USER_ACCESS_COOKIE);
+  const refreshToken = getRefreshTokenFromRequest(request, USER_REFRESH_COOKIE);
+  if (token) {
+    userSessions.delete(token);
+  }
+  if (accessToken) {
+    blacklistAccessToken(accessToken);
+  }
+  if (refreshToken) {
+    userRefreshSessions.delete(refreshToken);
+  }
+  clearUserAuthCookies(response, request);
   response.json({ ok: true });
 });
 
@@ -2069,6 +2474,30 @@ app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   response.json({ deliveryZones });
 }));
 
+app.post("/api/admin/refresh", asyncHandler(async (request, response) => {
+  const refreshToken = getRefreshTokenFromRequest(request, ADMIN_REFRESH_COOKIE);
+  if (!refreshToken) {
+    clearAdminAuthCookies(response, request);
+    return response.status(401).json({ error: "Your admin session has expired. Please sign in again." });
+  }
+
+  const refreshSession = consumeRefreshToken(adminRefreshSessions, refreshToken, "admin");
+  if (!refreshSession?.username) {
+    clearAdminAuthCookies(response, request);
+    return response.status(401).json({ error: "Your admin session has expired. Please sign in again." });
+  }
+
+  const session = {
+    createdAt: new Date().toISOString(),
+    username: refreshSession.username,
+    label: refreshSession.label || "Owner",
+    branchId: refreshSession.branchId || "",
+    isOwner: Boolean(refreshSession.isOwner),
+  };
+  issueAdminAuth(response, request, session);
+  response.json({ admin: session });
+}));
+
 app.post("/api/admin/login", asyncHandler(async (request, response) => {
   const { username, password } = request.body || {};
   const normalizedUsername = String(username || "").trim().toLowerCase();
@@ -2104,6 +2533,7 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
   };
 
   adminSessions.set(token, session);
+  issueAdminAuth(response, request, session);
   clearAttemptBucket("adminLogin", request, normalizedUsername);
 
   return response.json({
@@ -2114,7 +2544,18 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
 
 app.post("/api/admin/logout", requireAdmin, (request, response) => {
   const token = getBearerToken(request);
-  adminSessions.delete(token);
+  const accessToken = getAccessTokenFromRequest(request, ADMIN_ACCESS_COOKIE);
+  const refreshToken = getRefreshTokenFromRequest(request, ADMIN_REFRESH_COOKIE);
+  if (token) {
+    adminSessions.delete(token);
+  }
+  if (accessToken) {
+    blacklistAccessToken(accessToken);
+  }
+  if (refreshToken) {
+    adminRefreshSessions.delete(refreshToken);
+  }
+  clearAdminAuthCookies(response, request);
   response.json({ ok: true });
 });
 
