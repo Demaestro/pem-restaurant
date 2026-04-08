@@ -810,12 +810,51 @@ const CACHE_TTL = {
 };
 const ORDER_ITEM_LIMIT = 10;
 const ORDER_EDIT_WINDOW_MS = 5 * 60 * 1000;
+const API_READY_WINDOW_MS = 2 * 60 * 1000;
+const API_AUTH_TIMEOUT_MS = 30000;
+const API_WARMUP_TIMEOUT_MS = 35000;
 const GUEST_PROFILE_KEY = "pem-guest-profile";
 const MANUAL_BRANCH_SELECTION_KEY = "pem-manual-branch-selection";
 const AUTO_BRANCH_DETECTION_KEY = "pem-auto-branch-detected-v1";
+let lastSuccessfulApiContactAt = 0;
 
 function apiUrl(pathname) {
   return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
+}
+
+function markApiAsReachable() {
+  lastSuccessfulApiContactAt = Date.now();
+}
+
+function shouldWarmApiConnection() {
+  return !lastSuccessfulApiContactAt || Date.now() - lastSuccessfulApiContactAt > API_READY_WINDOW_MS;
+}
+
+async function warmApiConnection(timeoutMs = API_WARMUP_TIMEOUT_MS) {
+  if (typeof window === "undefined" || !shouldWarmApiConnection()) {
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(apiUrl("/api/health"), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return false;
+    }
+    markApiAsReachable();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINITY) {
@@ -1792,25 +1831,38 @@ function buildClientDietaryFallback(needs, sourceItems = menuItems) {
   };
 }
 
-async function postJson(url, payload, headers = {}) {
+async function postJson(url, payload, headers = {}, options = {}) {
   return requestJson(url, {
     method: "POST",
     payload,
     headers,
+    ...options,
   });
 }
 
-async function requestJson(url, { method = "GET", payload, headers = {}, retryOnTimeout = method === "GET", attempt = 1 } = {}) {
+async function requestJson(
+  url,
+  {
+    method = "GET",
+    payload,
+    headers = {},
+    retryOnTimeout = method === "GET",
+    retryOnNetworkError = false,
+    timeoutMs = 15000,
+    attempt = 1,
+  } = {},
+) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     throw new Error("You're offline right now. Reconnect and try again.");
   }
 
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(apiUrl(url), {
       method,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...headers,
@@ -1825,27 +1877,52 @@ async function requestJson(url, { method = "GET", payload, headers = {}, retryOn
       throw new Error(data.error || "Something went wrong. Please try again.");
     }
 
+    markApiAsReachable();
     return data;
   } catch (error) {
     if (error.name === "AbortError") {
       if (retryOnTimeout && attempt < 2) {
+        await warmApiConnection(Math.max(timeoutMs, API_WARMUP_TIMEOUT_MS));
         return requestJson(url, {
           method,
           payload,
           headers,
           retryOnTimeout,
+          retryOnNetworkError,
+          timeoutMs,
           attempt: attempt + 1,
         });
       }
       throw new Error("PEM is taking too long to respond. Please try again.");
     }
     if (error instanceof TypeError) {
+      if (retryOnNetworkError && attempt < 2) {
+        await warmApiConnection(Math.max(timeoutMs, API_WARMUP_TIMEOUT_MS));
+        return requestJson(url, {
+          method,
+          payload,
+          headers,
+          retryOnTimeout,
+          retryOnNetworkError,
+          timeoutMs,
+          attempt: attempt + 1,
+        });
+      }
       throw new Error("PEM could not reach the server. Check your internet or refresh and try again.");
     }
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+async function postAuthJson(url, payload, headers = {}) {
+  await warmApiConnection(API_WARMUP_TIMEOUT_MS);
+  return postJson(url, payload, headers, {
+    timeoutMs: API_AUTH_TIMEOUT_MS,
+    retryOnTimeout: true,
+    retryOnNetworkError: true,
+  });
 }
 
 function RatingStars({ rating }) {
@@ -4394,7 +4471,7 @@ export default function App() {
 
     try {
       setAdminLoginState({ loading: true, error: "" });
-      const result = await postJson("/api/admin/login", {
+      const result = await postAuthJson("/api/admin/login", {
         username: adminUsername,
         password: adminPassword,
       });
@@ -5170,7 +5247,7 @@ export default function App() {
     try {
       setAccountState({ loading: true, error: "", success: "" });
       setSignupFieldErrors({});
-      const data = await postJson("/api/auth/signup", {
+      const data = await postAuthJson("/api/auth/signup", {
         ...signupForm,
         fullName: normalizedFullName,
         email: normalizedEmail,
@@ -5211,7 +5288,7 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/login", loginForm);
+      const data = await postAuthJson("/api/auth/login", loginForm);
       setAccountToken(data.token || "");
       setLoginForm(initialLoginForm);
       setAccountState({
@@ -5233,7 +5310,7 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/forgot-password", {
+      const data = await postAuthJson("/api/auth/forgot-password", {
         email: forgotPasswordForm.email,
         phone: sanitizePhoneInput(forgotPasswordForm.phone),
       });
@@ -5275,7 +5352,7 @@ export default function App() {
 
     try {
       setAccountState({ loading: true, error: "", success: "" });
-      const data = await postJson("/api/auth/reset-password", {
+      const data = await postAuthJson("/api/auth/reset-password", {
         email: forgotPasswordForm.email,
         requestReference: forgotPasswordForm.requestReference,
         approvalCode: forgotPasswordForm.approvalCode,

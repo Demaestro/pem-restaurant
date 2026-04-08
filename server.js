@@ -600,11 +600,11 @@ function isBcryptHash(storedHash) {
   return /^\$2[aby]\$\d{2}\$/.test(String(storedHash || ""));
 }
 
-function createPasswordHash(password) {
-  return bcrypt.hashSync(String(password || ""), 12);
+async function createPasswordHash(password) {
+  return bcrypt.hash(String(password || ""), 12);
 }
 
-function verifyPassword(password, storedHash) {
+async function verifyPassword(password, storedHash) {
   const normalizedStoredHash = String(storedHash || "");
   if (!normalizedStoredHash) {
     return { ok: false, needsUpgrade: false };
@@ -612,7 +612,7 @@ function verifyPassword(password, storedHash) {
 
   if (isBcryptHash(normalizedStoredHash)) {
     return {
-      ok: bcrypt.compareSync(String(password || ""), normalizedStoredHash),
+      ok: await bcrypt.compare(String(password || ""), normalizedStoredHash),
       needsUpgrade: false,
     };
   }
@@ -1688,7 +1688,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
 
   const user = await storage.createUser({
     email: normalizedEmail,
-    passwordHash: createPasswordHash(password),
+    passwordHash: await createPasswordHash(password),
     fullName: normalizedFullName,
     phone: normalizedPhone,
     birthday: normalizedBirthday,
@@ -1705,8 +1705,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
     birthdayDiscountLastUsedYear: "",
     createdAt: new Date().toISOString(),
   });
-  const recoveryResult = await recoverGuestOrdersForUser(user);
-  const activeUser = recoveryResult.user || user;
+  const activeUser = user;
 
   if (referrer && referrer.email !== normalizedEmail) {
     const rewardPoints = 10;
@@ -1739,7 +1738,7 @@ app.post("/api/auth/signup", asyncHandler(async (request, response) => {
   response.status(201).json({
     token,
     user: sanitizeUser(activeUser),
-    recoveredOrderCount: recoveryResult.recoveredOrders.length,
+    recoveredOrderCount: 0,
   });
 }));
 
@@ -1757,7 +1756,7 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   }
 
   const user = await storage.getUserByEmail(normalizedEmail);
-  const passwordCheck = verifyPassword(String(password || ""), user?.passwordHash);
+  const passwordCheck = await verifyPassword(String(password || ""), user?.passwordHash);
 
   if (!normalizedEmail || !isValidEmailAddress(normalizedEmail) || !validatePasswordInput(password, 1) || !user || !passwordCheck.ok) {
     const blockedError = registerFailedAttempt("userLogin", request, normalizedEmail);
@@ -1768,15 +1767,14 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   }
 
   if (passwordCheck.needsUpgrade) {
-    user.passwordHash = createPasswordHash(password);
+    user.passwordHash = await createPasswordHash(password);
     user.updatedAt = new Date().toISOString();
     await storage.updateUser(user.email, user);
   }
 
   const greetedUser = withBirthdayGreeting(user);
   const birthdayAwareUser = greetedUser === user ? user : await storage.updateUser(user.email, greetedUser);
-  const recoveryResult = await recoverGuestOrdersForUser(birthdayAwareUser);
-  const activeUser = recoveryResult.user || birthdayAwareUser;
+  const activeUser = birthdayAwareUser;
 
   const token = createAdminToken();
   const session = { email: activeUser.email, createdAt: new Date().toISOString() };
@@ -1788,7 +1786,7 @@ app.post("/api/auth/login", asyncHandler(async (request, response) => {
   response.json({
     token,
     user: sanitizeUser(activeUser),
-    recoveredOrderCount: recoveryResult.recoveredOrders.length,
+    recoveredOrderCount: 0,
   });
 }));
 
@@ -1814,26 +1812,37 @@ app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => 
     return response.json({ message: genericMessage });
   }
 
-  const recoveryRequest = await storage.createPasswordRecoveryRequest({
-    reference: makeReference("PEM-REC"),
-    userEmail: user.email,
-    fullName: user.fullName,
-    phoneLast4: normalizedPhone.slice(-4),
-    status: "pending_review",
-    approvalCodeHash: "",
-    approvalCodeExpiresAt: null,
-    reviewedBy: "",
-    reviewedAt: null,
-    completedAt: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: null,
-  });
-  clearAttemptBucket("passwordRecoveryRequest", request, normalizedEmail);
+  try {
+    const recoveryRequest = await storage.createPasswordRecoveryRequest({
+      reference: makeReference("PEM-REC"),
+      userEmail: user.email,
+      fullName: user.fullName,
+      phoneLast4: normalizedPhone.slice(-4),
+      status: "pending_review",
+      approvalCodeHash: "",
+      approvalCodeExpiresAt: null,
+      reviewedBy: "",
+      reviewedAt: null,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+    });
+    clearAttemptBucket("passwordRecoveryRequest", request, normalizedEmail);
 
-  response.json({
-    message: "Recovery request received. PEM will review it and share the next step.",
-    reference: recoveryRequest.reference,
-  });
+    response.json({
+      message: "Recovery request received. PEM will review it and share the next step.",
+      reference: recoveryRequest.reference,
+    });
+  } catch (error) {
+    pushRuntimeIncident({
+      source: "auth-recovery",
+      message: `Password recovery request storage failed: ${error?.message || "Unknown error"}`,
+      path: "/api/auth/forgot-password",
+      build: process.env.RENDER_SERVICE_NAME || "server",
+      userAgent: String(request.headers["user-agent"] || "").slice(0, 180),
+    });
+    response.json({ message: genericMessage });
+  }
 }));
 
 app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
@@ -1863,6 +1872,9 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
     storage.getUserByEmail(normalizedEmail),
     storage.getPasswordRecoveryRequestByReference(normalizedReference),
   ]);
+  const approvalCheck = recoveryRequest?.approvalCodeHash
+    ? await verifyPassword(normalizedApprovalCode, recoveryRequest.approvalCodeHash)
+    : { ok: false };
 
   const invalidResetError = "The recovery details were invalid or have expired.";
   if (
@@ -1873,7 +1885,7 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
     !recoveryRequest.approvalCodeHash ||
     !recoveryRequest.approvalCodeExpiresAt ||
     new Date(recoveryRequest.approvalCodeExpiresAt).getTime() <= Date.now() ||
-    !verifyPassword(normalizedApprovalCode, recoveryRequest.approvalCodeHash).ok
+    !approvalCheck.ok
   ) {
     const blockedError = registerFailedAttempt("passwordReset", request, normalizedEmail);
     return response.status(blockedError ? 429 : 401).json({ error: blockedError || invalidResetError });
@@ -1881,7 +1893,7 @@ app.post("/api/auth/reset-password", asyncHandler(async (request, response) => {
 
   await storage.updateUser(user.email, {
     ...user,
-    passwordHash: createPasswordHash(newPassword),
+    passwordHash: await createPasswordHash(newPassword),
     notifications: [
       createNotification("Your PEM account password was updated.", "security"),
       ...(user.notifications || []),
@@ -2626,7 +2638,7 @@ app.post("/api/admin/password-recovery/:reference/approve", requireAdmin, requir
   const updatedRequest = await storage.updatePasswordRecoveryRequest(reference, {
     ...recoveryRequest,
     status: "approved",
-    approvalCodeHash: createPasswordHash(approvalCode),
+    approvalCodeHash: await createPasswordHash(approvalCode),
     approvalCodeExpiresAt: new Date(Date.now() + PASSWORD_RECOVERY_CODE_TTL_MS).toISOString(),
     reviewedBy: request.adminSession.username,
     reviewedAt: new Date().toISOString(),
