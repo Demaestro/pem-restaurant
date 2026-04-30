@@ -126,6 +126,31 @@ body {
 /* Lazy image presentation */
 .menu-card__image { background-color: rgba(0,0,0,0.04); }
 
+/* Blur-up placeholder for menu and meal card images: fade the image in
+   once the browser has decoded enough of it so users see a soft blur
+   instead of a flash-of-broken-image. */
+.meal-card__media img,
+.menu-card__image,
+.menu-card img {
+  background: linear-gradient(120deg, rgba(141,29,24,0.06), rgba(141,29,24,0.02));
+  filter: blur(8px);
+  transition: filter 320ms ease-out, opacity 320ms ease-out;
+  opacity: 0.6;
+}
+.meal-card__media img[loading="lazy"]:not([data-loaded="false"]),
+.menu-card__image[loading="lazy"]:not([data-loaded="false"]),
+.menu-card img[loading="lazy"]:not([data-loaded="false"]) {
+  filter: blur(0);
+  opacity: 1;
+}
+/* Fallback for browsers that paint the image before our hook fires */
+img[loading="lazy"].is-decoded { filter: blur(0); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .meal-card__media img,
+  .menu-card__image,
+  .menu-card img { transition: none; filter: none; opacity: 1; }
+}
+
 :root {
   color-scheme: light;
   --bg: #f6efe8;

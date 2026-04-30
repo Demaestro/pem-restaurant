@@ -1832,7 +1832,7 @@ app.post("/api/admin/login", authRateLimiter, asyncHandler(async (request, respo
   });
 }));
 
-app.post("/api/admin/2fa/setup", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+app.post("/api/admin/2fa/setup", authRateLimiter, requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const username = request.adminSession.username;
   const secret = createTotpSecret();
   const recoveryCodes = generateRecoveryCodes();
@@ -1852,7 +1852,7 @@ app.post("/api/admin/2fa/setup", requireAdmin, requireOwnerAdmin, asyncHandler(a
   response.json({ secret, otpAuthQr, recoveryCodes });
 }));
 
-app.post("/api/admin/2fa/enable", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+app.post("/api/admin/2fa/enable", authRateLimiter, requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const username = request.adminSession.username;
   const credential = await storage.getAdminCredential(username);
   if (!credential?.totpSecret) {
@@ -1870,7 +1870,7 @@ app.post("/api/admin/2fa/enable", requireAdmin, requireOwnerAdmin, asyncHandler(
   response.json({ ok: true });
 }));
 
-app.post("/api/admin/2fa/disable", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+app.post("/api/admin/2fa/disable", authRateLimiter, requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const username = request.adminSession.username;
   const credential = await storage.getAdminCredential(username);
   if (credential?.totpEnabled && !verifyTotpCode(credential.totpSecret, request.body?.totpCode)) {

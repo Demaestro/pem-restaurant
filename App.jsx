@@ -127,6 +127,17 @@ export default function App() {
   const [priceRange, setPriceRange] = useState("all");
   const [showCart, setShowCart] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
+  const toast = useToast();
+  useEffect(() => {
+    if (!orderPlaced) return;
+    const lower = orderPlaced.toLowerCase();
+    const variant = /(could not|cannot|failed|error|invalid|too long|denied|sold out)/.test(lower)
+      ? "error"
+      : /(success|submitted|confirmed|thanks|verified|copied|installed|updated|signed|welcome|placed)/.test(lower)
+        ? "success"
+        : "info";
+    toast.push(orderPlaced, { variant });
+  }, [orderPlaced, toast]);
   const [lastAddedItemId, setLastAddedItemId] = useState(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
