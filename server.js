@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import rateLimit from "express-rate-limit";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -7,6 +9,17 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import { createStorage } from "./lib/storage.js";
+import { createMailer } from "./lib/mailer.js";
+import {
+  generateToken,
+  hashToken,
+  createPasswordHash,
+  verifyPasswordHash,
+  isHashedPassword,
+  stripUnsafeText,
+  isValidEmail,
+  verifyPaystackSignature,
+} from "./lib/security.js";
 
 dotenv.config();
 
@@ -17,6 +30,7 @@ const DB_PATH = path.join(DATA_DIR, "submissions.json");
 const ENV_PATH = path.join(__dirname, ".env");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 let adminPassword = process.env.ADMIN_PASSWORD || "change-admin-password";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
@@ -26,9 +40,18 @@ const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
 const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS || "").split(",")]
   .map((value) => String(value || "").trim())
   .filter(Boolean);
-const adminSessions = new Map();
-const userSessions = new Map();
+const sessionTtlMs = Math.max(1, Number(process.env.SESSION_TTL_HOURS) || 168) * 60 * 60 * 1000;
+const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+const isProduction = process.env.NODE_ENV === "production";
+const cookieSecureMode = String(process.env.COOKIE_SECURE || "auto").toLowerCase();
+const cookieSecure = cookieSecureMode === "true" || (cookieSecureMode === "auto" && isProduction);
+const USER_COOKIE = "pem_user_session";
+const ADMIN_COOKIE = "pem_admin_session";
+
+const orderEventSubscribers = new Map();
+
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const mailer = createMailer();
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
@@ -103,6 +126,7 @@ function isLocalDevOrigin(origin) {
 
 app.use(
   cors({
+    credentials: true,
     origin(origin, callback) {
       if (!origin || allowedOrigins.includes(origin) || isLocalDevOrigin(origin)) {
         callback(null, true);
@@ -113,35 +137,131 @@ app.use(
     },
   }),
 );
-app.use(express.json());
+
+app.post(
+  "/api/payments/paystack/webhook",
+  express.raw({ type: "application/json", limit: "100kb" }),
+  asyncHandler(handlePaystackWebhook),
+);
+
+app.use(express.json({ limit: "100kb" }));
+app.use(cookieParser());
+
+function buildRateLimiter({ windowMs, max, message }) {
+  return rateLimit({
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: message },
+    skip: (request) => isLocalDevOrigin(request.headers.origin || "") && process.env.NODE_ENV !== "production",
+  });
+}
+
+const authRateLimiter = buildRateLimiter({
+  windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+  message: "Too many auth attempts from this device. Please wait a few minutes and try again.",
+});
+
+const orderRateLimiter = buildRateLimiter({
+  windowMs: Number(process.env.ORDER_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: Number(process.env.ORDER_RATE_LIMIT_MAX) || 30,
+  message: "Too many order attempts from this device. Please slow down and try again.",
+});
+
+const paymentRateLimiter = buildRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: "Too many payment attempts. Please wait a few minutes.",
+});
+
+const aiRateLimiter = buildRateLimiter({
+  windowMs: 60 * 1000,
+  max: 12,
+  message: "Slow down and try the dietary assistant again in a moment.",
+});
+
+const cookieBaseOptions = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: cookieSecure,
+  ...(cookieDomain ? { domain: cookieDomain } : {}),
+  path: "/",
+};
+
+function setSessionCookie(response, name, token, expiresAt) {
+  response.cookie(name, token, {
+    ...cookieBaseOptions,
+    expires: new Date(expiresAt),
+  });
+}
+
+function clearSessionCookie(response, name) {
+  response.clearCookie(name, cookieBaseOptions);
+}
 
 function makeReference(prefix) {
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}-${Date.now()}-${random}`;
+  const random = generateToken(6);
+  return `${prefix}-${Date.now().toString(36)}-${random}`;
 }
 
-function createAdminToken() {
-  return crypto.randomBytes(24).toString("hex");
+function createSessionToken() {
+  return generateToken(32);
 }
 
-function getBearerToken(request) {
-  const authHeader = request.headers.authorization || "";
-  if (!authHeader.startsWith("Bearer ")) {
-    return "";
+function getRequestToken(request, cookieName) {
+  if (cookieName && request.cookies && request.cookies[cookieName]) {
+    return String(request.cookies[cookieName]);
   }
+  const authHeader = request.headers.authorization || "";
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+  return "";
+}
 
-  return authHeader.slice(7);
+async function loadSession(request, cookieName, scope) {
+  const token = getRequestToken(request, cookieName);
+  if (!token) return null;
+  const tokenHash = hashToken(token);
+  const session = await storage.getSessionByTokenHash(tokenHash);
+  if (!session || session.scope !== scope) return null;
+  if (new Date(session.expiresAt).getTime() < Date.now()) {
+    await storage.deleteSessionByTokenHash(tokenHash).catch(() => {});
+    return null;
+  }
+  return { token, tokenHash, ...session };
+}
+
+async function persistSession({ scope, email = null, username = null, data = {} }) {
+  const token = createSessionToken();
+  const tokenHash = hashToken(token);
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + sessionTtlMs).toISOString();
+  await storage.createSession({
+    tokenHash,
+    scope,
+    email: email || "",
+    username: username || "",
+    data,
+    createdAt,
+    expiresAt,
+  });
+  return { token, tokenHash, createdAt, expiresAt };
 }
 
 function requireAdmin(request, response, next) {
-  const token = getBearerToken(request);
-
-  if (!token || !adminSessions.has(token)) {
-    return response.status(401).json({ error: "Admin login required." });
-  }
-
-  request.adminSession = adminSessions.get(token);
-  next();
+  Promise.resolve(loadSession(request, ADMIN_COOKIE, "admin"))
+    .then((session) => {
+      if (!session) {
+        return response.status(401).json({ error: "Admin login required." });
+      }
+      request.adminSession = { ...session.data, ...session };
+      request.adminToken = session.token;
+      next();
+    })
+    .catch(next);
 }
 
 function requireOwnerAdmin(request, response, next) {
@@ -152,45 +272,32 @@ function requireOwnerAdmin(request, response, next) {
 }
 
 function requireUser(request, response, next) {
-  const token = getBearerToken(request);
-  const session = userSessions.get(token);
-
-  if (!token || !session?.email) {
-    return response.status(401).json({ error: "User login required." });
-  }
-
-  request.userSession = session;
-  next();
+  Promise.resolve(loadSession(request, USER_COOKIE, "user"))
+    .then((session) => {
+      if (!session?.email) {
+        return response.status(401).json({ error: "User login required." });
+      }
+      request.userSession = { email: session.email, ...session.data };
+      request.userToken = session.token;
+      next();
+    })
+    .catch(next);
 }
 
-function getOptionalUserSession(request) {
-  const token = getBearerToken(request);
-  return token ? userSessions.get(token) || null : null;
+async function getOptionalUserSession(request) {
+  const session = await loadSession(request, USER_COOKIE, "user");
+  return session?.email ? { email: session.email, ...session.data } : null;
 }
 
-function getOptionalAdminSession(request) {
-  const token = getBearerToken(request);
-  return token ? adminSessions.get(token) || null : null;
+async function getOptionalAdminSession(request) {
+  const session = await loadSession(request, ADMIN_COOKIE, "admin");
+  return session ? { ...session.data, ...session } : null;
 }
 
 function asyncHandler(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
   };
-}
-
-function createPasswordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password, storedHash) {
-  const [salt, hash] = String(storedHash || "").split(":");
-  if (!salt || !hash) {
-    return false;
-  }
-  const comparison = crypto.scryptSync(password, salt, 64).toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(comparison, "hex"));
 }
 
 function isCardPaymentMethod(method) {
@@ -211,14 +318,121 @@ function buildLoyaltyTier(points) {
   return "bronze";
 }
 
-function createNotification(message, type = "general") {
-  return {
+function createNotification(message, type = "general", metadata = null) {
+  const notification = {
     id: crypto.randomBytes(8).toString("hex"),
     type,
-    message,
+    message: stripUnsafeText(message, 280),
     createdAt: new Date().toISOString(),
     read: false,
   };
+  if (metadata && typeof metadata === "object") {
+    Object.assign(notification, metadata);
+  }
+  return notification;
+}
+
+async function sendVerificationEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) return;
+  const token = generateToken(24);
+  const tokenHash = hashToken(token);
+  await storage.deleteEmailVerificationsForEmail(normalized, "signup").catch(() => {});
+  await storage.createEmailVerification({
+    tokenHash,
+    email: normalized,
+    purpose: "signup",
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const link = `${frontendUrl.replace(/\/$/, "")}/?verify=${encodeURIComponent(token)}`;
+  return mailer.sendVerificationEmail({ to: normalized, link });
+}
+
+function publishOrderEvent(reference, payload) {
+  const subscribers = orderEventSubscribers.get(reference);
+  if (!subscribers || subscribers.size === 0) return;
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const subscriber of subscribers) {
+    try {
+      subscriber.write(data);
+    } catch {
+      subscribers.delete(subscriber);
+    }
+  }
+}
+
+async function handlePaystackWebhook(request, response) {
+  if (!paystackSecretKey) {
+    return response.status(503).json({ error: "Paystack is not configured." });
+  }
+  const signature = request.headers["x-paystack-signature"] || "";
+  const rawBody = request.body instanceof Buffer ? request.body : Buffer.from(JSON.stringify(request.body || {}));
+  if (!verifyPaystackSignature(rawBody, signature, paystackSecretKey)) {
+    return response.status(401).json({ error: "Invalid webhook signature." });
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    return response.status(400).json({ error: "Invalid JSON payload." });
+  }
+
+  if (event.event !== "charge.success" || !event.data?.reference) {
+    return response.json({ ok: true, ignored: true });
+  }
+
+  const reference = String(event.data.reference);
+  const order = await storage.getOrderByReference(reference);
+  if (!order) {
+    return response.json({ ok: true, unknownOrder: true });
+  }
+
+  if (order.status === "awaiting_payment") {
+    const updated = await storage.updateOrderPayment(
+      reference,
+      {
+        ...(order.payment || {}),
+        method: "Pay with card",
+        status: "paid",
+        reference: event.data.reference || reference,
+        paidAt: event.data.paid_at || new Date().toISOString(),
+      },
+      "received",
+    );
+
+    publishOrderEvent(reference, { type: "status", status: "received", order: updated });
+
+    const customerEmail = String(updated?.customer?.email || "").trim().toLowerCase();
+    const linkedUser = customerEmail ? await storage.getUserByEmail(customerEmail) : null;
+    if (linkedUser) {
+      const addedPoints = Math.max(1, Math.floor((Number(updated?.pricing?.total) || 0) / 2500));
+      const loyaltyPoints = (Number(linkedUser.loyaltyPoints) || 0) + addedPoints;
+      await storage.updateUser(linkedUser.email, {
+        ...linkedUser,
+        notifications: [
+          createNotification(`Payment was confirmed for order ${reference}. PEM has now confirmed the order.`, "payment"),
+          ...(linkedUser.notifications || []),
+        ].slice(0, 15),
+        loyaltyPoints,
+        loyaltyTier: buildLoyaltyTier(loyaltyPoints),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    if (customerEmail) {
+      mailer.sendOrderConfirmation({
+        to: customerEmail,
+        customerName: updated?.customer?.customerName || "PEM customer",
+        reference,
+        total: updated?.pricing?.total || 0,
+        etaLabel: updated?.customer?.deliveryEta || "",
+      }).catch(() => {});
+    }
+  }
+
+  response.json({ ok: true });
 }
 
 function parsePromoCodes(rawValue) {
@@ -351,18 +565,43 @@ function parseStaffAdmins(rawValue) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [username, password, label = "PEM Staff", branchId = ""] = line.split("|").map((part) => String(part || "").trim());
-      if (!username || !password) {
+      const [username, secret, label = "PEM Staff", branchId = ""] = line
+        .split("|")
+        .map((part) => String(part || "").trim());
+      if (!username || !secret) {
         return null;
       }
+      const isHashed = isHashedPassword(secret);
       return {
         username: username.toLowerCase(),
-        password,
+        passwordHash: isHashed ? secret : "",
+        password: isHashed ? "" : secret,
         label,
         branchId: branchId.toLowerCase(),
       };
     })
     .filter(Boolean);
+}
+
+function hashStaffAdminsText(rawValue) {
+  let mutated = false;
+  const lines = String(rawValue || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|").map((part) => String(part || "").trim());
+      const [username, secret, label = "PEM Staff", branchId = ""] = parts;
+      if (!username || !secret) return null;
+      if (isHashedPassword(secret)) {
+        return [username.toLowerCase(), secret, label, branchId.toLowerCase()].join("|");
+      }
+      mutated = true;
+      const hashed = createPasswordHash(secret);
+      return [username.toLowerCase(), hashed, label, branchId.toLowerCase()].join("|");
+    })
+    .filter(Boolean);
+  return { text: lines.join("\n"), mutated };
 }
 
 function parseBranchLocations(rawValue, settings = defaultSettings) {
@@ -731,7 +970,7 @@ app.get("/api/menu", asyncHandler(async (_request, response) => {
 
 app.get("/api/settings", asyncHandler(async (request, response) => {
   const settings = await storage.getSettings();
-  const adminSession = getOptionalAdminSession(request);
+  const adminSession = await getOptionalAdminSession(request);
   response.json({
     settings: adminSession
       ? settings
@@ -759,70 +998,82 @@ app.post("/api/promo/validate", asyncHandler(async (request, response) => {
   response.json({ promo });
 }));
 
-app.post("/api/auth/signup", asyncHandler(async (request, response) => {
+app.post("/api/auth/signup", authRateLimiter, asyncHandler(async (request, response) => {
   const { fullName, email, password, phone, address, referralCode } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  const normalizedAddress = String(address || "").trim();
+  const normalizedAddress = stripUnsafeText(address, 200);
+  const normalizedFullName = stripUnsafeText(fullName, 80);
 
-  if (!fullName || !normalizedEmail || !password) {
+  if (!normalizedFullName || !normalizedEmail || !password) {
     return response.status(400).json({ error: "Full name, email, and password are required." });
   }
 
-  if (String(password).length < 6) {
-    return response.status(400).json({ error: "Password must be at least 6 characters long." });
+  if (!isValidEmail(normalizedEmail)) {
+    return response.status(400).json({ error: "Please enter a valid email address." });
+  }
+
+  if (String(password).length < 8) {
+    return response.status(400).json({ error: "Password must be at least 8 characters long." });
   }
 
   const existingUser = await storage.getUserByEmail(normalizedEmail);
   if (existingUser) {
     return response.status(409).json({ error: "An account with that email already exists." });
   }
-  const normalizedReferralCode = String(referralCode || "").trim().toLowerCase();
+  const normalizedReferralCode = String(referralCode || "").trim().toLowerCase().slice(0, 24);
 
   const user = await storage.createUser({
     email: normalizedEmail,
     passwordHash: createPasswordHash(password),
-    fullName: String(fullName).trim(),
-    phone: String(phone || "").trim(),
+    fullName: normalizedFullName,
+    phone: stripUnsafeText(phone, 22),
     favoriteItemIds: [],
     savedAddresses: normalizedAddress ? [normalizedAddress] : [],
     orderReferences: [],
     notifications: [createNotification("Welcome to PEM. Your account is ready to use.", "welcome")],
     loyaltyPoints: normalizedReferralCode ? 5 : 0,
     loyaltyTier: "bronze",
-    referralCode: createReferralCode(fullName),
+    referralCode: createReferralCode(normalizedFullName),
     referredBy: normalizedReferralCode,
     referralCredits: 0,
+    emailVerified: false,
     createdAt: new Date().toISOString(),
   });
 
-  const token = createAdminToken();
-  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+  await sendVerificationEmail(user.email).catch((error) => {
+    console.error("[signup] verification email send failed:", error.message);
+  });
+
+  const session = await persistSession({ scope: "user", email: user.email });
+  setSessionCookie(response, USER_COOKIE, session.token, session.expiresAt);
 
   response.status(201).json({
-    token,
     user: sanitizeUser(user),
+    session: { expiresAt: session.expiresAt },
+    requiresEmailVerification: !user.emailVerified,
   });
 }));
 
-app.post("/api/auth/login", asyncHandler(async (request, response) => {
+app.post("/api/auth/login", authRateLimiter, asyncHandler(async (request, response) => {
   const { email, password } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const user = await storage.getUserByEmail(normalizedEmail);
 
-  if (!user || !verifyPassword(String(password || ""), user.passwordHash)) {
+  if (!user || !verifyPasswordHash(String(password || ""), user.passwordHash)) {
     return response.status(401).json({ error: "Incorrect email or password." });
   }
 
-  const token = createAdminToken();
-  userSessions.set(token, { email: user.email, createdAt: new Date().toISOString() });
+  const session = await persistSession({ scope: "user", email: user.email });
+  setSessionCookie(response, USER_COOKIE, session.token, session.expiresAt);
 
   response.json({
-    token,
     user: sanitizeUser(user),
+    session: { expiresAt: session.expiresAt },
+    requiresEmailVerification: !user.emailVerified,
   });
 }));
 
-app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => {
+app.post("/api/auth/forgot-password", authRateLimiter, asyncHandler(async (request, response) => {
   const { email, phone, newPassword } = request.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const normalizedPhone = String(phone || "").replace(/\D/g, "");
@@ -836,8 +1087,8 @@ app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => 
     return response.status(401).json({ error: "The recovery phone number did not match this account." });
   }
 
-  if (String(newPassword || "").length < 6) {
-    return response.status(400).json({ error: "New password must be at least 6 characters long." });
+  if (String(newPassword || "").length < 8) {
+    return response.status(400).json({ error: "New password must be at least 8 characters long." });
   }
 
   const savedUser = await storage.updateUser(user.email, {
@@ -850,17 +1101,82 @@ app.post("/api/auth/forgot-password", asyncHandler(async (request, response) => 
     updatedAt: new Date().toISOString(),
   });
 
+  await storage.deleteSessionsByEmail(user.email, "user").catch(() => {});
+
+  await mailer.send({
+    to: user.email,
+    subject: "PEM password updated",
+    text: "Your PEM account password was just updated. If this was not you, please contact PEM support immediately.",
+  }).catch(() => {});
+
   response.json({
     message: "Password updated successfully. You can now log in.",
     user: sanitizeUser(savedUser),
   });
 }));
 
-app.post("/api/auth/logout", requireUser, (request, response) => {
-  const token = getBearerToken(request);
-  userSessions.delete(token);
+app.post("/api/auth/logout", asyncHandler(async (request, response) => {
+  const token = getRequestToken(request, USER_COOKIE);
+  if (token) {
+    await storage.deleteSessionByTokenHash(hashToken(token)).catch(() => {});
+  }
+  clearSessionCookie(response, USER_COOKIE);
   response.json({ ok: true });
-});
+}));
+
+app.get("/api/auth/me", asyncHandler(async (request, response) => {
+  const session = await getOptionalUserSession(request);
+  if (!session?.email) {
+    return response.json({ user: null });
+  }
+  const user = await storage.getUserByEmail(session.email);
+  response.json({
+    user: sanitizeUser(user),
+    requiresEmailVerification: user ? !user.emailVerified : false,
+  });
+}));
+
+app.post("/api/auth/resend-verification", authRateLimiter, requireUser, asyncHandler(async (request, response) => {
+  const user = await storage.getUserByEmail(request.userSession.email);
+  if (!user) {
+    return response.status(404).json({ error: "Account not found." });
+  }
+  if (user.emailVerified) {
+    return response.json({ ok: true, alreadyVerified: true });
+  }
+  await sendVerificationEmail(user.email);
+  response.json({ ok: true });
+}));
+
+app.post("/api/auth/verify-email", authRateLimiter, asyncHandler(async (request, response) => {
+  const rawToken = String(request.body?.token || request.query?.token || "").trim();
+  if (!rawToken) {
+    return response.status(400).json({ error: "Verification token is required.", code: "missing" });
+  }
+  const tokenHash = hashToken(rawToken);
+  const verification = await storage.getEmailVerificationByTokenHash(tokenHash);
+  if (!verification || verification.purpose !== "signup") {
+    return response.status(400).json({ error: "This verification link is invalid.", code: "invalid" });
+  }
+  if (verification.consumedAt) {
+    return response.json({ ok: true, alreadyVerified: true });
+  }
+  if (new Date(verification.expiresAt).getTime() < Date.now()) {
+    return response.status(400).json({ error: "This verification link has expired.", code: "expired" });
+  }
+  const user = await storage.getUserByEmail(verification.email);
+  if (user) {
+    await storage.updateUser(user.email, {
+      ...user,
+      emailVerified: true,
+      emailVerifiedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  await storage.consumeEmailVerification(tokenHash).catch(() => {});
+  await storage.deleteEmailVerificationsForEmail(verification.email, "signup").catch(() => {});
+  response.json({ ok: true });
+}));
 
 app.get("/api/account", requireUser, asyncHandler(async (request, response) => {
   const user = await storage.getUserByEmail(request.userSession.email);
@@ -948,9 +1264,9 @@ app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
   const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
   const sanitizedPhone = sanitizePhoneInput(customer?.phone || sender?.phone);
   const normalizedRecipientEmail = String(recipientEmail || "").trim().toLowerCase();
-  const normalizedSenderName = String(customer?.customerName || sender?.fullName || "").trim();
-  const normalizedGiftMessage = String(giftMessage || "").trim();
-  const normalizedPaymentReference = String(customer?.paymentReference || "").trim();
+  const normalizedSenderName = stripUnsafeText(customer?.customerName || sender?.fullName, 80);
+  const normalizedGiftMessage = stripUnsafeText(giftMessage, 400);
+  const normalizedPaymentReference = stripUnsafeText(customer?.paymentReference, 60);
 
   if (!sender) {
     return response.status(401).json({ error: "Sign in to send a meal gift through PEM." });
@@ -1388,7 +1704,7 @@ app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
   response.json({ deliveryZones });
 }));
 
-app.post("/api/admin/login", asyncHandler(async (request, response) => {
+app.post("/api/admin/login", authRateLimiter, asyncHandler(async (request, response) => {
   const { username, password } = request.body || {};
 
   if (!password) {
@@ -1397,38 +1713,68 @@ app.post("/api/admin/login", asyncHandler(async (request, response) => {
 
   const settings = await storage.getSettings();
   const staffAdmins = parseStaffAdmins(settings.staffAdminsText);
-  const matchedStaffAdmin = username
-    ? staffAdmins.find(
-        (item) => item.username === String(username || "").trim().toLowerCase() && item.password === password,
-      )
+  const normalizedUsername = String(username || "").trim().toLowerCase();
+  const matchedStaffAdmin = normalizedUsername
+    ? staffAdmins.find((item) => {
+        if (item.username !== normalizedUsername) return false;
+        if (item.passwordHash) return verifyPasswordHash(password, item.passwordHash);
+        return item.password === password;
+      })
     : null;
 
-  if (!matchedStaffAdmin && password !== adminPassword) {
+  const ownerMatch = !matchedStaffAdmin && (
+    isHashedPassword(adminPassword)
+      ? verifyPasswordHash(password, adminPassword)
+      : password === adminPassword
+  );
+
+  if (!matchedStaffAdmin && !ownerMatch) {
     return response.status(401).json({ error: "Incorrect admin credentials." });
   }
 
-  const token = createAdminToken();
-  const session = {
-    createdAt: new Date().toISOString(),
+  const sessionData = {
     username: matchedStaffAdmin?.username || "owner",
     label: matchedStaffAdmin?.label || "Owner",
     branchId: matchedStaffAdmin?.branchId || "",
     isOwner: !matchedStaffAdmin,
   };
-
-  adminSessions.set(token, session);
+  const session = await persistSession({
+    scope: "admin",
+    username: sessionData.username,
+    data: sessionData,
+  });
+  setSessionCookie(response, ADMIN_COOKIE, session.token, session.expiresAt);
 
   return response.json({
-    token,
-    admin: session,
+    admin: { ...sessionData, createdAt: session.createdAt },
+    session: { expiresAt: session.expiresAt },
   });
 }));
 
-app.post("/api/admin/logout", requireAdmin, (request, response) => {
-  const token = getBearerToken(request);
-  adminSessions.delete(token);
+app.post("/api/admin/logout", asyncHandler(async (request, response) => {
+  const token = getRequestToken(request, ADMIN_COOKIE);
+  if (token) {
+    await storage.deleteSessionByTokenHash(hashToken(token)).catch(() => {});
+  }
+  clearSessionCookie(response, ADMIN_COOKIE);
   response.json({ ok: true });
-});
+}));
+
+app.get("/api/admin/me", asyncHandler(async (request, response) => {
+  const session = await getOptionalAdminSession(request);
+  if (!session) {
+    return response.json({ admin: null });
+  }
+  response.json({
+    admin: {
+      username: session.username,
+      label: session.data?.label || session.label || "PEM admin",
+      branchId: session.data?.branchId || session.branchId || "",
+      isOwner: session.username === "owner",
+      createdAt: session.createdAt,
+    },
+  });
+}));
 
 app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
   const { currentPassword, newPassword, confirmPassword } = request.body || {};
@@ -1437,12 +1783,16 @@ app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHan
     return response.status(400).json({ error: "All password fields are required." });
   }
 
-  if (currentPassword !== adminPassword) {
+  const currentMatches = isHashedPassword(adminPassword)
+    ? verifyPasswordHash(currentPassword, adminPassword)
+    : currentPassword === adminPassword;
+
+  if (!currentMatches) {
     return response.status(401).json({ error: "Current password is incorrect." });
   }
 
-  if (newPassword.length < 8) {
-    return response.status(400).json({ error: "New password must be at least 8 characters long." });
+  if (String(newPassword).length < 12) {
+    return response.status(400).json({ error: "New admin password must be at least 12 characters long." });
   }
 
   if (newPassword !== confirmPassword) {
@@ -1453,8 +1803,9 @@ app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHan
     return response.status(400).json({ error: "Choose a different password from the current one." });
   }
 
-  await persistAdminPassword(newPassword);
-  adminSessions.clear();
+  const hashed = createPasswordHash(newPassword);
+  await persistAdminPassword(hashed);
+  await storage.deleteSessionsByEmail("", "admin").catch(() => {});
 
   response.json({
     message: "Admin password updated successfully. Please sign in again.",
@@ -1493,7 +1844,7 @@ app.put("/api/admin/settings", requireAdmin, requireOwnerAdmin, asyncHandler(asy
     bankInstructions: String(payload.bankInstructions || "").trim(),
     minimumOrder: Math.max(0, Number(payload.minimumOrder) || 0),
     promoCodesText: String(payload.promoCodesText || defaultSettings.promoCodesText).trim(),
-    staffAdminsText: String(payload.staffAdminsText || defaultSettings.staffAdminsText).trim(),
+    staffAdminsText: hashStaffAdminsText(String(payload.staffAdminsText || defaultSettings.staffAdminsText).trim()).text,
     branchLocationsText: String(payload.branchLocationsText || defaultSettings.branchLocationsText).trim(),
     receiptFooter: String(payload.receiptFooter || defaultSettings.receiptFooter).trim(),
   };
@@ -1583,7 +1934,7 @@ app.put("/api/admin/menu", requireAdmin, requireOwnerAdmin, asyncHandler(async (
   });
 }));
 
-app.post("/api/orders", asyncHandler(async (request, response) => {
+app.post("/api/orders", orderRateLimiter, asyncHandler(async (request, response) => {
   const { customer, items, pricing } = request.body || {};
   const settings = await storage.getSettings();
   const promoCodes = parsePromoCodes(settings.promoCodesText);
@@ -1712,7 +2063,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   });
   await storage.updateMenuItems(nextMenuItems);
 
-  const optionalSession = getOptionalUserSession(request);
+  const optionalSession = await getOptionalUserSession(request);
   const candidateEmail = String(optionalSession?.email || customer?.email || "").trim().toLowerCase();
   const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
 
@@ -1757,7 +2108,7 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   });
 }));
 
-app.post("/api/payments/paystack/initialize", asyncHandler(async (request, response) => {
+app.post("/api/payments/paystack/initialize", paymentRateLimiter, asyncHandler(async (request, response) => {
   if (!paystackSecretKey) {
     return response.status(400).json({ error: "Card payment is not configured on the server." });
   }
@@ -1787,7 +2138,7 @@ app.post("/api/payments/paystack/initialize", asyncHandler(async (request, respo
   response.json({ payment });
 }));
 
-app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request, response) => {
+app.get("/api/payments/paystack/verify/:reference", paymentRateLimiter, asyncHandler(async (request, response) => {
   if (!paystackSecretKey) {
     return response.status(400).json({ error: "Card payment is not configured on the server." });
   }
@@ -1851,6 +2202,48 @@ app.get("/api/orders/:reference", asyncHandler(async (request, response) => {
   });
 }));
 
+app.get("/api/orders/:reference/stream", asyncHandler(async (request, response) => {
+  const reference = String(request.params.reference || "").trim();
+  if (!reference) {
+    return response.status(400).json({ error: "Order reference is required." });
+  }
+  const order = await storage.getOrderByReference(reference);
+  if (!order) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  response.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  response.flushHeaders?.();
+  response.write(`data: ${JSON.stringify({ type: "snapshot", status: order.status, order })}\n\n`);
+
+  if (!orderEventSubscribers.has(reference)) {
+    orderEventSubscribers.set(reference, new Set());
+  }
+  const subscribers = orderEventSubscribers.get(reference);
+  subscribers.add(response);
+
+  const heartbeat = setInterval(() => {
+    try {
+      response.write(": ping\n\n");
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25_000);
+
+  request.on("close", () => {
+    clearInterval(heartbeat);
+    subscribers.delete(response);
+    if (subscribers.size === 0) {
+      orderEventSubscribers.delete(reference);
+    }
+  });
+}));
+
 app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(async (request, response) => {
   const { reference } = request.params;
   const { status } = request.body || {};
@@ -1869,28 +2262,49 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(asyn
   }
   const order = await storage.updateOrderStatus(reference, status);
 
+  publishOrderEvent(reference, { type: "status", status, order });
+
+  if (status === "delivered" || status === "out_for_delivery") {
+    const customerEmail = String(order?.customer?.email || "").trim().toLowerCase();
+    if (customerEmail) {
+      mailer.send({
+        to: customerEmail,
+        subject: `Update on PEM order ${reference}`,
+        text: `Your PEM order ${reference} status changed to: ${status.replace(/_/g, " ")}.`,
+      }).catch(() => {});
+    }
+  }
+
   return response.json({
     message: "Order status updated.",
     order,
   });
 }));
 
-app.post("/api/contact", asyncHandler(async (request, response) => {
+app.post("/api/contact", orderRateLimiter, asyncHandler(async (request, response) => {
   const { name, phone, message, branchId, branchName } = request.body || {};
   const settings = await storage.getSettings();
   const selectedBranch = resolveBranchSelection(branchId, settings);
 
-  if (!name || !phone || !message) {
+  const cleanName = stripUnsafeText(name, 80);
+  const cleanPhone = sanitizePhoneInput(phone);
+  const cleanMessage = stripUnsafeText(message, 1500);
+
+  if (!cleanName || !cleanPhone || !cleanMessage) {
     return response.status(400).json({ error: "Name, phone, and message are required." });
+  }
+
+  if (normalizePhoneDigits(cleanPhone).length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number." });
   }
 
   const entry = {
     reference: makeReference("PEM-MSG"),
-    name,
-    phone,
-    message,
+    name: cleanName,
+    phone: cleanPhone,
+    message: cleanMessage,
     branchId: selectedBranch.id,
-    branchName: branchName || selectedBranch.label,
+    branchName: stripUnsafeText(branchName, 80) || selectedBranch.label,
     createdAt: new Date().toISOString(),
     status: "new",
   };
@@ -1901,27 +2315,35 @@ app.post("/api/contact", asyncHandler(async (request, response) => {
   });
 }));
 
-app.post("/api/catering", asyncHandler(async (request, response) => {
+app.post("/api/catering", orderRateLimiter, asyncHandler(async (request, response) => {
   const { name, phone, eventDate, guestCount, eventType, details, branchId, branchName } = request.body || {};
   const settings = await storage.getSettings();
   const selectedBranch = resolveBranchSelection(branchId, settings);
 
-  if (!name || !phone || !eventDate || !guestCount || !details) {
+  const cleanName = stripUnsafeText(name, 80);
+  const cleanPhone = sanitizePhoneInput(phone);
+  const cleanDetails = stripUnsafeText(details, 2000);
+
+  if (!cleanName || !cleanPhone || !eventDate || !guestCount || !cleanDetails) {
     return response.status(400).json({
       error: "Name, phone, event date, guest count, and event details are required.",
     });
   }
 
+  if (normalizePhoneDigits(cleanPhone).length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number." });
+  }
+
   const entry = {
     reference: makeReference("PEM-CAT"),
-    name,
-    phone,
-    eventDate,
-    guestCount,
-    eventType,
-    details,
+    name: cleanName,
+    phone: cleanPhone,
+    eventDate: stripUnsafeText(eventDate, 60),
+    guestCount: stripUnsafeText(guestCount, 20),
+    eventType: stripUnsafeText(eventType, 80),
+    details: cleanDetails,
     branchId: selectedBranch.id,
-    branchName: branchName || selectedBranch.label,
+    branchName: stripUnsafeText(branchName, 80) || selectedBranch.label,
     createdAt: new Date().toISOString(),
     status: "new",
   };
@@ -1932,25 +2354,32 @@ app.post("/api/catering", asyncHandler(async (request, response) => {
   });
 }));
 
-app.post("/api/reservations", asyncHandler(async (request, response) => {
+app.post("/api/reservations", orderRateLimiter, asyncHandler(async (request, response) => {
   const { name, phone, date, time, guests, notes, branchId, branchName } = request.body || {};
   const settings = await storage.getSettings();
   const selectedBranch = resolveBranchSelection(branchId, settings);
 
-  if (!name || !phone || !date || !time || !guests) {
+  const cleanName = stripUnsafeText(name, 80);
+  const cleanPhone = sanitizePhoneInput(phone);
+
+  if (!cleanName || !cleanPhone || !date || !time || !guests) {
     return response.status(400).json({ error: "Name, phone, date, time, and guest count are required." });
+  }
+
+  if (normalizePhoneDigits(cleanPhone).length < 10) {
+    return response.status(400).json({ error: "Please enter a valid phone number." });
   }
 
   const reservation = await storage.createReservation({
     reference: makeReference("PEM-RES"),
-    name: String(name).trim(),
-    phone: String(phone).trim(),
-    date,
-    time,
-    guests: String(guests).trim(),
-    notes: String(notes || "").trim(),
+    name: cleanName,
+    phone: cleanPhone,
+    date: stripUnsafeText(date, 60),
+    time: stripUnsafeText(time, 30),
+    guests: stripUnsafeText(guests, 20),
+    notes: stripUnsafeText(notes, 1000),
     branchId: selectedBranch.id,
-    branchName: branchName || selectedBranch.label,
+    branchName: stripUnsafeText(branchName, 80) || selectedBranch.label,
     status: "new",
     createdAt: new Date().toISOString(),
   });
@@ -1958,7 +2387,7 @@ app.post("/api/reservations", asyncHandler(async (request, response) => {
   response.status(201).json({ reservation });
 }));
 
-app.post("/api/reviews", asyncHandler(async (request, response) => {
+app.post("/api/reviews", orderRateLimiter, asyncHandler(async (request, response) => {
   const { orderReference, rating, comment, branchId, branchName } = request.body || {};
   const order = await storage.getOrderByReference(String(orderReference || "").trim());
 
@@ -1978,11 +2407,11 @@ app.post("/api/reviews", asyncHandler(async (request, response) => {
   const review = await storage.createReview({
     reference: makeReference("PEM-REV"),
     orderReference: order.reference,
-    customerName: order.customer.customerName,
+    customerName: stripUnsafeText(order.customer.customerName, 80),
     branchId: order.customer.branchId || String(branchId || "").trim().toLowerCase(),
-    branchName: order.customer.branchName || branchName || "PEM Branch",
+    branchName: order.customer.branchName || stripUnsafeText(branchName, 80) || "PEM Branch",
     rating: normalizedRating,
-    comment: String(comment || "").trim(),
+    comment: stripUnsafeText(comment, 800),
     createdAt: new Date().toISOString(),
   });
 
@@ -2000,7 +2429,7 @@ app.get("/api/reviews", asyncHandler(async (request, response) => {
   response.json({ reviews });
 }));
 
-app.post("/api/ai/dietary-match", asyncHandler(async (request, response) => {
+app.post("/api/ai/dietary-match", aiRateLimiter, asyncHandler(async (request, response) => {
   const needs = String(request.body?.needs || "").trim();
   const menuItems = sanitizeMenuItems(request.body?.menuItems);
 
@@ -2107,15 +2536,47 @@ app.patch("/api/admin/reservations/:reference/status", requireAdmin, asyncHandle
   });
 }));
 
-app.use((error, _request, response, _next) => {
-  console.error("API error:", error);
-  response.status(500).json({
-    error: error?.message || "Something went wrong on the server.",
-  });
+app.use((_request, response) => {
+  response.status(404).json({ error: "Not found." });
 });
 
+app.use((error, request, response, _next) => {
+  const status = Number(error?.status) || Number(error?.statusCode) || 500;
+  const requestId = crypto.randomBytes(6).toString("hex");
+  const safeMessage = status >= 400 && status < 500 && typeof error?.message === "string"
+    ? error.message
+    : "Something went wrong on the server.";
+  console.error(`[api-error ${requestId}]`, request.method, request.path, error?.message || error);
+  if (response.headersSent) return;
+  response.status(status).json({ error: safeMessage, requestId });
+});
+
+async function migrateStaffAdminPasswordsAtRest() {
+  try {
+    const settings = await storage.getSettings();
+    const { text, mutated } = hashStaffAdminsText(settings.staffAdminsText);
+    if (mutated) {
+      await storage.updateSettings({ ...settings, staffAdminsText: text });
+      console.log("[startup] Hashed plaintext staff admin passwords in business settings.");
+    }
+  } catch (error) {
+    console.error("[startup] Failed to migrate staff admin passwords:", error.message);
+  }
+}
+
+function startSessionJanitor() {
+  setInterval(() => {
+    storage.deleteExpiredSessions().catch(() => {});
+  }, 30 * 60 * 1000).unref?.();
+}
+
 storage.init()
-  .then(() => {
+  .then(async () => {
+    await migrateStaffAdminPasswordsAtRest();
+    startSessionJanitor();
+    if (!isHashedPassword(adminPassword) && process.env.ADMIN_PASSWORD) {
+      console.warn("[startup] ADMIN_PASSWORD is plaintext. Run /api/admin/change-password to upgrade to a hashed credential.");
+    }
     app.listen(PORT, () => {
       console.log(`PEM API server running on http://localhost:${PORT} using ${storage.mode} storage`);
     });

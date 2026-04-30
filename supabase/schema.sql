@@ -209,4 +209,35 @@ create table if not exists public.gifts (
   responded_at timestamptz
 );
 
+create table if not exists public.sessions (
+  token_hash text primary key,
+  scope text not null,
+  email text,
+  username text,
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists sessions_expires_at_idx on public.sessions (expires_at);
+create index if not exists sessions_email_idx on public.sessions (email);
+
+create table if not exists public.email_verifications (
+  token_hash text primary key,
+  email text not null,
+  purpose text not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
+
+create index if not exists email_verifications_email_idx on public.email_verifications (email);
+create index if not exists email_verifications_expires_at_idx on public.email_verifications (expires_at);
+
+alter table public.users
+add column if not exists email_verified boolean not null default false;
+
+alter table public.users
+add column if not exists email_verified_at timestamptz;
+
 notify pgrst, 'reload schema';
