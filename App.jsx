@@ -1,1757 +1,88 @@
 import { useEffect, useMemo, useState } from "react";
 import logo from "./logo.jpg.jpeg";
-import jollofImage from "./Jollof Rice & Grilled Chicken.jpg";
-import friedRiceImage from "./Fried Rice & Beef Stew.jpg";
-import egusiImage from "./Egusi Soup & Pounded Yam.jpg";
-import pepperSoupImage from "./Pepper Soup (Goat Meat).jpg";
-import ogbonoImage from "./Ogbono Soup & Eba.jpg";
-import okroImage from "./Delicious Okro soup.jpg";
-import ukwaImage from "./Delicious Ukwa.jpg";
-import spaghettiImage from "./Spaghetti Bolognese.jpg";
-import abachaImage from "./Abacha.jpg";
-import afangImage from "./Afang Soup.jpg";
-import asunImage from "./Asun.jpeg";
-import coleslawImage from "./Coleslaw.jpg";
-import cokeImage from "./coke.webp";
-import edikaikongImage from "./Edikaikong Soup.webp";
-import fantaImage from "./Fanta.jpg";
-import hollandiaImage from "./Hollandia.jpg";
-import moiMoiImage from "./Moimoi.jpg";
-import nkwobiImage from "./Nkwobi.webp";
-import ohaImage from "./Oha soup.jpg";
-import parfaitImage from "./Parfaits.jpg";
-import plantainImage from "./Plantain.jpg";
-import beansPlantainImage from "./Porridge beans and plantain.jpg";
-import smallChopsImage from "./Small chops.webp";
-import smoothieImage from "./Smoothie.jpg";
-import spriteImage from "./Spirite.webp";
-import waterImage from "./Water.jpg";
-import whiteRiceSauceImage from "./White rice and Sauce.jpeg";
-import whiteSoupImage from "./White Soup (Ofe Nsala).jpg";
-
-const menuItems = [
-  {
-    id: 1,
-    name: "Jollof Rice & Grilled Chicken",
-    category: "Rice",
-    price: 3800,
-    rating: 4.9,
-    reviews: 241,
-    image: jollofImage,
-    spicy: false,
-    badge: "Popular",
-    description: "Classic Nigerian party jollof with grilled chicken and sweet plantain.",
-    dietaryTags: ["Chicken", "Rice-based", "Mild"],
-    dietaryProfile: "Contains grilled chicken and rice. Mild heat and a balanced, filling profile.",
-  },
-  {
-    id: 2,
-    name: "Fried Rice & Beef Stew",
-    category: "Rice",
-    price: 4000,
-    rating: 4.8,
-    reviews: 188,
-    image: friedRiceImage,
-    spicy: false,
-    badge: "Signature",
-    description: "Colorful fried rice served with rich beef stew for a hearty PEM favorite.",
-    dietaryTags: ["Beef", "Rice-based", "Mild"],
-    dietaryProfile: "Contains beef stew and fried rice. Hearty and filling, but not suitable for beef-free diets.",
-  },
-  {
-    id: 3,
-    name: "Egusi Soup & Pounded Yam",
-    category: "Soup",
-    price: 4500,
-    rating: 4.9,
-    reviews: 214,
-    image: egusiImage,
-    spicy: false,
-    badge: "Best Seller",
-    description: "Rich egusi soup with assorted protein and soft pounded yam.",
-    dietaryTags: ["Soup", "Swallow", "Rich"],
-    dietaryProfile: "Traditional soup meal with assorted protein and pounded yam. Rich and satisfying.",
-  },
-  {
-    id: 4,
-    name: "Pepper Soup (Goat Meat)",
-    category: "Soup",
-    price: 4300,
-    rating: 4.8,
-    reviews: 167,
-    image: pepperSoupImage,
-    spicy: true,
-    badge: "Hot",
-    description: "Aromatic pepper soup with goat meat, local spices, and deep warming flavor.",
-    dietaryTags: ["Goat meat", "Spicy", "Soup"],
-    dietaryProfile: "Spicy goat meat pepper soup. The closest fit on this menu for guests asking for lower-carb soup options.",
-  },
-  {
-    id: 5,
-    name: "Ogbono Soup & Eba",
-    category: "Soup",
-    price: 3900,
-    rating: 4.7,
-    reviews: 151,
-    image: ogbonoImage,
-    spicy: false,
-    badge: "Classic",
-    description: "Smooth ogbono soup paired with fresh eba and a balanced local taste.",
-    dietaryTags: ["Soup", "Swallow", "Local"],
-    dietaryProfile: "Traditional ogbono soup served with eba. Mild compared with the hotter soups on the menu.",
-  },
-  {
-    id: 6,
-    name: "Delicious Okro Soup",
-    category: "Soup",
-    price: 4100,
-    rating: 4.8,
-    reviews: 132,
-    image: okroImage,
-    spicy: true,
-    badge: "Local",
-    description: "Fresh okro soup with a rich blend of stock, spice, and satisfying texture.",
-    dietaryTags: ["Soup", "Spicy", "Local"],
-    dietaryProfile: "Spicier local soup option with rich texture and a more traditional feel.",
-  },
-  {
-    id: 7,
-    name: "Delicious Ukwa",
-    category: "Local Special",
-    price: 3600,
-    rating: 4.6,
-    reviews: 98,
-    image: ukwaImage,
-    spicy: false,
-    badge: "Traditional",
-    description: "African breadfruit prepared in a comforting local style for a distinct PEM meal.",
-    dietaryTags: ["Traditional", "Local special", "Mild"],
-    dietaryProfile: "Traditional African breadfruit dish with a comforting local style and mild flavor profile.",
-  },
-  {
-    id: 8,
-    name: "Spaghetti Bolognese",
-    category: "Pasta",
-    price: 3500,
-    rating: 4.5,
-    reviews: 89,
-    image: spaghettiImage,
-    spicy: false,
-    badge: "Continental",
-    description: "Savory spaghetti in a rich tomato and meat sauce for guests who want variety.",
-    dietaryTags: ["Pasta", "Meat sauce", "Mild"],
-    dietaryProfile: "Pasta dish with meat sauce. Better for guests who want a softer, non-spicy continental option.",
-  },
-  {
-    id: 9,
-    name: "Abacha",
-    category: "Local Special",
-    price: 3200,
-    rating: 4.7,
-    reviews: 84,
-    image: abachaImage,
-    spicy: true,
-    badge: "Eastern Favorite",
-    description: "Traditional African salad with a lively local taste and classic market-style flavor.",
-    dietaryTags: ["Traditional", "Local", "Spicy"],
-    dietaryProfile: "A local specialty with a stronger traditional profile. Good for guests asking for native dishes.",
-  },
-  {
-    id: 10,
-    name: "Afang Soup",
-    category: "Soup",
-    price: 4600,
-    rating: 4.9,
-    reviews: 176,
-    image: afangImage,
-    spicy: false,
-    badge: "Premium Local",
-    description: "Rich afang soup with deep flavor, hearty texture, and a polished event-ready finish.",
-    dietaryTags: ["Soup", "Local", "Rich"],
-    dietaryProfile: "Rich local soup option with a traditional, filling profile for guests who want premium native dishes.",
-  },
-  {
-    id: 11,
-    name: "Asun",
-    category: "Grills",
-    price: 4200,
-    rating: 4.7,
-    reviews: 92,
-    image: asunImage,
-    spicy: true,
-    badge: "Smoky",
-    description: "Spicy grilled asun with a bold smoky finish for guests who want something lively.",
-    dietaryTags: ["Grill", "Spicy", "Protein"],
-    dietaryProfile: "A spicy grilled protein option suited to guests who want bold flavor and a meat-focused choice.",
-  },
-  {
-    id: 12,
-    name: "Coleslaw",
-    category: "Sides",
-    price: 1500,
-    rating: 4.4,
-    reviews: 41,
-    image: coleslawImage,
-    spicy: false,
-    badge: "Fresh Side",
-    description: "Creamy fresh coleslaw that pairs well with rice dishes, grills, and party packs.",
-    dietaryTags: ["Side", "Fresh", "Mild"],
-    dietaryProfile: "A mild side dish that helps balance heavier or spicier meals.",
-  },
-  {
-    id: 13,
-    name: "Moi Moi",
-    category: "Sides",
-    price: 1800,
-    rating: 4.6,
-    reviews: 67,
-    image: moiMoiImage,
-    spicy: false,
-    badge: "Protein Side",
-    description: "Soft steamed bean pudding that works well as a side or light meal addition.",
-    dietaryTags: ["Beans", "Side", "Mild"],
-    dietaryProfile: "A lighter bean-based side that can support guests asking for something softer and less spicy.",
-  },
-  {
-    id: 14,
-    name: "Oha Soup",
-    category: "Soup",
-    price: 4400,
-    rating: 4.8,
-    reviews: 103,
-    image: ohaImage,
-    spicy: false,
-    badge: "Native Choice",
-    description: "A warm, comforting oha soup with a beautiful home-style local finish.",
-    dietaryTags: ["Soup", "Traditional", "Local"],
-    dietaryProfile: "Milder native soup option with a home-style feel and strong local appeal.",
-  },
-  {
-    id: 15,
-    name: "Parfait",
-    category: "Drinks & Desserts",
-    price: 2500,
-    rating: 4.5,
-    reviews: 38,
-    image: parfaitImage,
-    spicy: false,
-    badge: "Cool Treat",
-    description: "Layered parfait for guests who want a chilled, sweet add-on to their order.",
-    dietaryTags: ["Dessert", "Cool", "Sweet"],
-    dietaryProfile: "A dessert-style add-on rather than a main meal. Good for lighter, chilled indulgence.",
-  },
-  {
-    id: 16,
-    name: "Plantain",
-    category: "Sides",
-    price: 1400,
-    rating: 4.7,
-    reviews: 59,
-    image: plantainImage,
-    spicy: false,
-    badge: "Side Favorite",
-    description: "Golden fried plantain that pairs easily with rice, soup, and grilled meals.",
-    dietaryTags: ["Side", "Sweet", "Mild"],
-    dietaryProfile: "A mild popular side that complements many PEM dishes.",
-  },
-  {
-    id: 17,
-    name: "Porridge Beans and Plantain",
-    category: "Local Special",
-    price: 3300,
-    rating: 4.6,
-    reviews: 73,
-    image: beansPlantainImage,
-    spicy: false,
-    badge: "Comfort Meal",
-    description: "Comforting beans porridge served with sweet plantain for a filling local option.",
-    dietaryTags: ["Beans", "Local", "Mild"],
-    dietaryProfile: "A gentler local comfort meal and one of the softer non-spicy options on the menu.",
-  },
-  {
-    id: 18,
-    name: "White Rice and Sauce",
-    category: "Rice",
-    price: 3400,
-    rating: 4.5,
-    reviews: 64,
-    image: whiteRiceSauceImage,
-    spicy: false,
-    badge: "Simple Choice",
-    description: "Plain white rice served with rich sauce for guests who want a simpler plate.",
-    dietaryTags: ["Rice-based", "Mild", "Simple"],
-    dietaryProfile: "A simpler rice dish for guests who want a less intense flavor profile.",
-  },
-  {
-    id: 19,
-    name: "White Soup (Ofe Nsala)",
-    category: "Soup",
-    price: 4700,
-    rating: 4.8,
-    reviews: 88,
-    image: whiteSoupImage,
-    spicy: false,
-    badge: "Chef's Pick",
-    description: "Delicate white soup with a refined native flavor and rich event-style presentation.",
-    dietaryTags: ["Soup", "Native", "Mild"],
-    dietaryProfile: "A polished native soup option with milder flavor than the hotter soup choices.",
-  },
-  {
-    id: 20,
-    name: "Hollandia",
-    category: "Drinks",
-    price: 1200,
-    rating: 4.4,
-    reviews: 22,
-    image: hollandiaImage,
-    spicy: false,
-    badge: "Chilled Drink",
-    description: "Cold dairy drink for guests who want something smooth and refreshing with their meal.",
-    dietaryTags: ["Drink", "Cold", "Mild"],
-    dietaryProfile: "A chilled drink option that pairs well with spicy or heavy meals.",
-  },
-  {
-    id: 21,
-    name: "Smoothie",
-    category: "Drinks",
-    price: 2200,
-    rating: 4.6,
-    reviews: 31,
-    image: smoothieImage,
-    spicy: false,
-    badge: "Fresh Blend",
-    description: "Fresh smoothie with a cooler, lighter feel for customers who want a premium drink.",
-    dietaryTags: ["Drink", "Cold", "Fresh"],
-    dietaryProfile: "A lighter premium drink option for customers who want something refreshing.",
-  },
-  {
-    id: 22,
-    name: "Water",
-    category: "Drinks",
-    price: 500,
-    rating: 4.8,
-    reviews: 18,
-    image: waterImage,
-    spicy: false,
-    badge: "Essential",
-    description: "Simple bottled water to complete any PEM order.",
-    dietaryTags: ["Drink", "Hydration", "Zero spice"],
-    dietaryProfile: "The simplest drink choice for every customer.",
-  },
-  {
-    id: 23,
-    name: "Edikaikong Soup",
-    category: "Soup",
-    price: 4800,
-    rating: 4.8,
-    reviews: 54,
-    image: edikaikongImage,
-    spicy: false,
-    badge: "Deep Local",
-    description: "Rich edikaikong soup prepared with leafy depth, local flavour, and a fuller native finish.",
-    dietaryTags: ["Soup", "Local", "Rich"],
-    dietaryProfile: "A rich native soup with a deep local profile for customers who want another premium traditional option.",
-  },
-  {
-    id: 24,
-    name: "Nkwobi",
-    category: "Local Special",
-    price: 4500,
-    rating: 4.7,
-    reviews: 39,
-    image: nkwobiImage,
-    spicy: true,
-    badge: "Spicy Local",
-    description: "Bold nkwobi with a spicy palm-oil finish for customers who want a strong traditional bite.",
-    dietaryTags: ["Local", "Spicy", "Protein"],
-    dietaryProfile: "A bold native delicacy with a spicy profile, better suited to customers who enjoy stronger traditional flavours.",
-  },
-  {
-    id: 25,
-    name: "Small Chops",
-    category: "Starters",
-    price: 3000,
-    rating: 4.6,
-    reviews: 47,
-    image: smallChopsImage,
-    spicy: false,
-    badge: "Party Tray",
-    description: "Assorted small chops for quick snacking, events, and add-on party orders.",
-    dietaryTags: ["Starter", "Party", "Shareable"],
-    dietaryProfile: "A shareable starter pack that works well for events, office orders, and quick add-ons.",
-  },
-  {
-    id: 26,
-    name: "Fanta",
-    category: "Drinks",
-    price: 700,
-    rating: 4.5,
-    reviews: 21,
-    image: fantaImage,
-    spicy: false,
-    badge: "Cold Drink",
-    description: "Chilled orange soda for customers who want a familiar sweet drink with their meal.",
-    dietaryTags: ["Drink", "Cold", "Sweet"],
-    dietaryProfile: "A classic soft drink choice that pairs well with rice meals, grills, and party trays.",
-  },
-  {
-    id: 27,
-    name: "Coke",
-    category: "Drinks",
-    price: 700,
-    rating: 4.6,
-    reviews: 28,
-    image: cokeImage,
-    spicy: false,
-    badge: "Classic Soda",
-    description: "Cold Coke served as an easy everyday drink option for lunch, dinner, or event orders.",
-    dietaryTags: ["Drink", "Cold", "Classic"],
-    dietaryProfile: "A dependable soft drink option for customers who want something simple and familiar.",
-  },
-  {
-    id: 28,
-    name: "Sprite",
-    category: "Drinks",
-    price: 700,
-    rating: 4.4,
-    reviews: 17,
-    image: spriteImage,
-    spicy: false,
-    badge: "Lemon-Lime",
-    description: "Refreshing lemon-lime soda that works nicely with soups, local dishes, and spicy meals.",
-    dietaryTags: ["Drink", "Cold", "Refreshing"],
-    dietaryProfile: "A crisp soft drink option with a lighter feel for spicy meals and native dishes.",
-  },
-];
-
-const cateringPackages = [
-  {
-    title: "Office Catering",
-    subtitle: "Reliable food service for meetings and staff events",
-    details: "Custom trays, buffet setup, and timed delivery for teams of 20 to 300 guests.",
-  },
-  {
-    title: "Weddings & Celebrations",
-    subtitle: "Elegant local menus for your big day",
-    details: "Soup stations, rice combinations, small chops, desserts, and serving staff support.",
-  },
-  {
-    title: "Bulk Party Packs",
-    subtitle: "Fast order fulfillment for birthdays and naming ceremonies",
-    details: "Packaged meal boxes with clear portions, labels, and add-on drinks for guests.",
-  },
-];
-
-const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
-const defaultMenuSchedule = {
-  availableFrom: "",
-  availableUntil: "",
-  availableDays: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"],
-};
-const menuSections = [
-  { id: "all", label: "Everything", categories },
-  { id: "mains", label: "Main Meals", categories: ["All", "Rice", "Pasta", "Grills", "Local Special"] },
-  { id: "soups", label: "Soups", categories: ["All", "Soup"] },
-  { id: "sides", label: "Sides", categories: ["All", "Sides", "Starters"] },
-  { id: "drinks", label: "Drinks & Desserts", categories: ["All", "Drinks", "Drinks & Desserts"] },
-];
-const drinkCount = menuItems.filter((item) => item.category.includes("Drink")).length;
-const localDishCount = menuItems.filter(
-  (item) => item.category === "Soup" || item.category === "Local Special",
-).length;
-const dietaryPrompts = [
-  "I want something less spicy.",
-  "Show me high-protein meals.",
-  "I do not want beef.",
-  "Recommend more traditional local dishes.",
-];
-
-const currency = new Intl.NumberFormat("en-NG", {
-  style: "currency",
-  currency: "NGN",
-  maximumFractionDigits: 0,
-});
-
-const defaultDeliveryZones = [
-  { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
-  { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
-  { id: "maitama", label: "Maitama / Asokoro / Guzape", fee: 2200, eta: "50 to 70 mins" },
-  { id: "lugbe", label: "Lugbe / Airport Road", fee: 2500, eta: "60 to 85 mins" },
-  { id: "owerri", label: "Owerri, Imo State", fee: 4500, eta: "Next-day confirmation with PEM" },
-  { id: "custom", label: "Other area", fee: 3000, eta: "Confirmed after order" },
-];
-
-const comboBundles = [
-  {
-    id: "party-rice",
-    title: "Party Rice Combo",
-    itemIds: [1, 13, 22],
-    description: "Jollof rice, moi moi, and water for a quick balanced order.",
-  },
-  {
-    id: "native-soup",
-    title: "Native Soup Combo",
-    itemIds: [14, 16, 20],
-    description: "Oha soup with plantain and a chilled drink for a fuller local plate.",
-  },
-  {
-    id: "office-lunch",
-    title: "Office Lunch Combo",
-    itemIds: [18, 12, 21],
-    description: "White rice and sauce with coleslaw and smoothie for a lighter lunch set.",
-  },
-];
-
-const businessHours = [
-  { day: "Sunday", open: 10, close: 20 },
-  { day: "Monday", open: 8, close: 21 },
-  { day: "Tuesday", open: 8, close: 21 },
-  { day: "Wednesday", open: 8, close: 21 },
-  { day: "Thursday", open: 8, close: 21 },
-  { day: "Friday", open: 8, close: 22 },
-  { day: "Saturday", open: 9, close: 22 },
-];
-
-const initialCheckout = {
-  customerName: "",
-  phone: "",
-  email: "",
-  orderType: "self",
-  recipientEmail: "",
-  giftMessage: "",
-  address: "",
-  landmark: "",
-  fulfillmentMethod: "delivery",
-  scheduledFor: "",
-  deliveryZone: "gwarinpa",
-  paymentMethod: "Pay on arrival",
-  paymentReference: "",
-  promoCode: "",
-};
-
-const cardPaymentMethodLabel = "Pay with card";
-
-const checkoutPaymentOptions = [
-  { label: "Pay on arrival", icon: "ARR" },
-  { label: cardPaymentMethodLabel, icon: "CARD" },
-  { label: "Bank transfer", icon: "TRF" },
-];
-
-function isCardPaymentMethod(method) {
-  return [cardPaymentMethodLabel, "Paystack"].includes(String(method || "").trim());
-}
-
-const initialTrackingState = {
-  loading: false,
-  error: "",
-  order: null,
-};
-
-const initialDeliveryZoneAdminState = {
-  loading: false,
-  saving: false,
-  error: "",
-  success: "",
-  zones: defaultDeliveryZones,
-};
-const initialMenuAdminState = {
-  loading: false,
-  saving: false,
-  error: "",
-  success: "",
-  items: menuItems.map((item) => ({
-    ...defaultMenuSchedule,
-    ...item,
-    soldOut: false,
-    hidden: false,
-    stockQuantity: 12,
-  })),
-};
-const menuVisibilityOptions = [
-  { value: "available", label: "Available" },
-  { value: "sold-out", label: "Sold out" },
-  { value: "hidden", label: "Hidden" },
-];
-
-const initialContact = {
-  name: "",
-  phone: "",
-  message: "",
-};
-
-const initialCatering = {
-  name: "",
-  phone: "",
-  eventDate: "",
-  guestCount: "",
-  eventType: "",
-  details: "",
-};
-
-const initialReservation = {
-  name: "",
-  phone: "",
-  date: "",
-  time: "",
-  guests: "",
-  notes: "",
-};
-
-const initialReviewForm = {
-  rating: "5",
-  comment: "",
-};
-
-const initialAdminState = {
-  loading: false,
-  error: "",
-  data: {
-    orders: [],
-    contacts: [],
-    catering: [],
-    reservations: [],
-    reviews: [],
-  },
-};
-
-const initialDietaryState = {
-  loading: false,
-  error: "",
-  summary: "",
-  caution: "",
-  matches: [],
-  mode: "",
-  degraded: false,
-};
-const initialPromoValidationState = {
-  loading: false,
-  valid: false,
-  amount: 0,
-  code: "",
-  minimumOrder: 0,
-  subtotal: 0,
-  error: "",
-};
-
-const initialBusinessSettings = {
-  businessName: "Precious Events Makers",
-  appName: "PEM",
-  phone: "0803 334 5161",
-  whatsappPhone: "2348033345161",
-  supportEmail: "hello@pem.local",
-  address: "Abuja, Nigeria",
-  heroHeadline: "Restaurant ordering and catering, designed with a calmer PEM feel.",
-  heroCopy:
-    "Explore local favorites, choose your quantity, add special notes, and place orders through a cleaner, more elegant PEM experience.",
-  promoBanner: "Fresh local dishes, premium catering, and smoother ordering all in one PEM experience.",
-  contactPromise: "Professional meals, local flavors, and catering support for all event sizes.",
-  businessHoursText: "Open daily in Lagos time. PEM confirms exact delivery windows after checkout.",
-  bankName: "PEM Business Account",
-  bankAccountName: "Precious Events Makers",
-  bankAccountNumber: "0123456789",
-  bankInstructions: "After making a bank transfer, add your payment reference so PEM can confirm it faster.",
-  minimumOrder: 1500,
-  promoCodesText: "",
-  staffAdminsText: "",
-  branchLocationsText:
-    "owerri-central|PEM Owerri Central|Wetheral Road, Owerri|0803 334 5161|8:00 AM - 9:00 PM|Fast city-center delivery, pickup, and daily meals.\nnew-owerri|PEM New Owerri|New Owerri, Imo State|0803 334 5161|8:30 AM - 9:30 PM|Best for estate drop-offs and premium catering dispatch.\nikenegbu|PEM Ikenegbu|Ikenegbu Layout, Owerri|0803 334 5161|8:00 AM - 8:30 PM|Quick office lunch, table bookings, and evening pickup.",
-  receiptFooter: "Thank you for choosing PEM. For urgent support, please contact the team directly.",
-};
-
-const initialSettingsAdminState = {
-  loading: false,
-  saving: false,
-  error: "",
-  success: "",
-  settings: initialBusinessSettings,
-};
-
-const initialAccountUser = {
-  email: "",
-  fullName: "",
-  phone: "",
-  favoriteItemIds: [],
-  savedAddresses: [],
-  orderReferences: [],
-  notifications: [],
-  loyaltyPoints: 0,
-  loyaltyTier: "bronze",
-  referralCode: "",
-  referredBy: "",
-  referralCredits: 0,
-  createdAt: "",
-};
-
-const initialAdminSession = {
-  username: "",
-  label: "",
-  branchId: "",
-  isOwner: false,
-};
-
-const initialAccountForm = {
-  fullName: "",
-  email: "",
-  password: "",
-  phone: "",
-  address: "",
-  referralCode: "",
-};
-
-const initialAccountGifts = {
-  received: [],
-  sent: [],
-};
-
-const initialGiftActionState = {
-  loadingRef: "",
-  error: "",
-  success: "",
-  openRef: "",
-  address: "",
-  landmark: "",
-  phone: "",
-};
-
-const initialLoginForm = {
-  email: "",
-  password: "",
-};
-
-const initialForgotPasswordForm = {
-  email: "",
-  phone: "",
-  newPassword: "",
-};
-
-const orderStatuses = ["all", "awaiting_payment", "received", "confirmed", "preparing", "ready", "out_for_delivery", "delivered", "cancelled"];
-const contactStatuses = ["new", "handled"];
-const cateringStatuses = ["new", "contacted", "booked"];
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-const CACHE_TTL = {
-  account: 10 * 60 * 1000,
-  deliveryZones: 30 * 60 * 1000,
-  menu: 10 * 60 * 1000,
-  settings: 15 * 60 * 1000,
-  admin: 2 * 60 * 1000,
-  tracking: 10 * 60 * 1000,
-};
-const ORDER_ITEM_LIMIT = 10;
-
-function apiUrl(pathname) {
-  return apiBaseUrl ? `${apiBaseUrl}${pathname}` : pathname;
-}
-
-function readCachedJson(key, fallback = null, maxAgeMs = Number.POSITIVE_INFINITY) {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  try {
-    const rawValue = window.localStorage.getItem(key);
-    if (!rawValue) {
-      return fallback;
-    }
-
-    const parsed = JSON.parse(rawValue);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      Object.prototype.hasOwnProperty.call(parsed, "savedAt") &&
-      Object.prototype.hasOwnProperty.call(parsed, "value")
-    ) {
-      if (
-        Number.isFinite(maxAgeMs) &&
-        maxAgeMs !== Number.POSITIVE_INFINITY &&
-        Date.now() - Number(parsed.savedAt || 0) > maxAgeMs
-      ) {
-        window.localStorage.removeItem(key);
-        return fallback;
-      }
-      return parsed.value;
-    }
-
-    if (Number.isFinite(maxAgeMs) && maxAgeMs !== Number.POSITIVE_INFINITY) {
-      window.localStorage.removeItem(key);
-      return fallback;
-    }
-
-    return parsed;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeCachedJson(key, value) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify({
-        savedAt: Date.now(),
-        value,
-      }),
-    );
-  } catch {
-    // Ignore cache write failures.
-  }
-}
-
-function formatPrice(value) {
-  return currency.format(value);
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("en-NG", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function getDeliveryZone(zoneId, zones = defaultDeliveryZones) {
-  const sourceZones = Array.isArray(zones) && zones.length > 0 ? zones : defaultDeliveryZones;
-  return sourceZones.find((zone) => zone.id === zoneId) || sourceZones[0];
-}
-
-function formatMinutesAsTime(totalMinutes) {
-  const normalizedMinutes = Number(totalMinutes);
-  if (!Number.isFinite(normalizedMinutes)) {
-    return "time confirmed by PEM";
-  }
-
-  const safeMinutes = ((normalizedMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
-  const hours = Math.floor(safeMinutes / 60);
-  const minutes = safeMinutes % 60;
-  const suffix = hours >= 12 ? "PM" : "AM";
-  const normalizedHours = hours % 12 === 0 ? 12 : hours % 12;
-  return `${normalizedHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
-}
-
-function formatHour(hour) {
-  const suffix = hour >= 12 ? "PM" : "AM";
-  const normalized = hour % 12 === 0 ? 12 : hour % 12;
-  return `${normalized}:00 ${suffix}`;
-}
-
-function normalizeScheduleDays(days) {
-  const normalized = Array.isArray(days)
-    ? days.map((day) => String(day || "").trim().slice(0, 3).toLowerCase()).filter(Boolean)
-    : [];
-  return normalized.length > 0 ? [...new Set(normalized)] : [...defaultMenuSchedule.availableDays];
-}
-
-function parseTimeToMinutes(value) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
-  if (!match) {
-    return null;
-  }
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-    return null;
-  }
-  return hours * 60 + minutes;
-}
-
-function getLagosNowParts() {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Africa/Lagos",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const parts = formatter.formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return {
-    day: String(values.weekday || "").slice(0, 3).toLowerCase(),
-    minutes: (Number(values.hour) || 0) * 60 + (Number(values.minute) || 0),
-  };
-}
-
-function parseTimeLabelToMinutes(value) {
-  const match = /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(String(value || "").trim());
-  if (!match) {
-    return null;
-  }
-
-  let hours = Number(match[1]) || 0;
-  const minutes = Number(match[2] || 0) || 0;
-  const suffix = String(match[3] || "").toUpperCase();
-
-  if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
-    return null;
-  }
-
-  if (suffix === "AM") {
-    hours = hours === 12 ? 0 : hours;
-  } else {
-    hours = hours === 12 ? 12 : hours + 12;
-  }
-
-  return hours * 60 + minutes;
-}
-
-function parseHoursWindow(hoursText) {
-  const [openLabel, closeLabel] = String(hoursText || "")
-    .split("-")
-    .map((part) => String(part || "").trim());
-  const openMinutes = parseTimeLabelToMinutes(openLabel);
-  const closeMinutes = parseTimeLabelToMinutes(closeLabel);
-
-  if (openMinutes === null || closeMinutes === null) {
-    return null;
-  }
-
-  return { openMinutes, closeMinutes };
-}
-
-function isTimeWithinWindow(targetMinutes, window) {
-  if (!window || typeof targetMinutes !== "number") {
-    return true;
-  }
-
-  if (window.openMinutes === window.closeMinutes) {
-    return false;
-  }
-
-  if (window.openMinutes < window.closeMinutes) {
-    return targetMinutes >= window.openMinutes && targetMinutes <= window.closeMinutes;
-  }
-
-  return targetMinutes >= window.openMinutes || targetMinutes <= window.closeMinutes;
-}
-
-function isScheduledWithinBusinessHours(scheduledFor, hoursText) {
-  if (!scheduledFor) {
-    return true;
-  }
-
-  const scheduledDate = new Date(scheduledFor);
-  if (Number.isNaN(scheduledDate.getTime())) {
-    return false;
-  }
-
-  const hoursWindow = parseHoursWindow(hoursText);
-  if (!hoursWindow) {
-    return true;
-  }
-
-  return isTimeWithinWindow(
-    scheduledDate.getHours() * 60 + scheduledDate.getMinutes(),
-    hoursWindow,
-  );
-}
-
-function normalizePhoneDigits(value) {
-  return String(value || "").replace(/\D/g, "");
-}
-
-function sanitizePhoneInput(value) {
-  return String(value || "")
-    .replace(/[^\d+\s()-]/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trimStart()
-    .slice(0, 22);
-}
-
-function getWhatsAppPhone(settings) {
-  return String(settings?.whatsappPhone || initialBusinessSettings.whatsappPhone || "").replace(/\D/g, "");
-}
-
-function isMenuItemScheduledNow(item, now = getLagosNowParts()) {
-  const days = normalizeScheduleDays(item.availableDays);
-  const startsAt = parseTimeToMinutes(item.availableFrom);
-  const endsAt = parseTimeToMinutes(item.availableUntil);
-
-  if (!days.includes(now.day)) {
-    return false;
-  }
-
-  if (startsAt === null || endsAt === null || startsAt === endsAt) {
-    return true;
-  }
-
-  if (startsAt < endsAt) {
-    return now.minutes >= startsAt && now.minutes <= endsAt;
-  }
-
-  return now.minutes >= startsAt || now.minutes <= endsAt;
-}
-
-function formatScheduleLabelLegacy(item) {
-  const days = normalizeScheduleDays(item.availableDays);
-  const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
-  const hasTimeWindow = item.availableFrom && item.availableUntil;
-  if (!hasCustomDays && !hasTimeWindow) {
-    return "";
-  }
-  const dayLabel = hasCustomDays ? days.map((day) => day.toUpperCase()).join(", ") : "Daily";
-  const timeLabel = hasTimeWindow ? `${item.availableFrom} - ${item.availableUntil}` : "All day";
-  return `${dayLabel} · ${timeLabel}`;
-}
-
-function getBusinessStatus(hoursText, now = getLagosNowParts()) {
-  const normalizedHours = String(hoursText || "").trim();
-  if (!normalizedHours) {
-    return {
-      isOpen: true,
-      label: "Hours confirmed by PEM",
-    };
-  }
-
-  if (/closed/i.test(normalizedHours) && !normalizedHours.includes("-")) {
-    return {
-      isOpen: false,
-      label: normalizedHours,
-    };
-  }
-
-  const hoursWindow = parseHoursWindow(normalizedHours);
-  if (!hoursWindow) {
-    return {
-      isOpen: false,
-      label: normalizedHours,
-    };
-  }
-
-  const isOpen = isTimeWithinWindow(now.minutes, hoursWindow);
-  return {
-    isOpen,
-    label: isOpen
-      ? `Open now until ${formatMinutesAsTime(hoursWindow.closeMinutes)}`
-      : `Opens ${formatMinutesAsTime(hoursWindow.openMinutes)} today`,
-  };
-}
-
-function mergeMenuCatalog(baseItems, remoteItems) {
-  const remoteById = new Map((remoteItems || []).map((item) => [item.id, item]));
-  return baseItems.map((item) => ({
-    ...item,
-    ...(remoteById.get(item.id) || {}),
-    image: String(remoteById.get(item.id)?.imageUrl || item.image || "").trim(),
-    imageUrl: String(remoteById.get(item.id)?.imageUrl || item.imageUrl || "").trim(),
-    stockQuantity: Number(remoteById.get(item.id)?.stockQuantity ?? item.stockQuantity ?? 12) || 0,
-    availableFrom: String(remoteById.get(item.id)?.availableFrom ?? item.availableFrom ?? defaultMenuSchedule.availableFrom),
-    availableUntil: String(remoteById.get(item.id)?.availableUntil ?? item.availableUntil ?? defaultMenuSchedule.availableUntil),
-    availableDays: Array.isArray(remoteById.get(item.id)?.availableDays)
-      ? remoteById.get(item.id).availableDays
-      : Array.isArray(item.availableDays)
-        ? item.availableDays
-        : defaultMenuSchedule.availableDays,
-    soldOut: Boolean(remoteById.get(item.id)?.soldOut),
-    hidden: Boolean(remoteById.get(item.id)?.hidden),
-  }));
-}
-
-function parsePromoCodes(rawValue) {
-  return String(rawValue || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [code, type, amount, minimumOrder = "0"] = line.split("|").map((part) => String(part || "").trim());
-      if (!code || !type || !amount) {
-        return null;
-      }
-      return {
-        code: code.toUpperCase(),
-        type: type === "percent" ? "percent" : "flat",
-        amount: Number(amount) || 0,
-        minimumOrder: Number(minimumOrder) || 0,
-      };
-    })
-    .filter(Boolean);
-}
-
-function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
-  const normalizedCode = String(promoCode || "").trim().toUpperCase();
-  if (!normalizedCode) {
-    return { valid: false, amount: 0, code: "" };
-  }
-
-  const promo = promoCodes.find((item) => item.code === normalizedCode);
-  if (!promo) {
-    return { valid: false, amount: 0, code: normalizedCode, minimumOrder: 0 };
-  }
-
-  if ((Number(subtotal) || 0) < promo.minimumOrder) {
-    return { valid: false, amount: 0, code: normalizedCode, minimumOrder: promo.minimumOrder };
-  }
-
-  const amount = promo.type === "percent"
-    ? Math.round((Number(subtotal) || 0) * (promo.amount / 100))
-    : promo.amount;
-
-  return {
-    valid: true,
-    amount: Math.max(0, Math.min(amount, Number(subtotal) || 0)),
-    code: normalizedCode,
-    minimumOrder: promo.minimumOrder,
-  };
-}
-
-function parseBranchLocations(rawValue, settings = initialBusinessSettings) {
-  const fallbackAddress = String(settings.address || "").trim() || "Address confirmed by PEM";
-  const fallbackPhone = String(settings.phone || "").trim() || "Phone confirmed by PEM";
-  const fallbackHours = String(settings.businessHoursText || "").trim() || "Hours confirmed by PEM";
-  const parsed = String(rawValue || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const [id, label, address, phone, hours, note] = line.split("|").map((part) => String(part || "").trim());
-      if (!id || !label) {
-        return null;
-      }
-      return {
-        id: id.toLowerCase(),
-        label,
-        address: address || fallbackAddress,
-        phone: phone || fallbackPhone,
-        hours: hours || fallbackHours,
-        note: note || `Service support from ${label}.`,
-        rank: index,
-      };
-    })
-    .filter(Boolean);
-
-  if (parsed.length > 0) {
-    return parsed;
-  }
-
-  return [
-      {
-        id: "main-branch",
-        label: `${settings.appName} Main Branch`,
-        address: fallbackAddress,
-        phone: fallbackPhone,
-        hours: fallbackHours,
-        note: `${settings.businessName} main branch.`,
-        rank: 0,
-      },
-  ];
-}
-
-function getRecordBranchId(record) {
-  return String(record?.branchId || record?.customer?.branchId || "").trim().toLowerCase();
-}
-
-function getRecordBranchName(record) {
-  return (
-    record?.branchName ||
-    record?.customer?.branchName ||
-    record?.customer?.branchLabel ||
-    "Main branch"
-  );
-}
-
-function getOrderTimeline(order) {
-  const currentStatus = String(order?.status || "").toLowerCase();
-  const timeline = [
-    { key: "received", label: "Received" },
-    { key: "confirmed", label: "Confirmed" },
-    { key: "preparing", label: "Preparing" },
-    { key: "ready", label: "Ready" },
-    { key: "out_for_delivery", label: "Out for delivery" },
-    { key: "delivered", label: "Delivered" },
-  ];
-
-  const currentIndex = timeline.findIndex((step) => step.key === currentStatus);
-  return timeline.map((step, index) => ({
-    ...step,
-    done: currentIndex >= index,
-    active: step.key === currentStatus,
-  }));
-}
-
-function getTrackingStatusSummary(order, selectedZoneLabel = "") {
-  const status = String(order?.status || "").toLowerCase();
-  const zone = order?.customer?.deliveryZone || selectedZoneLabel || "your area";
-  const branch = order?.customer?.branchName || "PEM branch";
-
-  if (status === "awaiting_payment") {
-    return `PEM is waiting for payment confirmation before ${branch} starts this order.`;
-  }
-  if (status === "received") {
-    return `${branch} has received your order and will confirm the kitchen slot shortly.`;
-  }
-  if (status === "confirmed") {
-    return `${branch} has confirmed your order and queued it for preparation.`;
-  }
-  if (status === "preparing") {
-    return `Your meal is currently being prepared by ${branch}.`;
-  }
-  if (status === "ready") {
-    return order?.customer?.fulfillmentMethod === "pickup"
-      ? `Your meal is almost ready for pickup at ${branch}.`
-      : `Your meal is packed and being handed over for delivery to ${zone}.`;
-  }
-  if (status === "out_for_delivery") {
-    return `Your rider is on the way to ${zone}. Keep your phone nearby for quick coordination.`;
-  }
-  if (status === "delivered") {
-    return "This order has been delivered. You can now leave a review and reorder it any time.";
-  }
-  if (status === "cancelled") {
-    return "This order was cancelled. If you still need the meal, you can reorder it from the menu.";
-  }
-
-  return "Track this reference again in a few minutes if the status does not update immediately.";
-}
-
-function menuItemMatchesSearch(item, rawSearch, branch, nowParts = getLagosNowParts()) {
-  const normalizedSearch = String(rawSearch || "").trim().toLowerCase();
-  if (!normalizedSearch) {
-    return true;
-  }
-
-  const normalizedBranch = `${branch?.label || ""} ${branch?.address || ""} ${branch?.note || ""}`.toLowerCase();
-  const haystack = [
-    item.name,
-    item.description,
-    item.badge,
-    item.category,
-    item.dietaryProfile,
-    ...(item.dietaryTags || []),
-    normalizedBranch,
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  const tokens = normalizedSearch.split(/\s+/).filter(Boolean);
-
-  return tokens.every((token) => {
-    if (haystack.includes(token)) {
-      return true;
-    }
-    if (["cheap", "budget", "affordable", "value"].includes(token)) {
-      return item.price <= 4500;
-    }
-    if (["premium", "special", "signature"].includes(token)) {
-      return item.price >= 5000 || /signature|premium|special/.test(haystack);
-    }
-    if (["drink", "drinks", "juice", "beverage", "water", "smoothie"].includes(token)) {
-      return item.category.toLowerCase().includes("drink") || item.dietaryTags.some((tag) => /drink|cold|fresh|hydration/i.test(tag));
-    }
-    if (["soup", "swallow", "native", "local"].includes(token)) {
-      return /soup|native|local|traditional/.test(haystack);
-    }
-    if (["rice", "jollof", "fried"].includes(token)) {
-      return /rice|jollof|fried/.test(haystack);
-    }
-    if (["protein", "meat", "chicken", "beef", "goat"].includes(token)) {
-      return /protein|meat|chicken|beef|goat/.test(haystack);
-    }
-    if (["spicy", "hot", "pepper"].includes(token)) {
-      return Boolean(item.spicy) || /spicy|pepper/.test(haystack);
-    }
-    if (["mild", "soft", "gentle"].includes(token)) {
-      return !item.spicy || /mild|soft|gentle/.test(haystack);
-    }
-    if (["available", "today", "now"].includes(token)) {
-      return isMenuItemScheduledNow(item, nowParts) && !item.soldOut && !item.hidden;
-    }
-    return false;
-  });
-}
-
-function getBranchAvailabilityMeta(item, branch, nowParts = getLagosNowParts()) {
-  const branchLabel = branch?.label || "PEM Branch";
-
-  if (item.hidden) {
-    return { label: "Hidden", tone: "muted" };
-  }
-  if (item.soldOut) {
-    return { label: `Unavailable at ${branchLabel}`, tone: "warn" };
-  }
-  if (!isMenuItemScheduledNow(item, nowParts)) {
-    return { label: `Next serving window from ${branchLabel}`, tone: "soft" };
-  }
-  if (Number(item.stockQuantity || 0) > 0 && Number(item.stockQuantity || 0) <= 4) {
-    return { label: `${branchLabel} has limited portions`, tone: "warn" };
-  }
-
-  return { label: `Available from ${branchLabel} today`, tone: "ok" };
-}
-
-function getSuggestedAddOns(cartItems, menuCatalog, nowParts = getLagosNowParts()) {
-  if (!Array.isArray(cartItems) || cartItems.length === 0) {
-    return [];
-  }
-
-  const cartIds = new Set(cartItems.map((item) => item.id));
-  const hasDrink = cartItems.some((item) => item.category.toLowerCase().includes("drink"));
-  const hasSide = cartItems.some((item) => /side|dessert/i.test(item.category));
-  const hasSoup = cartItems.some((item) => /soup/i.test(item.category));
-  const hasRice = cartItems.some((item) => /rice|pasta/i.test(item.name + " " + item.category));
-
-  return menuCatalog
-    .filter((item) => !item.hidden && !item.soldOut && isMenuItemScheduledNow(item, nowParts) && !cartIds.has(item.id))
-    .filter((item) => {
-      if (!hasDrink && item.category.toLowerCase().includes("drink")) {
-        return true;
-      }
-      if (!hasSide && /side|dessert/i.test(item.category)) {
-        return true;
-      }
-      if (hasSoup && /swallow|side/i.test(item.category) && !hasSide) {
-        return true;
-      }
-      if (hasRice && item.category.toLowerCase().includes("drink")) {
-        return true;
-      }
-      return false;
-    })
-    .sort((left, right) => left.price - right.price)
-    .slice(0, 3);
-}
-
-function getRelatedMenuItems(item, menuCatalog, nowParts = getLagosNowParts()) {
-  if (!item) {
-    return [];
-  }
-
-  const normalizedCategory = String(item.category || "").toLowerCase();
-  const sourceTags = Array.isArray(item.dietaryTags) ? item.dietaryTags.join(" ").toLowerCase() : "";
-
-  return menuCatalog
-    .filter((candidate) => candidate.id !== item.id)
-    .filter((candidate) => !candidate.hidden && !candidate.soldOut && isMenuItemScheduledNow(candidate, nowParts))
-    .filter((candidate) => {
-      const candidateCategory = String(candidate.category || "").toLowerCase();
-      const candidateTags = Array.isArray(candidate.dietaryTags) ? candidate.dietaryTags.join(" ").toLowerCase() : "";
-
-      if (normalizedCategory.includes("soup")) {
-        return /side|swallow|local special/.test(candidateCategory) || /swallow|side|mild/.test(candidateTags);
-      }
-      if (normalizedCategory.includes("rice") || normalizedCategory.includes("pasta")) {
-        return candidateCategory.includes("drink") || /side|dessert/.test(candidateCategory);
-      }
-      if (normalizedCategory.includes("drink")) {
-        return /dessert|side/.test(candidateCategory);
-      }
-      return candidateCategory === normalizedCategory || candidateTags.includes(sourceTags);
-    })
-    .sort((left, right) => left.price - right.price)
-    .slice(0, 2);
-}
-
-function getBadgeTone(badge) {
-  const normalized = String(badge || "").trim().toLowerCase();
-  if (/popular|best seller|favorite/.test(normalized)) {
-    return "popular";
-  }
-  if (/hot|spicy|smoky/.test(normalized)) {
-    return "hot";
-  }
-  if (/signature|premium|chef/.test(normalized)) {
-    return "signature";
-  }
-  if (/local|traditional|native|eastern/.test(normalized)) {
-    return "local";
-  }
-  return "neutral";
-}
-
-function getDietaryTagTone(tag) {
-  const normalized = String(tag || "").trim().toLowerCase();
-  if (/spicy|hot|pepper/.test(normalized)) {
-    return "spicy";
-  }
-  if (/mild|soft|zero spice/.test(normalized)) {
-    return "mild";
-  }
-  if (/drink|cold|fresh|hydration/.test(normalized)) {
-    return "drink";
-  }
-  if (/local|traditional|native|swallow|soup/.test(normalized)) {
-    return "local";
-  }
-  if (/protein|beef|chicken|goat|meat/.test(normalized)) {
-    return "protein";
-  }
-  return "neutral";
-}
-
-function parseEtaMinutes(etaLabel) {
-  const values = String(etaLabel || "").match(/\d+/g);
-  if (!values || values.length === 0) {
-    return null;
-  }
-  return Number(values[values.length - 1]) || null;
-}
-
-function getEtaCountdown(order, deliveryZones) {
-  if (!order?.createdAt || order?.customer?.fulfillmentMethod === "pickup") {
-    return "";
-  }
-
-  const zone = deliveryZones.find((entry) => entry.label === order.customer?.deliveryZone);
-  const etaMinutes = parseEtaMinutes(order.customer?.deliveryEta || zone?.eta);
-  if (!etaMinutes) {
-    return "";
-  }
-
-  const dueAt = new Date(order.createdAt).getTime() + etaMinutes * 60 * 1000;
-  const remainingMs = dueAt - Date.now();
-
-  if (remainingMs <= 0) {
-    return "Delivery window is due now.";
-  }
-
-  const remainingMinutes = Math.ceil(remainingMs / 60000);
-  if (remainingMinutes >= 60) {
-    const hours = Math.floor(remainingMinutes / 60);
-    const minutes = remainingMinutes % 60;
-    return `${hours}h ${minutes}m remaining in the current delivery window.`;
-  }
-
-  return `${remainingMinutes} min remaining in the current delivery window.`;
-}
-
-function buildWhatsAppConfirmationUrlLegacy(order, settings, fallbackNumber) {
-  if (!order?.reference) {
-    return "";
-  }
-
-  const branchName = order.customer?.branchName || settings.appName || "PEM";
-  const lines = [
-    `Hello ${branchName}, I am confirming my PEM order.`,
-    "",
-    `Reference: ${order.reference}`,
-    `Name: ${order.customer?.customerName || "Customer"}`,
-    `Branch: ${branchName}`,
-    `Total: ${formatPrice(order.pricing?.total || 0)}`,
-    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
-    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
-  ];
-
-  const targetNumber = getWhatsAppPhone(settings) || String(fallbackNumber || "").replace(/\D/g, "");
-  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
-}
-
-function formatScheduleLabel(item) {
-  const days = normalizeScheduleDays(item.availableDays);
-  const hasCustomDays = days.length < defaultMenuSchedule.availableDays.length;
-  const hasTimeWindow = item.availableFrom && item.availableUntil;
-  if (!hasCustomDays && !hasTimeWindow) {
-    return "";
-  }
-  const dayLabel = hasCustomDays ? days.map((day) => day.toUpperCase()).join(", ") : "Daily";
-  const timeLabel = hasTimeWindow ? `${item.availableFrom} - ${item.availableUntil}` : "All day";
-  return `${dayLabel} - ${timeLabel}`;
-}
-
-function buildWhatsAppConfirmationUrl(order, settings) {
-  if (!order?.reference) {
-    return "";
-  }
-
-  const branchName = order.customer?.branchName || settings.appName || "PEM";
-  const lines = [
-    `Hello ${branchName}, I am confirming my PEM order.`,
-    "",
-    `Reference: ${order.reference}`,
-    `Name: ${order.customer?.customerName || "Customer"}`,
-    `Branch: ${branchName}`,
-    `Total: ${formatPrice(order.pricing?.total || 0)}`,
-    `Status: ${String(order.status || "").replaceAll("_", " ")}`,
-    `Payment: ${order.customer?.paymentMethod || "Not stated"}`,
-  ];
-
-  const targetNumber = getWhatsAppPhone(settings);
-  return targetNumber ? `https://wa.me/${targetNumber}?text=${encodeURIComponent(lines.join("\n"))}` : "";
-}
-
-function StarRatingInputLegacy({ value, onChange }) {
-  const numericValue = Number(value) || 0;
-
-  return (
-    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
-          aria-checked={star === numericValue}
-          role="radio"
-          onClick={() => onChange(String(star))}
-        >
-          {"\u2605"}
-        </button>
-      ))}
-      <span className="star-input__label">{numericValue}/5</span>
-    </div>
-  );
-}
-
-function resolvePageFromHash(hashValue = "") {
-  const normalized = String(hashValue || "").replace(/^#/, "").split("?")[0].trim().toLowerCase();
-  if (["menu", "track", "catering", "contact", "account", "admin"].includes(normalized)) {
-    return normalized;
-  }
-  return "menu";
-}
-
-function getQueryParamFromHash(hashValue = "", key = "") {
-  const normalizedHash = String(hashValue || "").replace(/^#/, "");
-  const queryStart = normalizedHash.indexOf("?");
-  if (queryStart === -1) {
-    return "";
-  }
-
-  const params = new URLSearchParams(normalizedHash.slice(queryStart + 1));
-  return String(params.get(key) || "").trim();
-}
-
-function buildClientDietaryFallback(needs, sourceItems = menuItems) {
-  const normalizedNeeds = needs.trim().toLowerCase();
-  const needsVegetarian = /\b(vegetarian|vegan|plant[- ]based|no meat|meatless)\b/.test(normalizedNeeds);
-  const needsLowSpice = /\b(low spice|less spicy|mild|not spicy|no pepper)\b/.test(normalizedNeeds);
-  const needsSpicy = !needsLowSpice && /\b(spicy|hot|pepper|pepper soup)\b/.test(normalizedNeeds);
-  const wantsLocal = /\b(local|traditional|native|swallow|soup)\b/.test(normalizedNeeds);
-  const wantsBudget = /\b(cheap|budget|affordable|low price)\b/.test(normalizedNeeds);
-  const wantsProtein = /\b(high protein|protein|filling|gym)\b/.test(normalizedNeeds);
-  const avoidsBeef = /\b(no beef|without beef|avoid beef)\b/.test(normalizedNeeds);
-
-  if (needsVegetarian) {
-    return {
-      loading: false,
-      error: "",
-      summary: "PEM does not currently show a clearly vegetarian or vegan main meal in this menu.",
-      caution:
-        "For strict vegetarian, vegan, allergy, or medical needs, please contact PEM directly before ordering.",
-      matches: [],
-      mode: "smart-filter",
-      degraded: true,
-    };
-  }
-
-  const matches = sourceItems
-    .map((item) => {
-      const haystack = [
-        item.name,
-        item.category,
-        item.badge,
-        item.description,
-        item.dietaryProfile,
-        item.dietaryTags.join(" "),
-      ]
-        .join(" ")
-        .toLowerCase();
-      let score = item.rating;
-      let reason = "matches your request more closely than other current menu options";
-
-      if (needsLowSpice && item.spicy) score -= 4;
-      if (needsLowSpice && !item.spicy) {
-        score += 2;
-        reason = "better for a milder spice preference";
-      }
-      if (needsSpicy && item.spicy) {
-        score += 2;
-        reason = "good fit for guests who want more heat";
-      }
-      if (wantsLocal && /\b(local|traditional|native|soup|classic)\b/.test(haystack)) {
-        score += 2;
-        reason = "closer to the traditional local dishes PEM offers";
-      }
-      if (wantsBudget && item.price <= 3900) {
-        score += 1.5;
-        reason = "one of the better-value options on the menu";
-      }
-      if (wantsProtein && /\b(chicken|beef|goat|protein|meat)\b/.test(haystack)) {
-        score += 1.8;
-        reason = "more filling for protein-focused orders";
-      }
-      if (avoidsBeef && /\bbeef\b/.test(haystack)) {
-        score -= 4;
-      }
-
-      return {
-        itemId: item.id,
-        score,
-        reason,
-      };
-    })
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 4)
-    .filter((item) => item.score > 1)
-    .map(({ itemId, reason }) => ({ itemId, reason }));
-
-  return {
-    loading: false,
-    error: "",
-    summary: matches.length
-      ? "These dishes are the closest matches to the dietary preference you entered."
-      : "PEM could not find a strong exact match from the current menu, but you can still browse or contact the team for a custom recommendation.",
-    caution:
-      "Dietary guidance is based on current menu descriptions and should be confirmed with PEM for strict needs.",
-    matches,
-    mode: "smart-filter",
-    degraded: true,
-  };
-}
-
-async function postJson(url, payload, headers = {}) {
-  return requestJson(url, {
-    method: "POST",
-    payload,
-    headers,
-  });
-}
-
-async function requestJson(url, { method = "GET", payload, headers = {}, retryOnTimeout = method === "GET", attempt = 1 } = {}) {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    throw new Error("You're offline right now. Reconnect and try again.");
-  }
-
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
-
-  try {
-    const response = await fetch(apiUrl(url), {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
-      },
-      body: payload === undefined ? undefined : JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data.error || "Something went wrong. Please try again.");
-    }
-
-    return data;
-  } catch (error) {
-    if (error.name === "AbortError") {
-      if (retryOnTimeout && attempt < 2) {
-        return requestJson(url, {
-          method,
-          payload,
-          headers,
-          retryOnTimeout,
-          attempt: attempt + 1,
-        });
-      }
-      throw new Error("PEM is taking too long to respond. Please try again.");
-    }
-    if (error instanceof TypeError) {
-      throw new Error("PEM could not reach the server. Check your internet or refresh and try again.");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
-function RatingStars({ rating }) {
-  const filled = Math.round(rating);
-
-  return (
-    <div className="rating">
-      <div className="rating__stars" aria-hidden="true">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <span
-            key={star}
-            className={star <= filled ? "rating__star rating__star--filled" : "rating__star"}
-          >
-            {"\u2605"}
-          </span>
-        ))}
-      </div>
-      <span>{rating.toFixed(1)}</span>
-    </div>
-  );
-}
-
-function StarRatingInput({ value, onChange }) {
-  const numericValue = Number(value) || 0;
-
-  return (
-    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
-          aria-checked={star === numericValue}
-          role="radio"
-          onClick={() => onChange(String(star))}
-        >
-          ★
-        </button>
-      ))}
-      <span className="star-input__label">{numericValue}/5</span>
-    </div>
-  );
-}
-
-function CleanStarRatingInput({ value, onChange }) {
-  const numericValue = Number(value) || 0;
-
-  return (
-    <div className="star-input" role="radiogroup" aria-label="Select a review rating">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          className={star <= numericValue ? "star-input__button is-active" : "star-input__button"}
-          aria-checked={star === numericValue}
-          role="radio"
-          onClick={() => onChange(String(star))}
-        >
-          {"\u2605"}
-        </button>
-      ))}
-      <span className="star-input__label">{numericValue}/5</span>
-    </div>
-  );
-}
-
-function QuantityControl({ value, onDecrease, onIncrease, disabled = false }) {
-  return (
-    <div className="qty-control">
-      <button type="button" onClick={onDecrease} aria-label="Decrease quantity" disabled={disabled}>
-        -
-      </button>
-      <span>{value}</span>
-      <button type="button" onClick={onIncrease} aria-label="Increase quantity" disabled={disabled}>
-        +
-      </button>
-    </div>
-  );
-}
-
-function ThemeToggle({ theme, onToggle, floating = false }) {
-  const isDark = theme === "dark";
-
-  return (
-    <button
-      type="button"
-      className={floating ? (isDark ? "theme-fab is-dark is-floating" : "theme-fab is-floating") : isDark ? "theme-fab is-dark" : "theme-fab"}
-      onClick={onToggle}
-      role="switch"
-      aria-checked={isDark}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      <span className="theme-fab__track" aria-hidden="true">
-        <span className="theme-fab__thumb" />
-      </span>
-    </button>
-  );
-}
+import {
+  cardPaymentMethodLabel,
+  cateringPackages,
+  categories,
+  checkoutPaymentOptions,
+  comboBundles,
+  defaultDeliveryZones,
+  defaultMenuSchedule,
+  dietaryPrompts,
+  drinkCount,
+  localDishCount,
+  menuItems,
+  menuSections,
+  menuVisibilityOptions,
+} from "./app/data.js";
+import {
+  CACHE_TTL,
+  ORDER_ITEM_LIMIT,
+  cateringStatuses,
+  contactStatuses,
+  initialAccountForm,
+  initialAccountGifts,
+  initialAccountUser,
+  initialAdminSession,
+  initialAdminState,
+  initialBusinessSettings,
+  initialCatering,
+  initialCheckout,
+  initialContact,
+  initialDeliveryZoneAdminState,
+  initialDietaryState,
+  initialForgotPasswordForm,
+  initialGiftActionState,
+  initialLoginForm,
+  initialMenuAdminState,
+  initialPromoValidationState,
+  initialReservation,
+  initialReviewForm,
+  initialSettingsAdminState,
+  initialTrackingState,
+  orderStatuses,
+} from "./app/constants.js";
+import { apiFetch, apiUrl, postJson, requestJson } from "./app/api.js";
+import { readCachedJson, writeCachedJson } from "./app/cache.js";
+import {
+  buildClientDietaryFallback,
+  buildWhatsAppConfirmationUrl,
+  formatDateTime,
+  formatHour,
+  formatMinutesAsTime,
+  formatPrice,
+  formatScheduleLabel,
+  getBadgeTone,
+  getBranchAvailabilityMeta,
+  getBusinessStatus,
+  getDeliveryZone,
+  getDietaryTagTone,
+  getEtaCountdown,
+  getLagosNowParts,
+  getOrderTimeline,
+  getPromoDiscount,
+  getQueryParamFromHash,
+  getRecordBranchId,
+  getRecordBranchName,
+  getRelatedMenuItems,
+  getSuggestedAddOns,
+  getTrackingStatusSummary,
+  getWhatsAppPhone,
+  isCardPaymentMethod,
+  isMenuItemScheduledNow,
+  isScheduledWithinBusinessHours,
+  menuItemMatchesSearch,
+  mergeMenuCatalog,
+  normalizePhoneDigits,
+  normalizeScheduleDays,
+  parseBranchLocations,
+  parseEtaMinutes,
+  parsePromoCodes,
+  parseTimeToMinutes,
+  resolvePageFromHash,
+  sanitizePhoneInput,
+} from "./app/utils.js";
+import { MobileBottomNav, QuantityControl, RatingStars, StarRatingInput, ThemeToggle, useToast } from "./app/components.jsx";
 
 export default function App() {
   const [theme, setTheme] = useState("light");
@@ -1796,6 +127,17 @@ export default function App() {
   const [priceRange, setPriceRange] = useState("all");
   const [showCart, setShowCart] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState("");
+  const toast = useToast();
+  useEffect(() => {
+    if (!orderPlaced) return;
+    const lower = orderPlaced.toLowerCase();
+    const variant = /(could not|cannot|failed|error|invalid|too long|denied|sold out)/.test(lower)
+      ? "error"
+      : /(success|submitted|confirmed|thanks|verified|copied|installed|updated|signed|welcome|placed)/.test(lower)
+        ? "success"
+        : "info";
+    toast.push(orderPlaced, { variant });
+  }, [orderPlaced, toast]);
   const [lastAddedItemId, setLastAddedItemId] = useState(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [checkoutForm, setCheckoutForm] = useState(initialCheckout);
@@ -2242,58 +584,58 @@ export default function App() {
   }, [checkoutForm.fulfillmentMethod, isGiftOrder]);
 
   useEffect(() => {
-    const savedAccountToken = window.localStorage.getItem("pem-account-token");
-    if (savedAccountToken) {
-      setAccountToken(savedAccountToken);
-    } else {
-      setAccountHydrated(true);
-    }
-  }, []);
+    // Clean up any tokens previously persisted to localStorage. Sessions now live in
+    // httpOnly cookies and are bootstrapped via /api/auth/me and /api/admin/me.
+    window.localStorage.removeItem("pem-account-token");
+    window.localStorage.removeItem("pem-admin-token");
+    window.localStorage.removeItem("pem-admin-profile");
 
-  useEffect(() => {
-    const savedAdminToken = window.localStorage.getItem("pem-admin-token");
-    let savedAdminProfile = null;
-    try {
-      savedAdminProfile = JSON.parse(window.localStorage.getItem("pem-admin-profile") || "null");
-    } catch {
-      savedAdminProfile = null;
-    }
-    if (savedAdminToken) {
-      setAdminToken(savedAdminToken);
-    }
-    if (savedAdminProfile) {
-      setAdminSession({ ...initialAdminSession, ...savedAdminProfile });
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await requestJson("/api/auth/me");
+        if (cancelled) return;
+        if (data?.user?.email) {
+          setAccountToken("session-active");
+          setAccountUser((previous) => ({ ...previous, ...data.user }));
+        } else {
+          setAccountHydrated(true);
+        }
+      } catch {
+        if (!cancelled) setAccountHydrated(true);
+      }
+      try {
+        const data = await requestJson("/api/admin/me");
+        if (cancelled) return;
+        if (data?.admin?.username) {
+          setAdminSession({ ...initialAdminSession, ...data.admin });
+          setAdminToken("session-active");
+        }
+      } catch {
+        // Not an admin — that's fine.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (adminToken) {
-      window.localStorage.setItem("pem-admin-token", adminToken);
       loadAdminData(adminToken);
       loadDeliveryZones(adminToken);
       loadMenuCatalog(adminToken);
       loadPublicSettings(adminToken);
     } else {
-      window.localStorage.removeItem("pem-admin-token");
-      window.localStorage.removeItem("pem-admin-profile");
       setAdminSession(initialAdminSession);
       setAdminState(initialAdminState);
     }
   }, [adminToken]);
 
   useEffect(() => {
-    if (!adminToken) {
-      return;
-    }
-    window.localStorage.setItem("pem-admin-profile", JSON.stringify(adminSession));
-  }, [adminSession, adminToken]);
-
-  useEffect(() => {
     if (accountToken) {
-      window.localStorage.setItem("pem-account-token", accountToken);
       loadAccount(accountToken);
     } else {
-      window.localStorage.removeItem("pem-account-token");
       setAccountUser(initialAccountUser);
       setAccountOrders([]);
       setAccountGifts(initialAccountGifts);
@@ -2478,6 +820,71 @@ export default function App() {
 
     verifyPayment();
   }, [accountToken]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verifyToken = params.get("verify");
+    if (!verifyToken) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await requestJson("/api/auth/verify-email", {
+          method: "POST",
+          payload: { token: verifyToken },
+        });
+        if (cancelled) return;
+        setOrderPlaced(
+          data?.alreadyVerified
+            ? "Email was already verified."
+            : "Thanks — your email is now verified.",
+        );
+      } catch (error) {
+        if (!cancelled) {
+          setOrderPlaced(error.message || "We could not verify that email link.");
+        }
+      } finally {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verify");
+        window.history.replaceState({}, "", url.toString());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const reference = trackingState.order?.reference;
+    if (!reference || typeof window === "undefined" || typeof window.EventSource === "undefined") {
+      return undefined;
+    }
+
+    const source = new window.EventSource(apiUrl(`/api/orders/${encodeURIComponent(reference)}/stream`), {
+      withCredentials: true,
+    });
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.order) {
+          setTrackingState((previous) => ({
+            ...previous,
+            order: payload.order,
+            loading: false,
+            error: "",
+          }));
+        }
+      } catch {
+        // Ignore malformed events.
+      }
+    };
+    source.onerror = () => {
+      // EventSource will retry automatically; nothing to do here.
+    };
+    return () => {
+      source.close();
+    };
+  }, [trackingState.order?.reference]);
 
   const visibleCategories = useMemo(() => {
     const availableCategories = [
@@ -3057,8 +1464,10 @@ export default function App() {
     }
   }
 
-  function getUserAuthHeaders(tokenOverride = accountToken) {
-    return tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : {};
+  function getUserAuthHeaders() {
+    // Authentication now flows through the httpOnly session cookie set by the server.
+    // Any caller still passing an override value is preserved as a no-op for backwards compatibility.
+    return {};
   }
 
   async function loadAccount(tokenOverride = accountToken) {
@@ -3173,13 +1582,7 @@ export default function App() {
         loading: true,
         error: "",
       }));
-      const data = await requestJson("/api/menu", {
-        headers: tokenOverride
-          ? {
-              Authorization: `Bearer ${tokenOverride}`,
-            }
-          : {},
-      });
+      const data = await requestJson("/api/menu");
       const mergedItems = mergeMenuCatalog(menuItems, data.menuItems || []);
       setMenuCatalog(mergedItems);
       writeCachedJson("pem-menu-cache", mergedItems);
@@ -3210,13 +1613,7 @@ export default function App() {
         loading: true,
         error: "",
       }));
-      const data = await requestJson("/api/settings", {
-        headers: tokenOverride
-          ? {
-              Authorization: `Bearer ${tokenOverride}`,
-            }
-          : {},
-      });
+      const data = await requestJson("/api/settings");
       const nextSettings = { ...initialBusinessSettings, ...(data.settings || {}) };
       const cachedSettingsValue = tokenOverride
         ? nextSettings
@@ -3264,11 +1661,7 @@ export default function App() {
         error: "",
         success: "",
       }));
-      const response = await fetch(apiUrl("/api/delivery-zones"), {
-        headers: {
-          Authorization: `Bearer ${tokenOverride}`,
-        },
-      });
+      const response = await apiFetch("/api/delivery-zones");
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.error || "Unable to load delivery zones.");
@@ -3315,11 +1708,7 @@ export default function App() {
         error: "",
       }));
 
-      const response = await fetch(apiUrl("/api/admin/summary"), {
-        headers: {
-          Authorization: `Bearer ${tokenOverride}`,
-        },
-      });
+      const response = await apiFetch("/api/admin/summary");
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -3379,7 +1768,7 @@ export default function App() {
       setAdminPassword("");
       setAdminLoginState({ loading: false, error: "" });
       setAdminSession({ ...initialAdminSession, ...(result.admin || {}) });
-      setAdminToken(result.token);
+      setAdminToken("session-active");
     } catch (error) {
       setAdminLoginState({
         loading: false,
@@ -3391,12 +1780,7 @@ export default function App() {
   async function handleAdminLogout() {
     try {
       if (adminToken) {
-        await fetch(apiUrl("/api/admin/logout"), {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${adminToken}`,
-          },
-        });
+        await apiFetch("/api/admin/logout", { method: "POST" });
       }
     } finally {
       setAdminSession(initialAdminSession);
@@ -3411,12 +1795,9 @@ export default function App() {
 
     try {
       setPasswordState({ loading: true, error: "", success: "" });
-      const result = await fetch(apiUrl("/api/admin/change-password"), {
+      const result = await apiFetch("/api/admin/change-password", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(passwordForm),
       });
       const data = await result.json().catch(() => ({}));
@@ -3459,12 +1840,9 @@ export default function App() {
         success: "",
       }));
 
-      const response = await fetch(apiUrl("/api/admin/delivery-zones"), {
+      const response = await apiFetch("/api/admin/delivery-zones", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           deliveryZones: deliveryZoneAdminState.zones,
         }),
@@ -3503,12 +1881,9 @@ export default function App() {
         error: "",
         success: "",
       }));
-      const response = await fetch(apiUrl("/api/admin/menu"), {
+      const response = await apiFetch("/api/admin/menu", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           menuItems: menuAdminState.items,
         }),
@@ -3547,12 +1922,9 @@ export default function App() {
         success: "",
       }));
 
-      const response = await fetch(apiUrl("/api/admin/settings"), {
+      const response = await apiFetch("/api/admin/settings", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           settings: settingsAdminState.settings,
         }),
@@ -3610,12 +1982,9 @@ export default function App() {
     try {
       setOrderActionState({ loadingRef: reference, error: "", success: "" });
 
-      const response = await fetch(apiUrl(`/api/admin/orders/${reference}/status`), {
+      const response = await apiFetch(`/api/admin/orders/${reference}/status`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
@@ -3657,12 +2026,9 @@ export default function App() {
       });
 
       for (const reference of selectedOrderReferences) {
-        const response = await fetch(apiUrl(`/api/admin/orders/${reference}/status`), {
+        const response = await apiFetch(`/api/admin/orders/${reference}/status`, {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: bulkOrderStatus }),
         });
         const data = await response.json().catch(() => ({}));
@@ -3695,12 +2061,9 @@ export default function App() {
     try {
       setOrderActionState({ loadingRef: reference, error: "", success: "" });
 
-      const response = await fetch(apiUrl(`/api/admin/contacts/${reference}/status`), {
+      const response = await apiFetch(`/api/admin/contacts/${reference}/status`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
@@ -3728,12 +2091,9 @@ export default function App() {
     try {
       setOrderActionState({ loadingRef: reference, error: "", success: "" });
 
-      const response = await fetch(apiUrl(`/api/admin/catering/${reference}/status`), {
+      const response = await apiFetch(`/api/admin/catering/${reference}/status`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
@@ -4001,13 +2361,18 @@ export default function App() {
         phone: normalizedPhone,
         address: normalizedAddress,
       });
-      setAccountToken(data.token || "");
+      setAccountToken("session-active");
+      if (data?.user) {
+        setAccountUser((previous) => ({ ...previous, ...data.user }));
+      }
       setSignupForm(initialAccountForm);
       setLoginForm(initialLoginForm);
       setAccountState({
         loading: false,
         error: "",
-        success: "Your PEM account is ready. You can now save meals, addresses, and order history.",
+        success: data?.requiresEmailVerification
+          ? "Account created. Check your email to verify the address — you can keep using PEM in the meantime."
+          : "Your PEM account is ready. You can now save meals, addresses, and order history.",
       });
     } catch (error) {
       setAccountState({
@@ -4024,12 +2389,17 @@ export default function App() {
     try {
       setAccountState({ loading: true, error: "", success: "" });
       const data = await postJson("/api/auth/login", loginForm);
-      setAccountToken(data.token || "");
+      setAccountToken("session-active");
+      if (data?.user) {
+        setAccountUser((previous) => ({ ...previous, ...data.user }));
+      }
       setLoginForm(initialLoginForm);
       setAccountState({
         loading: false,
         error: "",
-        success: "Welcome back to PEM.",
+        success: data?.requiresEmailVerification
+          ? "Welcome back to PEM. Verify your email when you have a moment to unlock the full account."
+          : "Welcome back to PEM.",
       });
     } catch (error) {
       setAccountState({
@@ -6565,7 +4935,7 @@ export default function App() {
                   }
                 >
                   <div className="meal-card__media">
-                    <img src={item.imageUrl || item.image} alt={item.name} />
+                    <img src={item.imageUrl || item.image} alt={item.name} loading="lazy" decoding="async" />
                     <div className="meal-card__gradient" />
                     {item.soldOut ? <div className="meal-card__overlay">Sold Out</div> : null}
                     <div className="meal-card__chips">
@@ -8667,6 +7037,17 @@ export default function App() {
           </div>
         </div>
       </aside>
+      <MobileBottomNav
+        activePage={activePage}
+        cartCount={Object.values(cart).reduce((sum, qty) => sum + Number(qty || 0), 0)}
+        onNavigate={(target) => {
+          if (target === "cart") {
+            setShowCart(true);
+            return;
+          }
+          navigateToPage(target);
+        }}
+      />
     </div>
   );
 }
