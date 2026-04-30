@@ -1,7 +1,17 @@
 import { Component, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import * as Sentry from "@sentry/react";
 import App from "./App.jsx";
+import { ToastProvider } from "./app/components.jsx";
 import "./index.css";
+
+if (import.meta.env.VITE_SENTRY_DSN) {
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    tracesSampleRate: Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE) || 0.1,
+  });
+}
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -16,6 +26,9 @@ class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     if (typeof console !== "undefined") {
       console.error("[pem-error-boundary]", error, info?.componentStack);
+    }
+    if (import.meta.env.VITE_SENTRY_DSN) {
+      Sentry.captureException(error, { extra: { componentStack: info?.componentStack } });
     }
   }
 
@@ -84,7 +97,9 @@ class ErrorBoundary extends Component {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

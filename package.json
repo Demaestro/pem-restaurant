@@ -10,23 +10,34 @@
     "build": "vite build",
     "optimize-images": "node scripts/optimize-images.mjs",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@sentry/node": "^8.40.0",
+    "@sentry/react": "^8.40.0",
     "@supabase/supabase-js": "^2.50.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
     "openai": "^4.104.0",
+    "otpauth": "^9.3.6",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "jsdom": "^25.0.1",
     "sharp": "^0.34.3",
-    "vite": "^5.4.14"
+    "vite": "^5.4.14",
+    "vitest": "^2.1.8"
   }
 }

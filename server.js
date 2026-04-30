@@ -2,6 +2,9 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
+import pinoHttp from "pino-http";
+import * as Sentry from "@sentry/node";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -10,6 +13,13 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { createStorage } from "./lib/storage.js";
 import { createMailer } from "./lib/mailer.js";
+import { logger, createHttpLogger } from "./lib/logger.js";
+import {
+  buildOtpAuthQrDataUrl,
+  createTotpSecret,
+  generateRecoveryCodes,
+  verifyTotpCode,
+} from "./lib/totp.js";
 import {
   generateToken,
   hashToken,
@@ -22,6 +32,14 @@ import {
 } from "./lib/security.js";
 
 dotenv.config();
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || "development",
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.1,
+  });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,6 +141,28 @@ const allowedOrigins = [...new Set([...frontendUrls, "http://localhost:5173", "h
 function isLocalDevOrigin(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
 }
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", ...allowedOrigins, "https://api.paystack.co"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+      },
+    },
+  }),
+);
+
+app.use(pinoHttp(createHttpLogger()));
 
 app.use(
   cors({
@@ -298,6 +338,19 @@ function asyncHandler(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
   };
+}
+
+function recordAudit(request, entry) {
+  const ip = request?.ip || request?.headers?.["x-forwarded-for"] || "";
+  return storage
+    .createAuditLog({
+      ...entry,
+      ip: typeof ip === "string" ? ip.split(",")[0].trim() : ip,
+      createdAt: new Date().toISOString(),
+    })
+    .catch((error) => {
+      logger.warn({ err: error.message, action: entry?.action }, "audit log write failed");
+    });
 }
 
 function isCardPaymentMethod(method) {
@@ -1041,7 +1094,7 @@ app.post("/api/auth/signup", authRateLimiter, asyncHandler(async (request, respo
   });
 
   await sendVerificationEmail(user.email).catch((error) => {
-    console.error("[signup] verification email send failed:", error.message);
+    logger.error({ err: error.message }, "signup verification email send failed");
   });
 
   const session = await persistSession({ scope: "user", email: user.email });
@@ -1705,7 +1758,7 @@ app.get("/api/delivery-zones", asyncHandler(async (_request, response) => {
 }));
 
 app.post("/api/admin/login", authRateLimiter, asyncHandler(async (request, response) => {
-  const { username, password } = request.body || {};
+  const { username, password, totpCode } = request.body || {};
 
   if (!password) {
     return response.status(400).json({ error: "Password is required." });
@@ -1729,14 +1782,36 @@ app.post("/api/admin/login", authRateLimiter, asyncHandler(async (request, respo
   );
 
   if (!matchedStaffAdmin && !ownerMatch) {
+    await recordAudit(request, {
+      actorType: "admin",
+      actorId: normalizedUsername || "unknown",
+      action: "admin.login.failed",
+    });
     return response.status(401).json({ error: "Incorrect admin credentials." });
   }
 
+  const resolvedUsername = matchedStaffAdmin?.username || "owner";
+  const credential = await storage.getAdminCredential(resolvedUsername);
+  if (credential?.totpEnabled) {
+    if (!totpCode) {
+      return response.status(401).json({ error: "Two-factor code required.", requiresTotp: true });
+    }
+    if (!verifyTotpCode(credential.totpSecret, totpCode)) {
+      await recordAudit(request, {
+        actorType: "admin",
+        actorId: resolvedUsername,
+        action: "admin.login.totp_failed",
+      });
+      return response.status(401).json({ error: "Invalid two-factor code.", requiresTotp: true });
+    }
+  }
+
   const sessionData = {
-    username: matchedStaffAdmin?.username || "owner",
+    username: resolvedUsername,
     label: matchedStaffAdmin?.label || "Owner",
     branchId: matchedStaffAdmin?.branchId || "",
     isOwner: !matchedStaffAdmin,
+    totpEnabled: Boolean(credential?.totpEnabled),
   };
   const session = await persistSession({
     scope: "admin",
@@ -1745,10 +1820,81 @@ app.post("/api/admin/login", authRateLimiter, asyncHandler(async (request, respo
   });
   setSessionCookie(response, ADMIN_COOKIE, session.token, session.expiresAt);
 
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: sessionData.username,
+    action: "admin.login.success",
+  });
+
   return response.json({
     admin: { ...sessionData, createdAt: session.createdAt },
     session: { expiresAt: session.expiresAt },
   });
+}));
+
+app.post("/api/admin/2fa/setup", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const username = request.adminSession.username;
+  const secret = createTotpSecret();
+  const recoveryCodes = generateRecoveryCodes();
+  const recoveryCodeHashes = recoveryCodes.map((code) => hashToken(code));
+  await storage.upsertAdminCredential({
+    username,
+    totpSecret: secret,
+    totpEnabled: false,
+    recoveryCodeHashes,
+  });
+  const otpAuthQr = await buildOtpAuthQrDataUrl(secret, username);
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: username,
+    action: "admin.2fa.setup_started",
+  });
+  response.json({ secret, otpAuthQr, recoveryCodes });
+}));
+
+app.post("/api/admin/2fa/enable", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const username = request.adminSession.username;
+  const credential = await storage.getAdminCredential(username);
+  if (!credential?.totpSecret) {
+    return response.status(400).json({ error: "Run 2FA setup first." });
+  }
+  if (!verifyTotpCode(credential.totpSecret, request.body?.totpCode)) {
+    return response.status(401).json({ error: "Invalid two-factor code." });
+  }
+  await storage.upsertAdminCredential({ ...credential, totpEnabled: true });
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: username,
+    action: "admin.2fa.enabled",
+  });
+  response.json({ ok: true });
+}));
+
+app.post("/api/admin/2fa/disable", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const username = request.adminSession.username;
+  const credential = await storage.getAdminCredential(username);
+  if (credential?.totpEnabled && !verifyTotpCode(credential.totpSecret, request.body?.totpCode)) {
+    return response.status(401).json({ error: "Invalid two-factor code." });
+  }
+  await storage.upsertAdminCredential({
+    username,
+    totpSecret: "",
+    totpEnabled: false,
+    recoveryCodeHashes: [],
+  });
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: username,
+    action: "admin.2fa.disabled",
+  });
+  response.json({ ok: true });
+}));
+
+app.get("/api/admin/audit-log", requireAdmin, requireOwnerAdmin, asyncHandler(async (request, response) => {
+  const limit = Math.min(500, Math.max(1, Number(request.query?.limit) || 100));
+  const offset = Math.max(0, Number(request.query?.offset) || 0);
+  const entries = await storage.listAuditLogs({ limit, offset });
+  response.json({ entries });
 }));
 
 app.post("/api/admin/logout", asyncHandler(async (request, response) => {
@@ -1807,6 +1953,12 @@ app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHan
   await persistAdminPassword(hashed);
   await storage.deleteSessionsByEmail("", "admin").catch(() => {});
 
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: request.adminSession.username,
+    action: "admin.password_changed",
+  });
+
   response.json({
     message: "Admin password updated successfully. Please sign in again.",
   });
@@ -1854,6 +2006,11 @@ app.put("/api/admin/settings", requireAdmin, requireOwnerAdmin, asyncHandler(asy
   }
 
   const savedSettings = await storage.updateSettings(settings);
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: request.adminSession.username,
+    action: "admin.settings.updated",
+  });
   response.json({
     message: "Business settings updated successfully.",
     settings: savedSettings,
@@ -2262,6 +2419,15 @@ app.patch("/api/admin/orders/:reference/status", requireAdmin, asyncHandler(asyn
   }
   const order = await storage.updateOrderStatus(reference, status);
 
+  await recordAudit(request, {
+    actorType: "admin",
+    actorId: request.adminSession.username,
+    action: "admin.order.status_changed",
+    targetType: "order",
+    targetId: reference,
+    metadata: { status },
+  });
+
   publishOrderEvent(reference, { type: "status", status, order });
 
   if (status === "delivered" || status === "out_for_delivery") {
@@ -2453,7 +2619,7 @@ app.post("/api/ai/dietary-match", aiRateLimiter, asyncHandler(async (request, re
     const recommendation = await buildAiDietaryResponse(needs, menuItems);
     return response.json(recommendation);
   } catch (error) {
-    console.error("Dietary AI request failed, using fallback matcher.", error);
+    logger.warn({ err: error.message }, "dietary AI request failed, using fallback matcher");
     return response.json({
       ...buildFallbackDietaryResponse(needs, menuItems),
       degraded: true,
@@ -2546,7 +2712,13 @@ app.use((error, request, response, _next) => {
   const safeMessage = status >= 400 && status < 500 && typeof error?.message === "string"
     ? error.message
     : "Something went wrong on the server.";
-  console.error(`[api-error ${requestId}]`, request.method, request.path, error?.message || error);
+  logger.error(
+    { requestId, method: request.method, path: request.path, err: error?.message || String(error) },
+    "api error",
+  );
+  if (process.env.SENTRY_DSN && status >= 500) {
+    Sentry.captureException(error, { tags: { requestId } });
+  }
   if (response.headersSent) return;
   response.status(status).json({ error: safeMessage, requestId });
 });
@@ -2557,10 +2729,10 @@ async function migrateStaffAdminPasswordsAtRest() {
     const { text, mutated } = hashStaffAdminsText(settings.staffAdminsText);
     if (mutated) {
       await storage.updateSettings({ ...settings, staffAdminsText: text });
-      console.log("[startup] Hashed plaintext staff admin passwords in business settings.");
+      logger.info("startup: hashed plaintext staff admin passwords in business settings");
     }
   } catch (error) {
-    console.error("[startup] Failed to migrate staff admin passwords:", error.message);
+    logger.error({ err: error.message }, "startup: failed to migrate staff admin passwords");
   }
 }
 
@@ -2575,13 +2747,13 @@ storage.init()
     await migrateStaffAdminPasswordsAtRest();
     startSessionJanitor();
     if (!isHashedPassword(adminPassword) && process.env.ADMIN_PASSWORD) {
-      console.warn("[startup] ADMIN_PASSWORD is plaintext. Run /api/admin/change-password to upgrade to a hashed credential.");
+      logger.warn("startup: ADMIN_PASSWORD is plaintext. Run /api/admin/change-password to upgrade.");
     }
     app.listen(PORT, () => {
-      console.log(`PEM API server running on http://localhost:${PORT} using ${storage.mode} storage`);
+      logger.info({ port: PORT, mode: storage.mode }, "PEM API server running");
     });
   })
   .catch((error) => {
-    console.error("Failed to start server:", error);
+    logger.fatal({ err: error.message }, "failed to start server");
     process.exit(1);
   });

@@ -240,4 +240,27 @@ add column if not exists email_verified boolean not null default false;
 alter table public.users
 add column if not exists email_verified_at timestamptz;
 
+create table if not exists public.audit_logs (
+  id bigint generated always as identity primary key,
+  actor_type text not null,
+  actor_id text,
+  action text not null,
+  target_type text,
+  target_id text,
+  metadata jsonb not null default '{}'::jsonb,
+  ip text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists audit_logs_created_at_idx on public.audit_logs (created_at desc);
+create index if not exists audit_logs_actor_idx on public.audit_logs (actor_type, actor_id);
+
+create table if not exists public.admin_credentials (
+  username text primary key,
+  totp_secret text,
+  totp_enabled boolean not null default false,
+  recovery_code_hashes jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 notify pgrst, 'reload schema';

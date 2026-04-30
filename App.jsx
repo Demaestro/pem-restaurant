@@ -82,7 +82,7 @@ import {
   resolvePageFromHash,
   sanitizePhoneInput,
 } from "./app/utils.js";
-import { QuantityControl, RatingStars, StarRatingInput, ThemeToggle } from "./app/components.jsx";
+import { MobileBottomNav, QuantityControl, RatingStars, StarRatingInput, ThemeToggle, useToast } from "./app/components.jsx";
 
 export default function App() {
   const [theme, setTheme] = useState("light");
@@ -4924,7 +4924,7 @@ export default function App() {
                   }
                 >
                   <div className="meal-card__media">
-                    <img src={item.imageUrl || item.image} alt={item.name} />
+                    <img src={item.imageUrl || item.image} alt={item.name} loading="lazy" decoding="async" />
                     <div className="meal-card__gradient" />
                     {item.soldOut ? <div className="meal-card__overlay">Sold Out</div> : null}
                     <div className="meal-card__chips">
@@ -7026,6 +7026,17 @@ export default function App() {
           </div>
         </div>
       </aside>
+      <MobileBottomNav
+        activePage={activePage}
+        cartCount={Object.values(cart).reduce((sum, qty) => sum + Number(qty || 0), 0)}
+        onNavigate={(target) => {
+          if (target === "cart") {
+            setShowCart(true);
+            return;
+          }
+          navigateToPage(target);
+        }}
+      />
     </div>
   );
 }
