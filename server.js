@@ -205,6 +205,14 @@ const storage = createStorage({
   defaultMenuItems,
   defaultSettings,
 });
+let storageReady = null;
+
+function initializeStorage() {
+  if (!storageReady) {
+    storageReady = storage.init();
+  }
+  return storageReady;
+}
 
 const allowedOrigins = [...new Set([...frontendUrls, "http://localhost:5173", "http://127.0.0.1:5173"])];
 
@@ -3601,15 +3609,26 @@ function shutdownServer(signal) {
   }, 10000).unref();
 }
 
-storage.init()
-  .then(() => {
-    httpServer = app.listen(PORT, () => {
-      console.log(`PEM API server running on http://localhost:${PORT} using ${storage.mode} storage`);
-    });
-    process.once("SIGINT", () => shutdownServer("SIGINT"));
-    process.once("SIGTERM", () => shutdownServer("SIGTERM"));
-  })
+async function startServer() {
+  await initializeStorage();
+  httpServer = app.listen(PORT, () => {
+    console.log(`PEM API server running on http://localhost:${PORT} using ${storage.mode} storage`);
+  });
+  process.once("SIGINT", () => shutdownServer("SIGINT"));
+  process.once("SIGTERM", () => shutdownServer("SIGTERM"));
+}
+
+export default async function handler(request, response) {
+  await initializeStorage();
+  return app(request, response);
+}
+
+export { app, initializeStorage };
+
+if (process.env.VERCEL !== "1" && process.env.PEM_DISABLE_SERVER_LISTEN !== "1") {
+  startServer()
   .catch((error) => {
     console.error("Failed to start server:", error);
     process.exit(1);
   });
+}
