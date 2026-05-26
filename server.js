@@ -21,9 +21,9 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, "data");
-const DB_PATH = path.join(DATA_DIR, "submissions.json");
-const ENV_PATH = path.join(__dirname, ".env");
+const DATA_DIR = process.env.PEM_DATA_DIR || path.join(__dirname, "data");
+const DB_PATH = process.env.PEM_DB_PATH || path.join(DATA_DIR, "submissions.json");
+const ENV_PATH = process.env.PEM_ADMIN_ENV_PATH || path.join(__dirname, ".env");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -32,6 +32,7 @@ let adminPassword = process.env.ADMIN_PASSWORD || "change-admin-password";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const forceLocalStorage = process.env.STORAGE_MODE === "local";
 const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || "";
+const paystackBaseUrl = (process.env.PAYSTACK_BASE_URL || "https://api.paystack.co").replace(/\/+$/, "");
 const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
 const frontendUrls = [process.env.FRONTEND_URL, ...(process.env.FRONTEND_URLS || "").split(",")]
   .map((value) => String(value || "").trim())
@@ -939,30 +940,7 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
 }
 
 async function decrementMenuStockForItems(orderItems) {
-  const menuItems = await storage.getMenuItems();
-  const normalized = normalizeCheckoutItems(orderItems, menuItems);
-  if (normalized.error) {
-    return { ok: false, error: normalized.error };
-  }
-
-  const orderedQuantityById = new Map(
-    normalized.items.map((item) => [Number(item.id), Number(item.quantity) || 0]),
-  );
-  const nextMenuItems = menuItems.map((menuItem) => {
-    const orderedQuantity = orderedQuantityById.get(Number(menuItem.id)) || 0;
-    if (!orderedQuantity || Number(menuItem.stockQuantity || 0) <= 0) {
-      return menuItem;
-    }
-    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - orderedQuantity);
-    return {
-      ...menuItem,
-      stockQuantity: remainingStock,
-      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
-    };
-  });
-
-  await storage.updateMenuItems(nextMenuItems);
-  return { ok: true };
+  return storage.reserveMenuStock(orderItems);
 }
 
 function normalizePhoneDigits(value) {
@@ -1570,7 +1548,7 @@ async function persistAdminPassword(nextPassword) {
 }
 
 async function initializePaystackTransaction({ email, amount, reference, metadata }) {
-  const response = await fetch("https://api.paystack.co/transaction/initialize", {
+  const response = await fetch(`${paystackBaseUrl}/transaction/initialize`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${paystackSecretKey}`,
@@ -1594,7 +1572,7 @@ async function initializePaystackTransaction({ email, amount, reference, metadat
 }
 
 async function verifyPaystackTransaction(reference) {
-  const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+  const response = await fetch(`${paystackBaseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
     headers: {
       Authorization: `Bearer ${paystackSecretKey}`,
     },

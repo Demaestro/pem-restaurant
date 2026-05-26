@@ -237,4 +237,70 @@ create table if not exists public.password_recovery_requests (
   updated_at timestamptz
 );
 
+create or replace function public.reserve_menu_stock(items jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  entry jsonb;
+  requested_item_id integer;
+  requested_quantity integer;
+  current_item record;
+begin
+  if jsonb_typeof(items) <> 'array' or jsonb_array_length(items) = 0 then
+    return jsonb_build_object('ok', false, 'error', 'At least one order item is required.');
+  end if;
+
+  for entry in select value from jsonb_array_elements(items) loop
+    if coalesce(entry->>'item_id', '') !~ '^[0-9]+$' or coalesce(entry->>'quantity', '') !~ '^[0-9]+$' then
+      return jsonb_build_object('ok', false, 'error', 'One of the selected menu items is no longer available.');
+    end if;
+
+    requested_item_id := (entry->>'item_id')::integer;
+    requested_quantity := (entry->>'quantity')::integer;
+
+    if requested_quantity < 1 then
+      return jsonb_build_object('ok', false, 'error', 'One of the selected menu items is no longer available.');
+    end if;
+
+    select item_id, name, stock_quantity, sold_out, hidden
+    into current_item
+    from public.menu_items
+    where item_id = requested_item_id
+    for update;
+
+    if not found then
+      return jsonb_build_object('ok', false, 'error', 'One of the selected menu items is no longer available.');
+    end if;
+
+    if current_item.hidden or current_item.sold_out then
+      return jsonb_build_object('ok', false, 'error', current_item.name || ' is currently unavailable. Please remove it and try again.');
+    end if;
+
+    if current_item.stock_quantity > 0 and requested_quantity > current_item.stock_quantity then
+      return jsonb_build_object('ok', false, 'error', current_item.name || ' only has limited stock left right now.');
+    end if;
+  end loop;
+
+  for entry in select value from jsonb_array_elements(items) loop
+    requested_item_id := (entry->>'item_id')::integer;
+    requested_quantity := (entry->>'quantity')::integer;
+
+    update public.menu_items
+    set
+      stock_quantity = greatest(0, stock_quantity - requested_quantity),
+      sold_out = case
+        when stock_quantity > 0 and greatest(0, stock_quantity - requested_quantity) = 0 then true
+        else sold_out
+      end
+    where item_id = requested_item_id
+      and stock_quantity > 0;
+  end loop;
+
+  return jsonb_build_object('ok', true, 'error', '');
+end;
+$$;
+
 notify pgrst, 'reload schema';

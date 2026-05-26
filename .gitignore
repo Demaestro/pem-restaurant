@@ -3,3 +3,5 @@ dist
 .vite
 .env
 data/submissions.json
+*_before_startup_fix.*
+__gift_ref_*

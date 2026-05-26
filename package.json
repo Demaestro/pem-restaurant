@@ -10,7 +10,8 @@
     "build": "vite build",
     "optimize-images": "node scripts/optimize-images.mjs",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.3",
