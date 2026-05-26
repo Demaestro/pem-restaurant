@@ -19,6 +19,7 @@
   --success: #1e6b3b;
   --error: #a12626;
   --overlay: linear-gradient(180deg, transparent 8%, rgba(18, 10, 10, 0.55) 100%);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 :root[data-theme="dark"] {
@@ -48,10 +49,13 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
+  min-width: 320px;
+  overflow-x: hidden;
   font-family: "Manrope", sans-serif;
   color: var(--text);
   background:
@@ -95,6 +99,15 @@ input,
 select,
 textarea {
   font: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
 }
 
 button:disabled {
@@ -108,6 +121,7 @@ button:disabled {
 
 .app-shell {
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .auth-shell {
@@ -244,9 +258,9 @@ button:disabled {
   margin: 0.35rem 0 1rem;
   max-width: 10ch;
   font-family: "Instrument Serif", serif;
-  font-size: clamp(2.7rem, 4.6vw, 4.8rem);
+  font-size: 4rem;
   line-height: 0.98;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .auth-hero__copy p,
@@ -322,7 +336,7 @@ button:disabled {
 
 .auth-card__top h3 {
   margin: 0.25rem 0 0;
-  font-size: clamp(1.5rem, 2.6vw, 2rem);
+  font-size: 1.8rem;
 }
 
 .auth-card__top--signup {
@@ -583,6 +597,7 @@ button:disabled {
   flex-direction: column;
   gap: 0.3rem;
   justify-items: start;
+  min-width: 0;
 }
 
 .theme-fab {
@@ -714,6 +729,9 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 1.4rem;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: center;
   color: var(--muted);
 }
 
@@ -764,6 +782,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  min-width: 0;
 }
 
 .topbar__account-button {
@@ -987,7 +1006,7 @@ button:disabled {
 
 .pre-menu-tools h2 {
   margin: 0.15rem 0 0.35rem;
-  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  font-size: 1.8rem;
 }
 
 .pre-menu-tools p:last-child,
@@ -1153,7 +1172,7 @@ button:disabled {
 }
 
 .hero h1 {
-  font-size: clamp(2.45rem, 4.2vw, 4rem);
+  font-size: 3.5rem;
   max-width: 12ch;
 }
 
@@ -1320,7 +1339,7 @@ button:disabled {
 }
 
 .section-heading h2 {
-  font-size: clamp(2.1rem, 4vw, 3.6rem);
+  font-size: 3.15rem;
   max-width: 13ch;
 }
 
@@ -1490,7 +1509,7 @@ button:disabled {
 .dietary-result__header h3 {
   margin: 0;
   font-family: "Instrument Serif", serif;
-  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  font-size: 2.1rem;
   font-weight: 400;
   line-height: 1.05;
 }
@@ -2926,15 +2945,16 @@ button:disabled {
 .quick-add-sheet__panel {
   position: absolute;
   right: 1rem;
-  bottom: 1rem;
+  bottom: calc(1rem + var(--safe-bottom));
   width: min(27rem, calc(100% - 2rem));
+  max-height: min(42rem, calc(100dvh - 2rem - var(--safe-bottom)));
   border-radius: 1.5rem;
   border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--line));
   background: color-mix(in srgb, var(--surface-strong) 95%, transparent);
   box-shadow: 0 24px 60px rgba(20, 10, 10, 0.22);
   transform: translateY(105%);
   transition: transform 0.25s ease;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .quick-add-sheet.is-open .quick-add-sheet__backdrop {
@@ -3060,7 +3080,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   width: min(32rem, 100%);
-  height: 100%;
+  height: 100dvh;
   background: var(--surface-strong);
   transform: translateX(100%);
   transition: transform 0.25s ease;
@@ -3099,7 +3119,8 @@ button:disabled {
 
 .cart-drawer__body {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 1.35rem 1.35rem 1.1rem;
 }
 
@@ -3730,7 +3751,7 @@ button:disabled {
   .auth-hero__copy h1,
   .auth-loading-card h1 {
     max-width: none;
-    font-size: clamp(2.5rem, 10vw, 3.6rem);
+    font-size: 2.65rem;
   }
 
   .auth-card__section {
@@ -3834,7 +3855,7 @@ button:disabled {
   }
 
   .support-fab {
-    bottom: 5.2rem;
+    bottom: calc(5.2rem + var(--safe-bottom));
     padding: 0.72rem 0.92rem;
     font-size: 0.82rem;
   }
@@ -3861,7 +3882,7 @@ button:disabled {
     position: fixed;
     left: 0.75rem;
     right: 0.75rem;
-    bottom: 1rem;
+    bottom: calc(0.75rem + var(--safe-bottom));
     z-index: 58;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3886,6 +3907,9 @@ button:disabled {
     color: var(--text);
     text-decoration: none;
     font-size: 0.84rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mobile-quickbar button.is-active {
@@ -4416,6 +4440,10 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
+  .app-shell {
+    padding-bottom: calc(5.75rem + var(--safe-bottom));
+  }
+
   .menu-skeleton-grid,
   .menu-grid {
     grid-template-columns: 1fr;
@@ -4430,15 +4458,7 @@ button:disabled {
 
   .support-fab,
   .cart-fab {
-    bottom: 5.5rem;
-  }
-
-  .cart-fab {
-    right: 0.9rem;
-  }
-
-  .support-fab {
-    left: 0.9rem;
+    display: none;
   }
 
   .menu-status-row,
@@ -4448,6 +4468,144 @@ button:disabled {
 
   .mobile-quickbar button.is-active::after {
     bottom: 0.42rem;
+  }
+}
+
+@media (max-width: 540px) {
+  .topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .topbar__identity {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .brand,
+  .topbar__welcome {
+    min-width: 0;
+  }
+
+  .brand__text,
+  .topbar__welcome {
+    max-width: 100%;
+  }
+
+  .brand__text small {
+    display: none;
+  }
+
+  .topbar__welcome {
+    text-align: right;
+  }
+
+  .topbar__welcome strong {
+    display: block;
+    max-width: 9.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar__actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .cart-toggle {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .hero,
+  .pre-menu-tools,
+  .receipt-section,
+  .account-section,
+  .menu-section,
+  .combo-section,
+  .reviews-section,
+  .trust-section,
+  .tracking-section,
+  .catering-section,
+  .contact-section,
+  .admin-section {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  .hero h1,
+  .section-heading h2 {
+    font-size: 2.35rem;
+  }
+
+  .pre-menu-tools h2,
+  .dietary-assistant__intro h2,
+  .dietary-result__header h3 {
+    font-size: 1.65rem;
+  }
+
+  .auth-card__top h3 {
+    font-size: 1.55rem;
+  }
+
+  .mobile-quickbar {
+    left: 0.5rem;
+    right: 0.5rem;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.3rem;
+    padding: 0.35rem;
+  }
+
+  .mobile-quickbar a,
+  .mobile-quickbar button {
+    min-height: 2.45rem;
+    padding: 0 0.2rem;
+    font-size: 0.72rem;
+  }
+
+  .support-fab {
+    left: 0.65rem;
+    max-width: calc(50vw - 1rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cart-fab {
+    right: 0.65rem;
+    max-width: calc(50vw - 1rem);
+  }
+
+  .quick-add-sheet__panel {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(0.5rem + var(--safe-bottom));
+    max-height: calc(100dvh - 1rem - var(--safe-bottom));
+  }
+}
+
+@media (max-width: 380px) {
+  .brand__text strong {
+    font-size: 0.86rem;
+  }
+
+  .topbar__welcome strong {
+    max-width: 7rem;
+    font-size: 0.82rem;
+  }
+
+  .hero h1,
+  .section-heading h2,
+  .auth-hero__copy h1,
+  .auth-loading-card h1 {
+    font-size: 2.1rem;
+  }
+
+  .cart-toggle span,
+  .cart-fab span {
+    display: none;
   }
 }
 

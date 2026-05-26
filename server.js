@@ -9,6 +9,12 @@ import OpenAI from "openai";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { parse as parseCookieHeader, serialize as serializeCookie } from "cookie";
+import {
+  PAYSTACK_CURRENCY,
+  normalizeCheckoutItems,
+  paystackPaymentMatchesOrder,
+  resolveCheckoutDelivery,
+} from "./lib/checkout.js";
 import { createStorage } from "./lib/storage.js";
 
 dotenv.config();
@@ -21,6 +27,7 @@ const ENV_PATH = path.join(__dirname, ".env");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const isProduction = process.env.NODE_ENV === "production";
 let adminPassword = process.env.ADMIN_PASSWORD || "change-admin-password";
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5-mini";
 const forceLocalStorage = process.env.STORAGE_MODE === "local";
@@ -49,6 +56,7 @@ const ADMIN_REFRESH_COOKIE = "pem_admin_refresh";
 const AUTH_COOKIE_PATH = "/";
 const AUTH_ISSUER = "pem-restaurant";
 const AUTH_AUDIENCE = "pem-app";
+let adminAuthEpoch = Date.now();
 const authJwtSecret =
   process.env.AUTH_JWT_SECRET
   || process.env.JWT_SECRET
@@ -85,6 +93,21 @@ const authAttemptPolicies = {
     error: "Too many password reset attempts. Please wait 30 minutes and try again.",
   },
 };
+
+function resolveTrustProxySetting(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized || ["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return Number(normalized);
+  }
+  if (["true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  return String(value).split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const runtimeIncidents = [];
 const MAX_RUNTIME_INCIDENTS = 40;
@@ -107,7 +130,16 @@ const branchGeoPresets = {
   },
 };
 app.disable("x-powered-by");
-app.set("trust proxy", 1);
+app.set("trust proxy", resolveTrustProxySetting(process.env.TRUST_PROXY));
+app.use((request, response, next) => {
+  request.requestId = crypto.randomUUID();
+  response.setHeader("X-Request-Id", request.requestId);
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self), payment=(self)");
+  next();
+});
 const defaultDeliveryZones = [
   { id: "gwarinpa", label: "Gwarinpa / Life Camp", fee: 1200, eta: "35 to 50 mins" },
   { id: "wuse", label: "Wuse / Utako / Jabi", fee: 1800, eta: "45 to 60 mins" },
@@ -289,11 +321,7 @@ function getRefreshTokenFromRequest(request, cookieName) {
 }
 
 function getClientAddress(request) {
-  const forwarded = String(request.headers["x-forwarded-for"] || "")
-    .split(",")
-    .map((value) => value.trim())
-    .find(Boolean);
-  return forwarded || request.ip || request.socket?.remoteAddress || "unknown";
+  return request.ip || request.socket?.remoteAddress || "unknown";
 }
 
 function buildAttemptKey(scope, request, identifier = "") {
@@ -360,11 +388,13 @@ function issueUserAuth(response, request, session) {
 
 function issueAdminAuth(response, request, session) {
   const accessToken = createAccessToken("admin", session.username, {
+    authEpoch: adminAuthEpoch,
     branchId: session.branchId || "",
     isOwner: Boolean(session.isOwner),
     label: session.label || "Owner",
   });
   const refreshToken = issueRefreshToken(adminRefreshSessions, "admin", session.username, {
+    authEpoch: adminAuthEpoch,
     branchId: session.branchId || "",
     isOwner: Boolean(session.isOwner),
     label: session.label || "Owner",
@@ -397,7 +427,12 @@ function getAdminSessionFromAccessToken(request) {
   const token = getAccessTokenFromRequest(request, ADMIN_ACCESS_COOKIE);
   const decoded = token ? decodeAccessToken(token) : null;
 
-  if (decoded?.scope === "admin" && decoded?.sub && !accessTokenBlacklist.has(decoded.jti)) {
+  if (
+    decoded?.scope === "admin" &&
+    decoded?.sub &&
+    Number(decoded.authEpoch || 0) === adminAuthEpoch &&
+    !accessTokenBlacklist.has(decoded.jti)
+  ) {
     return {
       createdAt: decoded.iat ? new Date(Number(decoded.iat) * 1000).toISOString() : new Date().toISOString(),
       username: String(decoded.sub || "").trim().toLowerCase(),
@@ -901,6 +936,33 @@ function getPromoDiscount(promoCode, subtotal, promoCodes = []) {
     type: promo.type,
     minimumOrder: promo.minimumOrder,
   };
+}
+
+async function decrementMenuStockForItems(orderItems) {
+  const menuItems = await storage.getMenuItems();
+  const normalized = normalizeCheckoutItems(orderItems, menuItems);
+  if (normalized.error) {
+    return { ok: false, error: normalized.error };
+  }
+
+  const orderedQuantityById = new Map(
+    normalized.items.map((item) => [Number(item.id), Number(item.quantity) || 0]),
+  );
+  const nextMenuItems = menuItems.map((menuItem) => {
+    const orderedQuantity = orderedQuantityById.get(Number(menuItem.id)) || 0;
+    if (!orderedQuantity || Number(menuItem.stockQuantity || 0) <= 0) {
+      return menuItem;
+    }
+    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - orderedQuantity);
+    return {
+      ...menuItem,
+      stockQuantity: remainingStock,
+      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
+    };
+  });
+
+  await storage.updateMenuItems(nextMenuItems);
+  return { ok: true };
 }
 
 function normalizePhoneDigits(value) {
@@ -1558,6 +1620,15 @@ app.get("/api/health", (_request, response) => {
   });
 });
 
+app.get("/api/ready", asyncHandler(async (_request, response) => {
+  await storage.getSettings();
+  response.json({
+    ok: true,
+    storageMode: storage.mode,
+    uptimeSeconds: Math.round(process.uptime()),
+  });
+}));
+
 app.post("/api/runtime-incidents", asyncHandler(async (request, response) => {
   const payload = request.body || {};
   pushRuntimeIncident({
@@ -2039,11 +2110,16 @@ app.patch("/api/account/notifications/read-all", requireUser, asyncHandler(async
 }));
 
 app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
-  const { customer, items, pricing, recipientEmail, giftMessage } = request.body || {};
+  const { customer, items, recipientEmail, giftMessage } = request.body || {};
   const sender = await storage.getUserByEmail(request.userSession.email);
-  const settings = await storage.getSettings();
+  const [settings, menuItems, deliveryZones] = await Promise.all([
+    storage.getSettings(),
+    storage.getMenuItems(),
+    storage.getDeliveryZones(),
+  ]);
   const promoCodes = parsePromoCodes(settings.promoCodesText);
   const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
+  const deliveryDetails = resolveCheckoutDelivery(customer, deliveryZones);
   const sanitizedPhone = sanitizePhoneInput(customer?.phone || sender?.phone);
   const normalizedRecipientEmail = String(recipientEmail || "").trim().toLowerCase();
   const normalizedSenderName = String(customer?.customerName || sender?.fullName || "").trim();
@@ -2091,12 +2167,6 @@ app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Add at least one meal before sending a gift." });
   }
 
-  if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
-    return response.status(400).json({
-      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
-    });
-  }
-
   if (String(customer?.paymentMethod || "").trim() !== "Bank transfer") {
     return response.status(400).json({ error: "Choose bank transfer to send a meal gift." });
   }
@@ -2105,8 +2175,13 @@ app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Add your transfer reference before sending this gift." });
   }
 
-  const subtotal = Number(pricing?.subtotal) || 0;
-  const delivery = Number(pricing?.delivery) || 0;
+  const normalizedOrderItems = normalizeCheckoutItems(items, menuItems);
+  if (normalizedOrderItems.error) {
+    return response.status(400).json({ error: normalizedOrderItems.error });
+  }
+
+  const subtotal = normalizedOrderItems.subtotal;
+  const delivery = deliveryDetails.delivery;
   const promo = getPromoDiscount(customer?.promoCode, subtotal, promoCodes);
 
   if (String(customer?.promoCode || "").trim() && !promo.valid) {
@@ -2120,25 +2195,9 @@ app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
   const discount = promo.valid ? promo.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
 
-  const menuItems = await storage.getMenuItems();
-  const soldOutItems = items.filter((item) =>
-    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
-  );
-
-  if (soldOutItems.length > 0) {
+  if (total < (Number(settings.minimumOrder) || 0)) {
     return response.status(400).json({
-      error: `${soldOutItems[0].name} is currently sold out. Please remove it and try again.`,
-    });
-  }
-
-  const unavailableStockItem = items.find((item) => {
-    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
-    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
-  });
-
-  if (unavailableStockItem) {
-    return response.status(400).json({
-      error: `${unavailableStockItem.name} only has limited stock left right now.`,
+      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
     });
   }
 
@@ -2153,10 +2212,10 @@ app.post("/api/gifts", requireUser, asyncHandler(async (request, response) => {
     branchName: selectedBranch.label,
     branchAddress: selectedBranch.address,
     branchPhone: selectedBranch.phone,
-    deliveryZone: String(customer?.deliveryZone || ""),
-    deliveryEta: String(customer?.deliveryEta || ""),
+    deliveryZone: deliveryDetails.deliveryZone,
+    deliveryEta: deliveryDetails.deliveryEta,
     giftMessage: normalizedGiftMessage,
-    items,
+    items: normalizedOrderItems.items,
     pricing: {
       subtotal,
       delivery,
@@ -2223,7 +2282,6 @@ app.post("/api/gifts/:reference/accept", requireUser, asyncHandler(async (reques
   const reference = String(request.params.reference || "").trim();
   const recipient = await storage.getUserByEmail(request.userSession.email);
   const gift = await storage.getGiftByReference(reference);
-  const menuItems = await storage.getMenuItems();
   const recipientAddress = String(request.body?.address || "").trim();
   const recipientLandmark = String(request.body?.landmark || "").trim();
   const recipientPhone = sanitizePhoneInput(request.body?.phone || recipient?.phone);
@@ -2252,25 +2310,9 @@ app.post("/api/gifts/:reference/accept", requireUser, asyncHandler(async (reques
     return response.status(400).json({ error: "Add a valid phone number before accepting this gift." });
   }
 
-  const soldOutItems = (gift.items || []).filter((item) =>
-    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
-  );
-
-  if (soldOutItems.length > 0) {
-    return response.status(400).json({
-      error: `${soldOutItems[0].name} is no longer available. Please ask the sender to update the gift.`,
-    });
-  }
-
-  const unavailableStockItem = (gift.items || []).find((item) => {
-    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
-    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
-  });
-
-  if (unavailableStockItem) {
-    return response.status(400).json({
-      error: `${unavailableStockItem.name} no longer has enough stock for this gift.`,
-    });
+  const stockUpdate = await decrementMenuStockForItems(gift.items || []);
+  if (!stockUpdate.ok) {
+    return response.status(400).json({ error: stockUpdate.error });
   }
 
   const order = await storage.createOrder({
@@ -2308,20 +2350,6 @@ app.post("/api/gifts/:reference/accept", requireUser, asyncHandler(async (reques
     createdAt: new Date().toISOString(),
     status: "received",
   });
-
-  const nextMenuItems = menuItems.map((menuItem) => {
-    const orderedItem = (gift.items || []).find((item) => Number(item.id) === Number(menuItem.id));
-    if (!orderedItem || Number(menuItem.stockQuantity || 0) <= 0) {
-      return menuItem;
-    }
-    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - Number(orderedItem.quantity || 0));
-    return {
-      ...menuItem,
-      stockQuantity: remainingStock,
-      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
-    };
-  });
-  await storage.updateMenuItems(nextMenuItems);
 
   const savedGift = await storage.updateGift(reference, {
     ...gift,
@@ -2494,7 +2522,7 @@ app.post("/api/admin/refresh", asyncHandler(async (request, response) => {
   }
 
   const refreshSession = consumeRefreshToken(adminRefreshSessions, refreshToken, "admin");
-  if (!refreshSession?.username) {
+  if (!refreshSession?.username || Number(refreshSession.authEpoch || 0) !== adminAuthEpoch) {
     clearAdminAuthCookies(response, request);
     return response.status(401).json({ error: "Your admin session has expired. Please sign in again." });
   }
@@ -2595,7 +2623,9 @@ app.post("/api/admin/change-password", requireAdmin, requireOwnerAdmin, asyncHan
   }
 
   await persistAdminPassword(newPassword);
+  adminAuthEpoch = Date.now();
   adminSessions.clear();
+  adminRefreshSessions.clear();
 
   response.json({
     message: "Admin password updated successfully. Please sign in again.",
@@ -2816,10 +2846,15 @@ app.put("/api/admin/menu", requireAdmin, requireOwnerAdmin, asyncHandler(async (
 }));
 
 app.post("/api/orders", asyncHandler(async (request, response) => {
-  const { customer, items, pricing } = request.body || {};
-  const settings = await storage.getSettings();
+  const { customer, items } = request.body || {};
+  const [settings, menuItems, deliveryZones] = await Promise.all([
+    storage.getSettings(),
+    storage.getMenuItems(),
+    storage.getDeliveryZones(),
+  ]);
   const promoCodes = parsePromoCodes(settings.promoCodesText);
   const selectedBranch = resolveBranchSelection(customer?.branchId, settings);
+  const deliveryDetails = resolveCheckoutDelivery(customer, deliveryZones);
   const sanitizedPhone = sanitizePhoneInput(customer?.phone);
 
   if (!customer?.customerName || !sanitizedPhone) {
@@ -2862,18 +2897,17 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
     return response.status(400).json({ error: "Scheduled orders must fall within branch business hours." });
   }
 
-  if ((Number(pricing?.total) || 0) < (Number(settings.minimumOrder) || 0)) {
-    return response.status(400).json({
-      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
-    });
-  }
-
   const optionalSession = getOptionalUserSession(request);
   const candidateEmail = String(optionalSession?.email || "").trim().toLowerCase();
   const linkedUser = candidateEmail ? await storage.getUserByEmail(candidateEmail) : null;
   const now = getLagosDateParts();
-  const subtotal = Number(pricing?.subtotal) || 0;
-  const delivery = Number(pricing?.delivery) || 0;
+  const normalizedOrderItems = normalizeCheckoutItems(items, menuItems);
+  if (normalizedOrderItems.error) {
+    return response.status(400).json({ error: normalizedOrderItems.error });
+  }
+
+  const subtotal = normalizedOrderItems.subtotal;
+  const delivery = deliveryDetails.delivery;
   const promo = getPromoDiscount(customer?.promoCode, subtotal, promoCodes);
 
   if (String(customer?.promoCode || "").trim() && !promo.valid) {
@@ -2890,25 +2924,9 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   const discount = birthdayDiscountApplied ? birthdayDiscount : promoDiscount;
   const total = Math.max(0, subtotal + delivery - discount);
 
-  const menuItems = await storage.getMenuItems();
-  const soldOutItems = items.filter((item) =>
-    menuItems.some((menuItem) => menuItem.id === Number(item.id) && menuItem.soldOut),
-  );
-
-  if (soldOutItems.length > 0) {
+  if (total < (Number(settings.minimumOrder) || 0)) {
     return response.status(400).json({
-      error: `${soldOutItems[0].name} is currently sold out. Please remove it and try again.`,
-    });
-  }
-
-  const unavailableStockItem = items.find((item) => {
-    const menuItem = menuItems.find((entry) => entry.id === Number(item.id));
-    return menuItem && Number(menuItem.stockQuantity || 0) > 0 && Number(item.quantity || 0) > Number(menuItem.stockQuantity || 0);
-  });
-
-  if (unavailableStockItem) {
-    return response.status(400).json({
-      error: `${unavailableStockItem.name} only has limited stock left right now.`,
+      error: `The current minimum order is NGN ${Number(settings.minimumOrder || 0).toLocaleString("en-NG")}.`,
     });
   }
 
@@ -2921,9 +2939,12 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
       branchName: selectedBranch.label,
       branchAddress: selectedBranch.address,
       branchPhone: selectedBranch.phone,
+      deliveryZoneId: deliveryDetails.deliveryZoneId,
+      deliveryZone: deliveryDetails.deliveryZone,
+      deliveryEta: deliveryDetails.deliveryEta,
       operations: normalizeOrderOperations(customer?.operations),
     },
-    items,
+    items: normalizedOrderItems.items,
     pricing: {
       subtotal,
       delivery,
@@ -2943,19 +2964,16 @@ app.post("/api/orders", asyncHandler(async (request, response) => {
   const savedOrder = await storage.createOrder(order);
   const awaitingCardPayment = isCardPaymentMethod(customer?.paymentMethod);
 
-  const nextMenuItems = menuItems.map((menuItem) => {
-    const orderedItem = items.find((item) => Number(item.id) === Number(menuItem.id));
-    if (!orderedItem || Number(menuItem.stockQuantity || 0) <= 0) {
-      return menuItem;
+  if (!awaitingCardPayment) {
+    const stockUpdate = await decrementMenuStockForItems(savedOrder.items);
+    if (!stockUpdate.ok) {
+      await storage.updateOrder(savedOrder.reference, {
+        ...savedOrder,
+        status: "cancelled",
+      });
+      return response.status(409).json({ error: stockUpdate.error });
     }
-    const remainingStock = Math.max(0, Number(menuItem.stockQuantity || 0) - Number(orderedItem.quantity || 0));
-    return {
-      ...menuItem,
-      stockQuantity: remainingStock,
-      soldOut: remainingStock === 0 ? true : menuItem.soldOut,
-    };
-  });
-  await storage.updateMenuItems(nextMenuItems);
+  }
 
   if (linkedUser) {
     const orderReferences = [
@@ -3013,25 +3031,51 @@ app.post("/api/payments/paystack/initialize", asyncHandler(async (request, respo
     return response.status(400).json({ error: "Card payment is not configured on the server." });
   }
 
-  const { orderReference, email, amount, customerName } = request.body || {};
-  if (!orderReference || !email || !amount) {
-    return response.status(400).json({ error: "Order reference, email, and amount are required." });
+  const { orderReference, email } = request.body || {};
+  const reference = String(orderReference || "").trim();
+  const requestedEmail = normalizeEmail(email);
+  if (!reference || !requestedEmail) {
+    return response.status(400).json({ error: "Order reference and email are required." });
+  }
+
+  const order = await storage.getOrderByReference(reference);
+  if (!order) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  const orderEmail = normalizeEmail(order.customer?.email || "");
+  if (orderEmail && orderEmail !== requestedEmail) {
+    return response.status(403).json({ error: "This payment request does not match the order email." });
+  }
+
+  if (!isCardPaymentMethod(order.customer?.paymentMethod) || order.status !== "awaiting_payment") {
+    return response.status(400).json({ error: "This order is not waiting for card payment." });
+  }
+
+  const orderTotal = Number(order.pricing?.total) || 0;
+  if (orderTotal <= 0) {
+    return response.status(400).json({ error: "This order has no payable balance." });
   }
 
   const payment = await initializePaystackTransaction({
-    email,
-    amount: Math.round(Number(amount) * 100),
-    reference: orderReference,
+    email: orderEmail || requestedEmail,
+    amount: Math.round(orderTotal * 100),
+    reference,
     metadata: {
-      orderReference,
-      customerName,
+      currency: PAYSTACK_CURRENCY,
+      orderReference: reference,
+      orderTotal,
+      customerName: order.customer?.customerName || "",
     },
   });
 
-  await storage.updateOrderPayment(orderReference, {
+  await storage.updateOrderPayment(reference, {
+    ...(order.payment || {}),
+    amount: orderTotal,
+    currency: PAYSTACK_CURRENCY,
     method: "Pay with card",
     status: "pending",
-    reference: orderReference,
+    reference,
     paidAt: null,
   });
 
@@ -3044,14 +3088,53 @@ app.get("/api/payments/paystack/verify/:reference", asyncHandler(async (request,
   }
 
   const reference = String(request.params.reference || "").trim();
-  const payment = await verifyPaystackTransaction(reference);
   let order = await storage.getOrderByReference(reference);
+  if (!order) {
+    return response.status(404).json({ error: "Order not found." });
+  }
+
+  const payment = await verifyPaystackTransaction(reference);
 
   if (payment.status === "success" && order && order.status === "awaiting_payment") {
+    if (!paystackPaymentMatchesOrder(payment, order)) {
+      pushRuntimeIncident({
+        source: "paystack",
+        message: `Payment amount mismatch for ${reference}.`,
+        path: "/api/payments/paystack/verify",
+        build: process.env.RENDER_SERVICE_NAME || "server",
+        userAgent: String(request.headers["user-agent"] || "").slice(0, 180),
+      });
+      return response.status(409).json({
+        error: "Payment amount did not match this order. Please contact PEM support.",
+        order,
+        verified: false,
+      });
+    }
+
+    const stockUpdate = await decrementMenuStockForItems(order.items);
+    if (!stockUpdate.ok) {
+      pushRuntimeIncident({
+        source: "paystack",
+        message: `Paid card order ${reference} could not reserve stock: ${stockUpdate.error}`,
+        path: "/api/payments/paystack/verify",
+        build: process.env.RENDER_SERVICE_NAME || "server",
+        userAgent: String(request.headers["user-agent"] || "").slice(0, 180),
+      });
+      return response.status(409).json({
+        error: "Payment was confirmed, but PEM needs to review item availability for this order.",
+        order,
+        payment,
+        paymentRequiresReview: true,
+        verified: true,
+      });
+    }
+
     order = await storage.updateOrderPayment(
       reference,
       {
         ...(order.payment || {}),
+        amount: Number(order.pricing?.total) || 0,
+        currency: PAYSTACK_CURRENCY,
         method: "Pay with card",
         status: "paid",
         reference: payment.reference || reference,
@@ -3502,18 +3585,51 @@ app.patch("/api/admin/reservations/:reference/status", requireAdmin, asyncHandle
   });
 }));
 
-app.use((error, _request, response, _next) => {
-  console.error("API error:", error);
-  response.status(500).json({
-    error: error?.message || "Something went wrong on the server.",
+app.use((error, request, response, _next) => {
+  const statusCode = Number(error?.status || error?.statusCode) || 500;
+  const safeStatusCode = statusCode >= 400 && statusCode < 600 ? statusCode : 500;
+  const requestId = request.requestId || crypto.randomUUID();
+  console.error("API error:", {
+    message: error?.message || "Unknown error",
+    requestId,
+    stack: error?.stack,
+    statusCode: safeStatusCode,
+  });
+  response.status(safeStatusCode).json({
+    error: safeStatusCode < 500 || !isProduction
+      ? error?.message || "Something went wrong on the server."
+      : "Something went wrong on the server.",
+    requestId,
   });
 });
 
+let httpServer = null;
+function shutdownServer(signal) {
+  if (!httpServer) {
+    process.exit(0);
+  }
+
+  console.log(`Received ${signal}. Closing PEM API server...`);
+  httpServer.close((error) => {
+    if (error) {
+      console.error("Error while closing PEM API server:", error);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+  setTimeout(() => {
+    console.error("Forced shutdown after timeout.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
 storage.init()
   .then(() => {
-    app.listen(PORT, () => {
+    httpServer = app.listen(PORT, () => {
       console.log(`PEM API server running on http://localhost:${PORT} using ${storage.mode} storage`);
     });
+    process.once("SIGINT", () => shutdownServer("SIGINT"));
+    process.once("SIGTERM", () => shutdownServer("SIGTERM"));
   })
   .catch((error) => {
     console.error("Failed to start server:", error);

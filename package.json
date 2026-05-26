@@ -24,9 +24,9 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.1.2",
     "sharp": "^0.34.3",
-    "vite": "^5.4.14"
+    "vite": "^8.0.14"
   }
 }
